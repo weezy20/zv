@@ -314,14 +314,11 @@ pub enum TemplateType {
 pub const GITIGNORE_ZIG: &str = r#"zig-out
 .zig-cache"#;
 
-pub const MAIN_ZIG: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/barebones/main.zig"
-));
+pub const MAIN_ZIG: &str = r#"pub fn main() !void {}"#;
 
 pub const BUILD_ZIG: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/templates/barebones/build.zig"
+    "/templates/lean_build.zig"
 ));
 
 pub const BUILD_ZIG_ZON: &str = r#".{
