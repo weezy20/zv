@@ -1,0 +1,7 @@
+/target
+.cargo
+.zv
+.vscode
+myapp
+zig.exe
+zig

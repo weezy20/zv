@@ -1,0 +1,119 @@
+use crate::ZigVersion;
+use color_eyre::{Result, eyre::eyre};
+use std::{borrow::Cow, path::PathBuf};
+use yansi::Paint;
+
+/// Return PATH to the default fallback zv directory which is $HOME/.zv
+fn get_default_zv_dir() -> Result<PathBuf> {
+    dirs::home_dir()
+        .map(|home| home.join(".zv"))
+        .or_else(|| {
+            warn("Unable to locate home directory, falling back to current working directory");
+            warn("zv may not be able to resume from expected state next time as current-working-dir is an ephemeral location");
+            std::env::current_dir().ok().map(|cwd| cwd.join(".zv"))
+        })
+        .ok_or_else(|| {
+            eyre!(
+                "Unable to locate home directory or current working directory.\
+                Please set `ZV_DIR` to use zv. If you think this is a bug please open an issue at <https://github.com/weezy20/zv/issues>"
+            )
+        })
+}
+/// Fetch the zv directory PATH set using env var or fallback PATH ($HOME/.zv -> $CWD/.zv)
+pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
+    let zv_dir_env = match std::env::var("ZV_DIR") {
+        Ok(dir) if !dir.is_empty() => Some(dir),
+        Ok(_) => None,
+        Err(env_err) => match env_err {
+            std::env::VarError::NotPresent => None,
+            std::env::VarError::NotUnicode(ref str) => {
+                error(format!(
+                    "Warning: ZV_DIR={str:?} is set but contains invalid Unicode."
+                ));
+                return Err(eyre!(env_err));
+            }
+        },
+    };
+    Ok(if let Some(zv_dir) = zv_dir_env {
+        (PathBuf::from(zv_dir), true /* using-env true */)
+    } else {
+        (get_default_zv_dir()?, false /* Using fallback path */)
+    })
+}
+
+/// Print a warning message in yellow if stderr is a TTY
+pub fn warn(message: impl Into<Cow<'static, str>>) {
+    let msg = message.into();
+    eprintln!("{}: {}", "Warning".yellow().bold(), msg.bright_yellow());
+}
+
+/// Print an error message in red if stderr is a TTY
+pub fn error(message: impl Into<Cow<'static, str>>) {
+    let msg = message.into();
+    eprintln!("{}: {}", "Error".red().bold(), msg.bright_red());
+}
+
+
+pub fn sys_info() -> String {
+    use target_lexicon::HOST;
+    format!("{}", HOST)
+}
+
+/// Get the zig tarball name based on HOST arch-os
+pub fn zig_tarball(version: ZigVersion, zip: bool) -> Option<String> {
+    use target_lexicon::HOST;
+    // Return None for Unknown and System variants
+    let semver_version = match version {
+        ZigVersion::Semver(v) => v,
+        ZigVersion::Master(v) => v,
+        ZigVersion::Stable(v) => v,
+        ZigVersion::Latest(v) => v,
+        ZigVersion::System { .. } => return None,
+        ZigVersion::Unknown => return None,
+    };
+
+    let arch = match HOST.architecture {
+        target_lexicon::Architecture::X86_64 => "x86_64",
+        target_lexicon::Architecture::Aarch64(_) => "aarch64",
+        target_lexicon::Architecture::X86_32(_) => "x86",
+        target_lexicon::Architecture::Arm(_) => "arm",
+        target_lexicon::Architecture::Riscv64(_) => "riscv64",
+        target_lexicon::Architecture::Powerpc64 => "powerpc64",
+        target_lexicon::Architecture::Powerpc64le => "powerpc64le",
+        target_lexicon::Architecture::S390x => "s390x",
+        target_lexicon::Architecture::LoongArch64 => "loongarch64",
+        _ => return None,
+    };
+
+    let os = match HOST.operating_system {
+        target_lexicon::OperatingSystem::Linux => "linux",
+        target_lexicon::OperatingSystem::Darwin(_) => "macos",
+        target_lexicon::OperatingSystem::Windows => "windows",
+        target_lexicon::OperatingSystem::Freebsd => "freebsd",
+        target_lexicon::OperatingSystem::Netbsd => "netbsd",
+        _ => return None,
+    };
+    let ext = if !zip { "tar.xz" } else { "zip" };
+
+    Some(format!("zig-{os}-{arch}-{semver_version}.{ext}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_zig_tarball_constructs_expected_filename() {
+        let version =
+            ZigVersion::Semver(semver::Version::parse("0.16.0-dev.65+ca2e17e0a").unwrap());
+        let result = zig_tarball(version, false);
+
+        // The exact result depends on the host architecture and OS
+        // but should contain the version string and .tar.xz extension
+        if let Some(tarball_name) = result {
+            assert!(tarball_name.contains("0.16.0-dev.65+ca2e17e0a"));
+            assert!(tarball_name.ends_with(".tar.xz"));
+            assert!(tarball_name.starts_with("zig-"));
+        }
+    }
+}
