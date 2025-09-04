@@ -226,12 +226,14 @@ impl Template {
 
     fn instantiate_zig(&self, app: &crate::App) -> Result<Vec<FileStatus>, ZvError> {
         let target_dir = &self.context.as_ref().unwrap().target_dir;
-        
+
         // Get the zig path from the app
-        let zig_path = app.zv_zig_or_system()
+        let zig_path = app
+            .zv_zig_or_system()
             .ok_or_else(|| ZvError::TemplateError(eyre!("No zig executable found")))?;
 
-        let output = app.spawn_with_guard(&zig_path, &["init"], Some(target_dir))
+        let output = app
+            .spawn_with_guard(&zig_path, &["init"], Some(target_dir))
             .map_err(|e| {
                 if self.context.as_ref().unwrap().created_new_dir {
                     let _ = fs::remove_dir_all(target_dir);
@@ -303,7 +305,11 @@ pub enum TemplateType {
 pub const GITIGNORE_ZIG: &str = r#"zig-out
 .zig-cache"#;
 
-pub const MAIN_ZIG: &str = r#"pub fn main() !void {}"#;
+pub const MAIN_ZIG: &str = r#"pub fn main() !void {
+    std.log.info("Hello, World!", .{});
+}
+    
+const std = @import("std");"#;
 
 pub const BUILD_ZIG: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
