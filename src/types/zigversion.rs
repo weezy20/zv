@@ -76,6 +76,12 @@ impl ZigVersion {
     /// Returns true if embedded version is a placeholder (0.0.0)
     /// Returns false in all other cases
     pub fn is_placeholder_version(&self) -> bool {
+        if let ZigVersion::System { version, path } = self {
+            if path.is_none() && version.is_none() {
+                // System variant with unknown version is not a placeholder
+                return true;
+            }
+        }
         let placeholder = Version::parse("0.0.0").unwrap();
         self.version().map_or(false, |v| *v == placeholder)
     }
@@ -182,7 +188,7 @@ impl PartialEq for ZigVersion {
                     path: r_path,
                     version: r_version,
                 },
-            ) => l_path == r_path && l_version == r_version,
+            ) => *l_path == *r_path && *l_version == *r_version,
 
             // Unknown only equals Unknown
             (Self::Unknown, Self::Unknown) => true,
@@ -193,7 +199,7 @@ impl PartialEq for ZigVersion {
 
             // All other variants: compare versions only
             (l, r) => match (l.version(), r.version()) {
-                (Some(lv), Some(rv)) => lv == rv,
+                (Some(lv), Some(rv)) => *lv == *rv,
                 _ => false,
             },
         }
@@ -222,12 +228,12 @@ impl Serialize for ZigVersion {
             }
             ZigVersion::Stable(version) => {
                 let mut map = BTreeMap::new();
-                map.insert("stable", version.to_string());
+                map.insert("version", version.to_string());
                 map.serialize(serializer)
             }
             ZigVersion::Latest(version) => {
                 let mut map = BTreeMap::new();
-                map.insert("latest", version.to_string());
+                map.insert("version", version.to_string());
                 map.serialize(serializer)
             }
             ZigVersion::System { path, version } => {

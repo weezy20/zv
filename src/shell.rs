@@ -52,7 +52,7 @@ impl Shell {
 
     /// Returns the env file path and content without writing to disk
     pub fn export_without_dump(&self, zv_dir: &Path) -> (PathBuf, String) {
-        let env_file = zv_dir.join(self.env_file_name());
+        let env_file = zv_dir.join(self.env_file_name()); // app.env_path
         let zv_bin_path_str =
             if cfg!(windows) && matches!(self, Shell::Bash | Shell::Zsh | Shell::Fish) {
                 // Convert Windows path separators to Unix-style for Unix-like shells on Windows (e.g., WSL)
