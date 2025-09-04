@@ -8,24 +8,13 @@ use color_eyre::{
     eyre::Context,
 };
 
-const ZV_RECURSION_MAX: u32 = 1; // We only expect to route to `zig` or `zls` once from `zv`
+// We only expect to route to `zig` or `zls` once from `zv`
+// For example: `zv init --zig`  => `zv` spawns `zig`, +1 in [instantiate_zig]
+const ZV_RECURSION_MAX: u32 = 1;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Recursion guard - prevent infinite loops but allow zig subcommands such as zv init --zig :  zv -> zig
-    let recursion_count = std::env::var("ZV_RECURSION_COUNT")
-        .unwrap_or_else(|_| "0".to_string())
-        .parse::<u32>()
-        .unwrap_or(0);
-
-    if recursion_count > ZV_RECURSION_MAX {
-        eprintln!(
-            "Error: Too many recursive calls detected (depth: {}). \
-             The zv binary may be calling itself infinitely.",
-            recursion_count
-        );
-        std::process::exit(1);
-    }
+    check_recursion()?;
 
     yansi::whenever(yansi::Condition::TTY_AND_COLOR);
     if yansi::is_enabled() {
@@ -46,16 +35,15 @@ async fn main() -> Result<()> {
     #[cfg(windows)]
     apply_windows_security_mitigations();
 
-    // More robust program name detection
     let program_name = get_program_name()?;
 
     match program_name.as_str() {
         "zv" => cli::zv_main().await,
-        "zig" => cli::zig_main().await,
-        "zls" => cli::zls_main().await,
+        "zig" => cli::zig_main(),
+        "zls" => cli::zls_main(),
         _ => {
             eprintln!(
-                "Unknown tool: {}. This binary should be invoked as 'zv', 'zig', or 'zls'.",
+                "Unknown invocation: {}. This binary should be invoked as 'zv', 'zig', or 'zls'.",
                 program_name
             );
             std::process::exit(1);
@@ -95,6 +83,24 @@ pub fn apply_windows_security_mitigations() {
         // SetDefaultDllDirectories should never fail with valid arguments
         assert_ne!(result, 0, "Failed to set secure DLL directories");
     }
+}
+
+fn check_recursion() -> Result<()> {
+    // Recursion guard - prevent infinite loops but allow zig subcommands such as zv init --zig :  zv -> zig
+    let recursion_count = std::env::var("ZV_RECURSION_COUNT")
+        .unwrap_or_else(|_| "0".to_string())
+        .parse::<u32>()
+        .unwrap_or(0);
+
+    if recursion_count > ZV_RECURSION_MAX {
+        eprintln!(
+            "Error: Too many recursive calls detected (depth: {}). \
+             The zv binary may be calling itself infinitely.",
+            recursion_count
+        );
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 mod app;

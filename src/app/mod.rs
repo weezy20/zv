@@ -2,7 +2,7 @@ mod config;
 mod constants;
 mod utils;
 
-use color_eyre::eyre::Context as _;
+use color_eyre::eyre::{Context as _, eyre};
 
 use crate::types::*;
 use std::path::{Path, PathBuf};
@@ -108,18 +108,19 @@ impl App {
 
     /// Spawn a zig process with recursion guard management
     /// Only bumps the recursion count if we're spawning our own shim
-    pub fn spawn_with_guard(
+    pub(crate) fn spawn_with_guard(
         &self,
         zig_path: &Path,
         args: &[&str],
         current_dir: Option<&Path>,
     ) -> Result<Output, ZvError> {
+        // No need for canonicalization here, just a quick check
         let is_our_shim = zig_path.parent() == Some(self.bin_path.as_path());
 
-        let current_count = if is_our_shim {
+        let new_count = if is_our_shim {
             let count = std::env::var("ZV_RECURSION_COUNT")
-                .unwrap_or_else(|_| "0".to_string())
-                .parse::<u32>()
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok())
                 .unwrap_or(0);
 
             let new_count = count + 1;
@@ -145,12 +146,20 @@ impl App {
             cmd.current_dir(dir);
         }
 
-        if let Some(count) = current_count {
+        if let Some(count) = new_count {
             cmd.env("ZV_RECURSION_COUNT", count.to_string());
         }
 
         cmd.output().map_err(|e| {
-            ZvError::TemplateError(color_eyre::eyre::eyre!("Failed to execute zig: {}", e))
+            tracing::error!(
+                "Failed to execute zig at path: {:?}, error: {}",
+                zig_path,
+                e
+            );
+            ZvError::ZigExecuteError {
+                source: eyre!("Failed to execute zig: {}", e),
+                command: "zig ".to_string() + &args.join(" "),
+            }
         })
     }
 }
