@@ -1,4 +1,4 @@
-use app::App;
+// use app::App;
 use cli::ZvCli;
 use color_eyre::{
     Result,

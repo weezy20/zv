@@ -28,6 +28,9 @@ reqwest = "0.12.23"
 toml = "0.9.5"
 toml_edit = "0.23.4"
 thiserror = "2.0.16"
+ahash = "0.8.12"
+walkdir = "2.5.0"
+which = "8.0.0"
 
 [features]
 default = ["log"]

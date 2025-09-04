@@ -1,3 +1,5 @@
+//! Global types used across zv
+
 pub mod error;
 pub use error::*;
 

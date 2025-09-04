@@ -1,10 +1,12 @@
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use crate::ZvError;
 use color_eyre::eyre::eyre;
 use reqwest::Url;
-use std::fs;
-use std::io::Write;
 
 #[derive(Debug, Clone)]
 pub enum FileStatus {
@@ -117,10 +119,8 @@ impl Template {
 
         let file_statuses = match &self.r#type {
             TemplateType::Embedded => self.instantiate_embedded()?,
-            TemplateType::Minimal => self.instantiate_minimal()?,
+            // TemplateType::Minimal => self.instantiate_minimal()?,
             TemplateType::Zig(zig_path) => self.instantiate_zig(zig_path.as_path())?,
-            TemplateType::Git(url) => self.instantiate_git(&url)?,
-            TemplateType::Custom(path) => self.instantiate_custom(path.as_path())?,
         };
 
         Ok(TemplateResult {
@@ -147,25 +147,26 @@ impl Template {
         self.create_template_files(&files)
     }
 
-    fn instantiate_minimal(&self) -> Result<Vec<FileStatus>, ZvError> {
-        // First create embedded files
-        let mut file_statuses = self.instantiate_embedded()?;
+    // TODO: Add after zv 1.0.0
+    // fn instantiate_minimal(&self) -> Result<Vec<FileStatus>, ZvError> {
+    //     // First create embedded files
+    //     let mut file_statuses = self.instantiate_embedded()?;
 
-        // Then add minimal-specific files
-        let minimal_files = [("build.zig.zon", BUILD_ZIG_ZON)];
+    //     // Then add minimal-specific files
+    //     let minimal_files = [("build.zig.zon", BUILD_ZIG_ZON)];
 
-        match self.create_template_files(&minimal_files) {
-            Ok(mut minimal_statuses) => {
-                file_statuses.append(&mut minimal_statuses);
-                Ok(file_statuses)
-            }
-            Err(e) => {
-                // Rollback the embedded files that were created
-                self.rollback_created_files(&file_statuses);
-                Err(e)
-            }
-        }
-    }
+    //     match self.create_template_files(&minimal_files) {
+    //         Ok(mut minimal_statuses) => {
+    //             file_statuses.append(&mut minimal_statuses);
+    //             Ok(file_statuses)
+    //         }
+    //         Err(e) => {
+    //             // Rollback the embedded files that were created
+    //             self.rollback_created_files(&file_statuses);
+    //             Err(e)
+    //         }
+    //     }
+    // }
 
     /// Create template files with rollback
     fn create_template_files(&self, files: &[(&str, &str)]) -> Result<Vec<FileStatus>, ZvError> {
@@ -302,13 +303,9 @@ pub enum TemplateType {
     #[default]
     Embedded,
     /// Minimal Template with build.zig.zon & unit test
-    Minimal,
+    // Minimal, //TODO: unimplemented
     /// Template initialized using Zig
     Zig(PathBuf), // inner points to zig exe to use for zig init
-    /// Template initialized using Git URL
-    Git(Url),
-    /// Template initialized using a file path
-    Custom(PathBuf), // inner points to the template source to use on local filesystem
 }
 
 pub const GITIGNORE_ZIG: &str = r#"zig-out
@@ -354,7 +351,7 @@ fn parse_zig_output_line(line: &str) -> Option<(fn(PathBuf) -> FileStatus, &str)
     }
 
     // Determine the operation based on keywords in the line
-    if line.contains("preserving") {
+    if line.contains("preserving") || line.contains("preserved") {
         Some((FileStatus::Preserved, file_path))
     } else if line.contains("created") {
         Some((FileStatus::Created, file_path))

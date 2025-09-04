@@ -91,18 +91,15 @@ impl Commands {
             Commands::Init { project_name, zig } => {
                 use crate::{Template, TemplateType};
                 if zig {
-                    return init::init_project(
-                        Template::new(
-                            project_name,
-                            TemplateType::Zig(
-                                app.zv_zig_or_system()
-                                    .ok_or_else(|| eyre!("No Zig executable found"))?,
-                            ),
+                    return init::init_project(Template::new(
+                        project_name,
+                        TemplateType::Zig(
+                            app.zv_zig_or_system()
+                                .ok_or_else(|| eyre!("No Zig executable found"))?,
                         ),
-                        &app,
-                    );
+                    ));
                 } else {
-                    init::init_project(Template::new(project_name, TemplateType::Embedded), &app)
+                    init::init_project(Template::new(project_name, TemplateType::Embedded))
                 }
             }
             Commands::Use { version, path } => {
