@@ -6,7 +6,17 @@ description = "Ziglang Version Manager and Project Starter"
 license = "MIT"
 authors = ["Abhishek Shah <abhishekshah3@gmail.com>"]
 repository = "https://github.com/weezy20/zv"
+keywords = [
+    "ziglang",
+    "version-manager",
+    "project-starter",
+    "cli",
+    "development-tools",
+]
 
+[[bin]]
+path = "src/main.rs"
+name = "zv"
 
 [dependencies]
 clap = { version = "4.5.45", features = ["derive"] }

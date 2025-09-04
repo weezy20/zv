@@ -53,14 +53,13 @@ pub fn error(message: impl Into<Cow<'static, str>>) {
     eprintln!("{}: {}", "Error".red().bold(), msg.bright_red());
 }
 
-
 pub fn sys_info() -> String {
     use target_lexicon::HOST;
     format!("{}", HOST)
 }
 
 /// Get the zig tarball name based on HOST arch-os
-pub fn zig_tarball(version: ZigVersion, zip: bool) -> Option<String> {
+pub fn zig_tarball(version: ZigVersion) -> Option<String> {
     use target_lexicon::HOST;
     // Return None for Unknown and System variants
     let semver_version = match version {
@@ -93,7 +92,11 @@ pub fn zig_tarball(version: ZigVersion, zip: bool) -> Option<String> {
         target_lexicon::OperatingSystem::Netbsd => "netbsd",
         _ => return None,
     };
-    let ext = if !zip { "tar.xz" } else { "zip" };
+    let ext = if cfg!(target_os = "windows") {
+        "zip"
+    } else {
+        "tar.xz"
+    };
 
     Some(format!("zig-{os}-{arch}-{semver_version}.{ext}"))
 }
@@ -106,13 +109,16 @@ mod tests {
     fn test_zig_tarball_constructs_expected_filename() {
         let version =
             ZigVersion::Semver(semver::Version::parse("0.16.0-dev.65+ca2e17e0a").unwrap());
-        let result = zig_tarball(version, false);
+        let result = zig_tarball(version);
 
         // The exact result depends on the host architecture and OS
         // but should contain the version string and .tar.xz extension
         if let Some(tarball_name) = result {
             assert!(tarball_name.contains("0.16.0-dev.65+ca2e17e0a"));
+            #[cfg(not(target_os = "windows"))]
             assert!(tarball_name.ends_with(".tar.xz"));
+            #[cfg(target_os = "windows")]
+            assert!(tarball_name.ends_with(".zip"));
             assert!(tarball_name.starts_with("zig-"));
         }
     }
