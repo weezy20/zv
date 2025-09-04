@@ -1,20 +1,38 @@
-// use app::App;
-use cli::ZvCli;
+#![allow(unused, warnings)]
+
+use std::borrow::Cow;
+
 use color_eyre::{
     Result,
     config::{HookBuilder, Theme},
-    eyre::Context as _,
+    eyre::Context,
 };
+
+const ZV_RECURSION_MAX: u32 = 1; // We only expect to route to `zig` or `zls` once from `zv`
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Recursion guard - prevent infinite loops but allow zig subcommands such as zv init --zig :  zv -> zig
+    let recursion_count = std::env::var("ZV_RECURSION_COUNT")
+        .unwrap_or_else(|_| "0".to_string())
+        .parse::<u32>()
+        .unwrap_or(0);
+
+    if recursion_count > ZV_RECURSION_MAX {
+        eprintln!(
+            "Error: Too many recursive calls detected (depth: {}). \
+             The zv binary may be calling itself infinitely.",
+            recursion_count
+        );
+        std::process::exit(1);
+    }
+
     yansi::whenever(yansi::Condition::TTY_AND_COLOR);
     if yansi::is_enabled() {
         color_eyre::install()?;
     } else {
         HookBuilder::default().theme(Theme::new()).install()?;
     }
-    let zv_cli = <ZvCli as clap::Parser>::parse();
 
     #[cfg(feature = "dotenv")]
     dotenv::dotenv().ok();
@@ -25,66 +43,58 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    let (zv_dir, using_env) = tools::fetch_zv_dir()?;
+    #[cfg(windows)]
+    apply_windows_security_mitigations();
 
-    // TODO: Allow force flags to skip prompts in ZvCli
-    // let allow_shell = zv_cli.allow_shell || zv_cli.force;
-    // let force = zv_cli.force;
-    // let g = Genie { allow_shell, force };
+    // More robust program name detection
+    let program_name = get_program_name()?;
 
-    // Init ZV_DIR
-    match zv_dir.try_exists() {
-        Ok(true) => {
-            if !zv_dir.is_dir() {
-                tools::error(format!(
-                    "zv directory exists but is not a directory: {}. Please check ZV_DIR env var. Aborting...",
-                    zv_dir.display()
-                ));
-                std::process::exit(1);
-            }
-        }
-        Ok(false) => {
-            if using_env {
-                std::fs::create_dir_all(&zv_dir)
-                    .map_err(ZvError::Io)
-                    .wrap_err_with(|| {
-                        format!(
-                            "Error creating ZV_DIR from env var ZV_DIR={}",
-                            std::env::var("ZV_DIR").expect("Handled in zv_fetch_dir()")
-                        )
-                    })?;
-            } else {
-                // Using fallback path $HOME/.zv (or $CWD/.zv in rare fallback)
-                std::fs::create_dir(&zv_dir)
-                    .map_err(ZvError::Io)
-                    .wrap_err_with(|| {
-                        format!("Failed to create default .zv at {}", zv_dir.display())
-                    })?;
-            }
-        }
-        Err(e) => {
-            tools::error(format!(
-                "Failed to check zv directory at {:?}",
-                zv_dir.display(),
-            ));
-            return Err(ZvError::Io(e).into());
-        }
-    };
-    let zv_dir = std::fs::canonicalize(&zv_dir).map_err(ZvError::Io)?;
-
-    let app = App::init(UserConfig {
-        path: zv_dir,
-        shell: Shell::detect(),
-    })?;
-
-    match zv_cli.command {
-        Some(cmd) => cmd.execute(app).await?,
-        None => {
-            println!("~ ZV ~");
-            println!("{}", tools::sys_info());
+    match program_name.as_str() {
+        "zv" => cli::zv_main().await,
+        "zig" => cli::zig_main().await,
+        "zls" => cli::zls_main().await,
+        _ => {
+            eprintln!(
+                "Unknown tool: {}. This binary should be invoked as 'zv', 'zig', or 'zls'.",
+                program_name
+            );
+            std::process::exit(1);
         }
     }
-    Ok(())
+}
+
+fn get_program_name() -> Result<String> {
+    let current_exe = std::env::current_exe().wrap_err("Failed to get current executable path")?;
+
+    let file_name = current_exe
+        .file_name()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Failed to get executable filename"))?
+        .to_string_lossy();
+
+    // Remove .exe extension on Windows
+    let name = if cfg!(windows) && file_name.ends_with(".exe") {
+        file_name.strip_suffix(".exe").unwrap().to_string()
+    } else {
+        file_name.to_string()
+    };
+    Ok(name)
+}
+
+#[cfg(windows)]
+pub fn apply_windows_security_mitigations() {
+    use windows_sys::Win32::System::LibraryLoader::{
+        LOAD_LIBRARY_SEARCH_SYSTEM32, LOAD_LIBRARY_SEARCH_USER_DIRS, SetDefaultDllDirectories,
+    };
+
+    // Restrict DLL loading to system directories only
+    // This prevents loading DLLs from the current directory or PATH
+    let search_flags = LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS;
+
+    unsafe {
+        let result = SetDefaultDllDirectories(search_flags);
+        // SetDefaultDllDirectories should never fail with valid arguments
+        assert_ne!(result, 0, "Failed to set secure DLL directories");
+    }
 }
 
 mod app;
@@ -94,6 +104,7 @@ mod templates;
 mod tools;
 mod types;
 
+pub use app::App;
 pub use shell::*;
 pub use templates::*;
 pub use types::*;

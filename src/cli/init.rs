@@ -3,8 +3,8 @@ use crate::Template;
 use color_eyre::Result;
 use yansi::Paint;
 
-pub(crate) fn init_project(template: Template) -> Result<()> {
-    let template_result = template.execute()?;
+pub(crate) fn init_project(template: Template, app: &App) -> Result<()> {
+    let template_result = template.execute(app)?;
     let project_name = template_result.project_name;
 
     if let Some(msg) = &template_result.pre_exec_msg {

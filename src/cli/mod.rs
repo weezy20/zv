@@ -1,12 +1,80 @@
-use crate::{App, ZigVersion};
+use crate::{App, Shell, UserConfig, ZigVersion, ZvError, tools};
 use clap::{Parser, Subcommand};
-use color_eyre::eyre::eyre;
+use color_eyre::eyre::{Context as _, eyre};
 use yansi::Paint;
-
 mod init;
 mod list;
 mod sync;
 mod r#use;
+mod zig;
+mod zls;
+
+pub use zig::zig_main;
+pub use zls::zls_main;
+
+pub async fn zv_main() -> super::Result<()> {
+    let zv_cli = <ZvCli as clap::Parser>::parse();
+    let (zv_dir, using_env) = tools::fetch_zv_dir()?;
+
+    // TODO: Allow force flags to skip prompts in ZvCli
+    // let allow_shell = zv_cli.allow_shell || zv_cli.force;
+    // let force = zv_cli.force;
+    // let g = Genie { allow_shell, force };
+
+    // Init ZV_DIR
+    match zv_dir.try_exists() {
+        Ok(true) => {
+            if !zv_dir.is_dir() {
+                tools::error(format!(
+                    "zv directory exists but is not a directory: {}. Please check ZV_DIR env var. Aborting...",
+                    zv_dir.display()
+                ));
+                std::process::exit(1);
+            }
+        }
+        Ok(false) => {
+            if using_env {
+                std::fs::create_dir_all(&zv_dir)
+                    .map_err(ZvError::Io)
+                    .wrap_err_with(|| {
+                        format!(
+                            "Error creating ZV_DIR from env var ZV_DIR={}",
+                            std::env::var("ZV_DIR").expect("Handled in zv_fetch_dir()")
+                        )
+                    })?;
+            } else {
+                // Using fallback path $HOME/.zv (or $CWD/.zv in rare fallback)
+                std::fs::create_dir(&zv_dir)
+                    .map_err(ZvError::Io)
+                    .wrap_err_with(|| {
+                        format!("Failed to create default .zv at {}", zv_dir.display())
+                    })?;
+            }
+        }
+        Err(e) => {
+            tools::error(format!(
+                "Failed to check zv directory at {:?}",
+                zv_dir.display(),
+            ));
+            return Err(ZvError::Io(e).into());
+        }
+    };
+    let zv_dir = std::fs::canonicalize(&zv_dir).map_err(ZvError::Io)?;
+
+    let app = App::init(UserConfig {
+        path: zv_dir,
+        shell: Shell::detect(),
+    })?;
+
+    match zv_cli.command {
+        Some(cmd) => cmd.execute(app).await?,
+        None => {
+            println!("~ ZV ~");
+            println!("{}", tools::sys_info());
+        }
+    }
+    Ok(())
+}
 
 /// zv - Zig Version (zv) Manager
 ///
@@ -91,15 +159,18 @@ impl Commands {
             Commands::Init { project_name, zig } => {
                 use crate::{Template, TemplateType};
                 if zig {
-                    return init::init_project(Template::new(
-                        project_name,
-                        TemplateType::Zig(
-                            app.zv_zig_or_system()
-                                .ok_or_else(|| eyre!("No Zig executable found"))?,
+                    return init::init_project(
+                        Template::new(
+                            project_name,
+                            TemplateType::Zig(
+                                app.zv_zig_or_system()
+                                    .ok_or_else(|| eyre!("No Zig executable found"))?,
+                            ),
                         ),
-                    ));
+                        &app,
+                    );
                 } else {
-                    init::init_project(Template::new(project_name, TemplateType::Embedded))
+                    init::init_project(Template::new(project_name, TemplateType::Embedded), &app)
                 }
             }
             Commands::Use { version, path } => {

@@ -99,6 +99,7 @@ impl Template {
     pub fn instantiate_with_context(
         self,
         pre_exec_msg: Option<String>,
+        app: &crate::App,
     ) -> Result<TemplateResult, ZvError> {
         if !self
             .context
@@ -120,7 +121,7 @@ impl Template {
         let file_statuses = match &self.r#type {
             TemplateType::Embedded => self.instantiate_embedded()?,
             // TemplateType::Minimal => self.instantiate_minimal()?,
-            TemplateType::Zig(zig_path) => self.instantiate_zig(zig_path.as_path())?,
+            TemplateType::Zig(_zig_path) => self.instantiate_zig(app)?,
         };
 
         Ok(TemplateResult {
@@ -132,9 +133,9 @@ impl Template {
     }
 
     /// Convenience method that handles directory preparation and instantiation
-    pub fn execute(mut self) -> Result<TemplateResult, ZvError> {
+    pub fn execute(mut self, app: &crate::App) -> Result<TemplateResult, ZvError> {
         let pre_exec_msg = self.prepare_directory()?;
-        self.instantiate_with_context(pre_exec_msg)
+        self.instantiate_with_context(pre_exec_msg, app)
     }
 
     fn instantiate_embedded(&self) -> Result<Vec<FileStatus>, ZvError> {
@@ -223,20 +224,19 @@ impl Template {
         }
     }
 
-    fn instantiate_zig(&self, zig_path: &Path) -> Result<Vec<FileStatus>, ZvError> {
-        use std::process::Command;
-
+    fn instantiate_zig(&self, app: &crate::App) -> Result<Vec<FileStatus>, ZvError> {
         let target_dir = &self.context.as_ref().unwrap().target_dir;
+        
+        // Get the zig path from the app
+        let zig_path = app.zv_zig_or_system()
+            .ok_or_else(|| ZvError::TemplateError(eyre!("No zig executable found")))?;
 
-        let output = Command::new(zig_path)
-            .args(&["init"])
-            .current_dir(target_dir)
-            .output()
+        let output = app.spawn_with_guard(&zig_path, &["init"], Some(target_dir))
             .map_err(|e| {
                 if self.context.as_ref().unwrap().created_new_dir {
                     let _ = fs::remove_dir_all(target_dir);
                 }
-                ZvError::TemplateError(eyre!("Failed to execute zig init: {}", e))
+                e
             })?;
 
         if !output.status.success() {
@@ -269,14 +269,6 @@ impl Template {
         }
 
         Ok(file_statuses)
-    }
-
-    fn instantiate_git(&self, _url: &Url) -> Result<Vec<FileStatus>, ZvError> {
-        todo!("Git template instantiation not yet implemented")
-    }
-
-    fn instantiate_custom(&self, _path: &Path) -> Result<Vec<FileStatus>, ZvError> {
-        todo!("Path template instantiation not yet implemented")
     }
 }
 

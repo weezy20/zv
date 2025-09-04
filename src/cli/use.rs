@@ -2,7 +2,7 @@ use crate::ZigVersion;
 use std::path::PathBuf;
 use yansi::Paint;
 
-use crate::{App, Result};
+use crate::{Result, app::App};
 
 /// Main entry point for the use command
 pub(crate) async fn use_version(version: ZigVersion, app: &mut App) -> Result<()> {

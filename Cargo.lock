@@ -2312,5 +2312,8 @@ dependencies = [
  "tracing-subscriber",
  "walkdir",
  "which",
+ "windows-registry",
+ "windows-result",
+ "windows-sys 0.60.2",
  "yansi",
 ]

@@ -1,9 +1,165 @@
+mod config;
+mod constants;
+mod utils;
+
+use color_eyre::eyre::Context as _;
+
+use crate::types::*;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+/// Zv App State
+#[derive(Debug, Default)]
+pub struct App {
+    /// <ZV_DIR> - Home for zv
+    path: PathBuf,
+    /// <ZV_DIR>/bin - Binary symlink location
+    bin_path: PathBuf,
+    /// <ZV_DIR>/bin/zig - Zv managed zig executable if any
+    zig: Option<PathBuf>,
+    // /// <ZV_DIR>/versions - Installed versions
+    // versions_path: PathBuf,
+    // /// <ZV_DIR>/config.toml - Config path
+    // config_path: PathBuf,
+    // /// <ZV_DIR>/env or /env.ps1 or /env.bat - OS specific env file
+    // env_path: PathBuf,
+    // /// <ZV_DIR>/config.toml - Configuration implementation
+    // config: Option<ZvConfig>,
+    // /// Network client
+    // network: Option<ZvNetwork>,
+    // /// <ZV_DIR>/bin in $PATH? If not prompt user to run `setup` or add `source <ZV_DIR>/env to their shell profile`
+    // source_set: bool,
+    // /// Current detected shell
+    // shell: crate::Shell,
+}
+
+impl App {
+    /// Minimal App path initialization & directory creation
+    pub fn init(UserConfig { path, shell }: UserConfig) -> Result<Self, ZvError> {
+        /* path is canonicalized in zv::main so we don't need to do that here */
+        let bin_path = path.join("bin");
+        let mut zig = None;
+        if !bin_path.try_exists().unwrap_or_default() {
+            std::fs::create_dir_all(&bin_path)
+                .map_err(ZvError::Io)
+                .wrap_err("Creation of bin directory failed")?;
+        } else {
+            // Check for existing ZV zig shim in bin directory
+            zig = utils::detect_zig_shim(&bin_path);
+        }
+        let versions_path = path.join("versions");
+        if !versions_path.try_exists().unwrap_or(false) {
+            std::fs::create_dir_all(&versions_path)
+                .map_err(ZvError::Io)
+                .wrap_err("Creation of versions directory failed")?;
+        }
+
+        let config_path = path.join("config.toml");
+
+        // let config = None;
+        let env_path = path.join("env");
+
+        let app = App {
+            // network: None,
+            zig,
+            // source_set: shell.check_path_in_system(&bin_path),
+            path,
+            bin_path,
+            // config_path,
+            // env_path,
+            // config,
+            // versions_path,
+            // shell: shell,
+        };
+        Ok(app)
+    }
+    /// Set the active Zig version
+    pub async fn set_zig_version(&mut self, version: ZigVersion) -> Result<ZigVersion, ZvError> {
+        println!("App::set_zig_version called with version: {:?}", version);
+        println!("This is a placeholder implementation");
+
+        // self.active_version = Some(version.clone());
+        Ok(version)
+    }
+
+    /// Get the current active Zig version
+    pub fn get_active_version(&self) -> Option<&ZigVersion> {
+        // self.active_version.as_ref()
+        None
+    }
+
+    /// Get the app's base path
+    pub fn path(&self) -> &PathBuf {
+        &self.path
+    }
+
+    /// Returns first available zig executable, first looking for ZV_DIR/bin or PATH if not set
+    pub fn zv_zig_or_system(&self) -> Option<PathBuf> {
+        if let Some(ref path) = self.zig {
+            return Some(path.to_path_buf());
+        }
+        which::which(if cfg!(target_os = "windows") {
+            "zig.exe"
+        } else {
+            "zig"
+        })
+        .ok()
+    }
+
+    /// Spawn a zig process with recursion guard management
+    /// Only bumps the recursion count if we're spawning our own shim
+    pub fn spawn_with_guard(
+        &self,
+        zig_path: &Path,
+        args: &[&str],
+        current_dir: Option<&Path>,
+    ) -> Result<Output, ZvError> {
+        let is_our_shim = zig_path.parent() == Some(self.bin_path.as_path());
+
+        let current_count = if is_our_shim {
+            let count = std::env::var("ZV_RECURSION_COUNT")
+                .unwrap_or_else(|_| "0".to_string())
+                .parse::<u32>()
+                .unwrap_or(0);
+
+            let new_count = count + 1;
+            tracing::trace!(
+                "Spawning ZV shim zig process at {:?} with ZV_RECURSION_COUNT: {} -> {}",
+                zig_path,
+                count,
+                new_count
+            );
+            Some(new_count)
+        } else {
+            tracing::trace!(
+                "Spawning external zig process at {:?} (no recursion guard needed)",
+                zig_path
+            );
+            None
+        };
+
+        let mut cmd = Command::new(zig_path);
+        cmd.args(args);
+
+        if let Some(dir) = current_dir {
+            cmd.current_dir(dir);
+        }
+
+        if let Some(count) = current_count {
+            cmd.env("ZV_RECURSION_COUNT", count.to_string());
+        }
+
+        cmd.output().map_err(|e| {
+            ZvError::TemplateError(color_eyre::eyre::eyre!("Failed to execute zig: {}", e))
+        })
+    }
+}
+
 // use crate::types::*;
 
 // use ahash::AHashMap;
 // use color_eyre::eyre::{Context, eyre};
 // use which::which;
-mod constants;
 // mod network;
 // use std::{
 //     path::{Path, PathBuf},
@@ -22,31 +178,6 @@ mod constants;
 
 // pub(crate) const BUILD_CONFIG_TARGET: &'static str = "libzv::build_config";
 
-// /// Zv App State
-// #[derive(Debug, Default)]
-// pub struct App {
-//     /// <ZV_DIR> - Home for zv
-//     path: PathBuf,
-//     /// <ZV_DIR>/bin - Binary symlink location
-//     bin_path: PathBuf,
-//     /// <ZV_DIR>/bin/zig - Symlinked bin
-//     zig: Option<PathBuf>,
-//     /// <ZV_DIR>/versions - Installed versions
-//     versions_path: PathBuf,
-//     /// <ZV_DIR>/config.toml - Config path
-//     config_path: PathBuf,
-//     /// <ZV_DIR>/env or /env.ps1 or /env.bat - OS specific env file
-//     env_path: PathBuf,
-//     /// <ZV_DIR>/config.toml - Configuration implementation
-//     config: Option<ZvConfig>,
-//     /// Network client
-//     network: Option<ZvNetwork>,
-//     /// <ZV_DIR>/bin in $PATH? If not prompt user to run `setup` or add `source <ZV_DIR>/env to their shell profile`
-//     source_set: bool,
-//     /// Current detected shell
-//     shell: crate::Shell,
-// }
-
 // impl App {
 //     /// Get a mutable handle to the network client, initializing if necessary
 //     pub fn network_mut(&mut self) -> &mut ZvNetwork {
@@ -63,70 +194,7 @@ mod constants;
 //         }
 //         Ok(self.config.as_ref().unwrap().clone())
 //     }
-//     /// Minimal App path initialization & directory creation
-//     pub fn init(UserConfig { path, shell, genie }: UserConfig<G>) -> Result<Self, ZvError> {
-//         /* path is canonicalized in zv::main so we don't need to do that here */
-//         let bin_path = path.join("bin");
-//         let mut zig = None;
-//         if !bin_path.try_exists().unwrap_or_default() {
-//             std::fs::create_dir_all(&bin_path)
-//                 .map_err(ZvError::Io)
-//                 .wrap_err("Creation of bin directory failed")?;
-//         } else {
-//             let zig_file = if cfg!(target_os = "windows") {
-//                 bin_path.join("zig.exe")
-//             } else {
-//                 bin_path.join("zig")
-//             };
-//             if zig_file.exists() && zig_file.is_file() {
-//                 #[cfg(unix)]
-//                 {
-//                     if let Ok(metadata) = std::fs::metadata(&zig_file) {
-//                         if metadata.permissions().mode() & 0o111 != 0 {
-//                             zig = zig_file.canonicalize().ok();
-//                         }
-//                     }
-//                 }
-//                 #[cfg(target_os = "windows")]
-//                 {
-//                     // On Windows, assume .exe is executable if it exists and is a file
-//                     zig = zig_file.canonicalize().ok();
-//                 }
-//                 // Add this for other platforms
-//                 #[cfg(not(any(unix, target_os = "windows")))]
-//                 {
-//                     // For other platforms, assume executable if file exists
-//                     zig = zig_file.canonicalize().ok();
-//                 }
-//             }
-//         }
-//         let versions_path = path.join("versions");
-//         if !versions_path.try_exists().unwrap_or(false) {
-//             std::fs::create_dir_all(&versions_path)
-//                 .map_err(ZvError::Io)
-//                 .wrap_err("Creation of versions directory failed")?;
-//         }
 
-//         let config_path = path.join("config.toml");
-
-//         let config = None;
-//         let env_path = path.join("env");
-
-//         let app = App {
-//             network: None,
-//             zig,
-//             source_set: shell.check_path_in_system(&bin_path),
-//             path,
-//             bin_path,
-//             config_path,
-//             env_path,
-//             config,
-//             versions_path,
-//             shell: shell,
-//             genie,
-//         };
-//         Ok(app)
-//     }
 //     /// Set zig version
 //     pub async fn set_zig_version(&mut self, version: ZigVersion) -> Result<ZigVersion, ZvError> {
 //         tracing::debug!(target: "libzv::app", "Setting zig version: {}", version);
@@ -352,19 +420,7 @@ mod constants;
 //         Ok(())
 //     }
 
-//     /// Returns first available zig executable, first looking for ZV_DIR/bin or PATH if not set
-//     pub fn zv_zig_or_system(&self) -> Option<PathBuf> {
-//         if let Some(ref path) = self.zig {
-//             return Some(path.to_path_buf());
-//         }
-//         which(if cfg!(target_os = "windows") {
-//             "zig.exe"
-//         } else {
-//             "zig"
-//         })
-//         .ok()
-//     }
-
+//
 //     /// Find all system zig in PATH excluding <ZV_DIR>/bin which works `zig version`
 //     fn scan_system_zig(&self) -> Option<Vec<ZigVersion>> {
 //         let zig = if cfg!(target_os = "windows") {
@@ -418,8 +474,8 @@ mod constants;
 //                     get_zig_version(&zig).map_err(|err| {
 //                         tracing::error!(target: BUILD_CONFIG_TARGET, "Failed to get version of system zig for `{}`: {}", zig.display(), err);
 //                         err
-//                     }).ok().map(|version| ZigVersion::System { 
-//                         path: Some(zig), 
+//                     }).ok().map(|version| ZigVersion::System {
+//                         path: Some(zig),
 //                         version: Some(version)
 //                     })
 //                 }
@@ -448,7 +504,7 @@ mod constants;
 //                 })
 //                 .and_then(|v| {
 //                     v.parse::<ZigVersion>().map_err(|err| {
-//                         tracing::warn!(target: BUILD_CONFIG_TARGET, 
+//                         tracing::warn!(target: BUILD_CONFIG_TARGET,
 //                             "Skipping directory with invalid zig version {}: {}",
 //                             v,
 //                             err
@@ -785,7 +841,7 @@ mod constants;
 //     async fn download_and_install(&mut self, version: &ZigVersion) -> Result<PathBuf, ZvError> {
 //         use crate::url::zig_tarball;
 //         use tokio::fs as async_fs;
-        
+
 //         // Extract semver::Version from ZigVersion for download URL generation
 //         let semver_version = match version {
 //             ZigVersion::Semver(v) => v.clone(),
@@ -799,55 +855,55 @@ mod constants;
 //                 return Err(ZvError::General(eyre!("Cannot download unknown version")));
 //             }
 //         };
-        
+
 //         tracing::info!(target: "libzv::download_and_install", "Starting download and install for version {} ({})", version, semver_version);
-        
+
 //         // Create temporary download directory
 //         let tmp_dir = self.path.join("tmp");
 //         if !tmp_dir.try_exists().unwrap_or_default() {
 //             async_fs::create_dir_all(&tmp_dir).await
 //                 .wrap_err("Failed to create temporary download directory")?;
 //         }
-        
+
 //         // Generate platform-specific tarball name (use ZIP for Windows, tar.xz for others)
 //         let use_zip = cfg!(windows);
 //         let tarball_name = zig_tarball(version.clone(), use_zip)
 //             .ok_or_else(|| ZvError::General(eyre!("Cannot generate tarball name for version: {}", version)))?;
 //         let download_path = tmp_dir.join(&tarball_name);
-        
+
 //         tracing::debug!(target: "libzv::download_and_install", "Target tarball: {}, download path: {:?}", tarball_name, download_path);
-        
+
 //         // Get download URL using mirror system with fallback
 //         let tarball_name_for_url = tarball_name.clone();
-        
+
 //         tracing::info!(target: "libzv::download_and_install", "Getting download URLs...");
-        
+
 //         // Download with mirror failover
 //         self.download_with_mirror_failover(&tarball_name_for_url, &download_path).await?;
-        
+
 //         // Determine installation directory
 //         let install_dir = self.versions_path.join(semver_version.to_string());
-        
+
 //         tracing::info!(target: "libzv::download_and_install", "Extracting to: {:?}", install_dir);
-        
+
 //         // Extract tarball to versions directory
 //         self.extract_tarball(&download_path, &install_dir).await?;
-        
+
 //         // Clean up temporary download
 //         if download_path.try_exists().unwrap_or_default() {
 //             async_fs::remove_file(&download_path).await
 //                 .wrap_err("Failed to clean up downloaded tarball")?;
 //         }
-        
+
 //         // Return path to zig executable
 //         // First try direct path, then look in subdirectory
 //         let zig_exe_name = if cfg!(windows) { "zig.exe" } else { "zig" };
 //         let mut zig_exe = install_dir.join(zig_exe_name);
-        
+
 //         if !zig_exe.try_exists().unwrap_or_default() {
 //             // Look for zig executable in subdirectories (common with ZIP archives)
 //             tracing::debug!(target: "libzv::download_and_install", "zig not found at {:?}, searching subdirectories", zig_exe);
-            
+
 //             if let Ok(entries) = std::fs::read_dir(install_dir) {
 //                 for entry in entries {
 //                     if let Ok(entry) = entry {
@@ -864,55 +920,55 @@ mod constants;
 //                 }
 //             }
 //         }
-        
+
 //         if !zig_exe.try_exists().unwrap_or_default() {
 //             return Err(ZvError::General(eyre!("Zig executable not found after extraction: {:?}", zig_exe)));
 //         }
-        
+
 //         tracing::info!(target: "libzv::download_and_install", "Successfully installed version {} to {:?}", version, zig_exe);
-        
+
 //         Ok(zig_exe)
 //     }
 
 //     /// Download with mirror failover implementing the proper algorithm
 //     async fn download_with_mirror_failover(&mut self, tarball_name: &str, download_path: &std::path::Path) -> Result<(), ZvError> {
 //         use crate::constants::ZIG_BASE_DOWNLOAD_URL;
-        
+
 //         // Get mirrors with shuffle algorithm
 //         let mut download_urls = Vec::new();
-        
+
 //         // First, try to get community mirrors
 //         let network = self.network.get_or_insert_with(|| ZvNetwork::init(&self.path));
-        
+
 //         match network.get_mirrors().await {
 //             Ok(mirrors_config) => {
 //                 let mut mirrors = mirrors_config.mirrors.clone();
-                
+
 //                 // Apply shuffle_lines algorithm prioritizing low ranks
 //                 crate::network::shuffle_lines(&mut mirrors);
-                
+
 //                 // Convert mirrors to URLs
 //                 for mirror in mirrors {
 //                     let url = format!("{}/{}", mirror.url.trim_end_matches('/'), tarball_name);
 //                     download_urls.push(url);
 //                 }
-                
+
 //                 tracing::info!(target: "libzv::download_with_mirror_failover", "Shuffled {} mirrors for download", download_urls.len());
 //             }
 //             Err(err) => {
 //                 tracing::warn!(target: "libzv::download_with_mirror_failover", "Failed to get mirrors: {}", err);
 //             }
 //         }
-        
+
 //         // Always add the main download URL as fallback
 //         let main_url = format!("{}/{}", ZIG_BASE_DOWNLOAD_URL.trim_end_matches('/'), tarball_name);
 //         download_urls.push(main_url);
-        
+
 //         // Try each URL until one succeeds
 //         let mut last_error = None;
 //         for (index, url) in download_urls.iter().enumerate() {
 //             tracing::info!(target: "libzv::download_with_mirror_failover", "Trying mirror {} of {}: {}", index + 1, download_urls.len(), url);
-            
+
 //             match self.download_and_verify(url, download_path).await {
 //                 Ok(()) => {
 //                     tracing::info!(target: "libzv::download_with_mirror_failover", "Successfully downloaded and verified from mirror {}", url);
@@ -921,16 +977,16 @@ mod constants;
 //                 Err(err) => {
 //                     tracing::warn!(target: "libzv::download_with_mirror_failover", "Mirror {} failed: {}", url, err);
 //                     last_error = Some(err);
-                    
+
 //                     // TODO: Update mirror ranking based on failure type
 //                     // For timeout/network errors: rank += 1
 //                     // For 404/client errors: rank += 2
-                    
+
 //                     continue;
 //                 }
 //             }
 //         }
-        
+
 //         // All mirrors failed
 //         Err(last_error.unwrap_or_else(|| ZvError::General(eyre!("All mirrors failed and no fallback available"))))
 //     }
@@ -938,27 +994,27 @@ mod constants;
 //     /// Get download URL for a version using mirror system with fallback
 //     async fn get_download_url(&mut self, _version: &semver::Version, tarball_name: &str) -> Result<String, ZvError> {
 //         use crate::constants::ZIG_BASE_DOWNLOAD_URL;
-        
+
 //         // First ensure we have a network instance
 //         let network = self.network.get_or_insert_with(|| ZvNetwork::init(&self.path));
-        
+
 //         // Try to get mirrors, fall back to main URL if mirrors unavailable
 //         match network.get_mirrors().await {
 //             Ok(mirrors_config) => {
 //                 // Sort mirrors by rank (lowest rank = highest priority)
 //                 let mut sorted_mirrors = mirrors_config.mirrors.clone();
 //                 sorted_mirrors.sort_by_key(|m| m.rank);
-                
+
 //                 // Try mirrors in rank order
 //                 for mirror in &sorted_mirrors {
 //                     let url = format!("{}/{}", mirror.url.trim_end_matches('/'), tarball_name);
 //                     tracing::debug!(target: "libzv::get_download_url", "Trying mirror: {} (rank: {})", url, mirror.rank);
-                    
+
 //                     // For now, return the first mirror URL
 //                     // TODO: In the future, we could check mirror availability here
 //                     return Ok(url);
 //                 }
-                
+
 //                 // No mirrors available, fall back to main URL
 //                 tracing::warn!(target: "libzv::get_download_url", "No mirrors available, falling back to main download URL");
 //                 Ok(format!("{}/{}", ZIG_BASE_DOWNLOAD_URL.trim_end_matches('/'), tarball_name))
@@ -973,10 +1029,10 @@ mod constants;
 //     /// Download a file with retry logic and mirror ranking updates
 //     async fn download_with_retry(&mut self, url: &str, download_path: &std::path::Path) -> Result<(), ZvError> {
 //         const MAX_RETRIES: u32 = 3;
-        
+
 //         for attempt in 1..=MAX_RETRIES {
 //             tracing::debug!(target: "libzv::download_with_retry", "Download attempt {} of {}", attempt, MAX_RETRIES);
-            
+
 //             match self.download_and_verify(url, download_path).await {
 //                 Ok(()) => {
 //                     tracing::info!(target: "libzv::download_with_retry", "Successfully downloaded and verified {:?}", download_path);
@@ -984,15 +1040,15 @@ mod constants;
 //                 }
 //                 Err(err) => {
 //                     tracing::warn!(target: "libzv::download_with_retry", "Download attempt {} failed: {}", attempt, err);
-                    
+
 //                     // TODO: Update mirror ranking based on failure type
 //                     // For timeout/network errors: rank += 1
 //                     // For 404/client errors: rank += 2
-                    
+
 //                     if attempt == MAX_RETRIES {
 //                         return Err(err);
 //                     }
-                    
+
 //                     // Wait before retry (exponential backoff)
 //                     let wait_duration = std::time::Duration::from_secs(2_u64.pow(attempt - 1));
 //                     tracing::debug!(target: "libzv::download_with_retry", "Waiting {:?} before retry", wait_duration);
@@ -1000,33 +1056,33 @@ mod constants;
 //                 }
 //             }
 //         }
-        
+
 //         unreachable!("Loop should have returned or errored")
 //     }
 
 //     /// Download a file and its signature, then verify with minisign
 //     async fn download_and_verify(&mut self, url: &str, download_path: &std::path::Path) -> Result<(), ZvError> {
 //         use tokio::fs as async_fs;
-        
+
 //         // Download the main file
 //         self.download_file(url, download_path).await?;
-        
+
 //         // Download the signature file
 //         let signature_url = format!("{}.minisig", url);
 //         let signature_path = download_path.with_extension("minisig");
-        
+
 //         tracing::debug!(target: "libzv::download_and_verify", "Downloading signature from: {}", signature_url);
 //         self.download_file(&signature_url, &signature_path).await?;
-        
+
 //         // Verify signature
 //         tracing::debug!(target: "libzv::download_and_verify", "Verifying signature for {:?}", download_path);
 //         self.verify_signature(download_path, &signature_path).await?;
-        
+
 //         // Clean up signature file
 //         if signature_path.try_exists().unwrap_or_default() {
 //             let _ = async_fs::remove_file(&signature_path).await;
 //         }
-        
+
 //         tracing::info!(target: "libzv::download_and_verify", "Successfully verified signature for {:?}", download_path);
 //         Ok(())
 //     }
@@ -1035,28 +1091,28 @@ mod constants;
 //     async fn verify_signature(&self, file_path: &std::path::Path, signature_path: &std::path::Path) -> Result<(), ZvError> {
 //         use minisign_verify::{PublicKey, Signature};
 //         use tokio::fs as async_fs;
-        
+
 //         // Read the public key
 //         let pk = PublicKey::from_base64(crate::constants::ZIG_MINSIGN_PUBKEY)
 //             .map_err(|e| ZvError::General(eyre!("Failed to parse public key: {}", e)))?;
-        
+
 //         // Read signature file
 //         let signature_content = async_fs::read_to_string(signature_path)
 //             .await
 //             .wrap_err("Failed to read signature file")?;
-        
+
 //         let signature = Signature::decode(&signature_content)
 //             .map_err(|e| ZvError::General(eyre!("Failed to decode signature: {}", e)))?;
-        
+
 //         // Read the file for verification
 //         let file_content = async_fs::read(file_path)
 //             .await
 //             .wrap_err("Failed to read file for verification")?;
-        
+
 //         // Verify the signature - NEVER SKIP this step!
 //         pk.verify(&file_content, &signature, true)
 //             .map_err(|e| ZvError::General(eyre!("Signature verification failed: {}", e)))?;
-        
+
 //         tracing::info!(target: "libzv::verify_signature", "Signature verification successful for {:?}", file_path);
 //         Ok(())
 //     }
@@ -1066,33 +1122,33 @@ mod constants;
 //         use tokio::fs as async_fs;
 //         use tokio::io::AsyncWriteExt;
 //         use reqwest::Client;
-        
+
 //         let client = Client::new();
 //         let response = client.get(url)
 //             .send()
 //             .await
 //             .map_err(|e| ZvError::General(eyre!("Failed to send request: {}", e)))?;
-            
+
 //         if !response.status().is_success() {
 //             return Err(ZvError::General(eyre!("HTTP error {}: {}", response.status(), url)));
 //         }
-        
+
 //         let mut file = async_fs::File::create(download_path)
 //             .await
 //             .wrap_err("Failed to create download file")?;
-            
+
 //         let bytes = response.bytes()
 //             .await
 //             .map_err(|e| ZvError::General(eyre!("Failed to read response: {}", e)))?;
-            
+
 //         file.write_all(&bytes)
 //             .await
 //             .wrap_err("Failed to write file")?;
-        
+
 //         file.sync_all()
 //             .await
 //             .wrap_err("Failed to sync file")?;
-            
+
 //         Ok(())
 //     }
 
@@ -1100,32 +1156,32 @@ mod constants;
 //     async fn extract_tarball(&self, tarball_path: &std::path::Path, install_dir: &std::path::Path) -> Result<(), ZvError> {
 //         use tokio::fs as async_fs;
 //         use std::process::Command;
-        
+
 //         // Create installation directory
 //         if install_dir.try_exists().unwrap_or_default() {
 //             async_fs::remove_dir_all(install_dir)
 //                 .await
 //                 .wrap_err("Failed to remove existing installation directory")?;
 //         }
-        
+
 //         async_fs::create_dir_all(install_dir)
 //             .await
 //             .wrap_err("Failed to create installation directory")?;
-        
+
 //         // Extract based on file extension
 //         let file_name = tarball_path.file_name()
 //             .and_then(|n| n.to_str())
 //             .ok_or_else(|| ZvError::General(eyre!("Invalid tarball filename")))?;
-            
+
 //         tracing::debug!(target: "libzv::extract_tarball", "Extracting {} to {:?}", file_name, install_dir);
-        
+
 //         if file_name.ends_with(".tar.xz") {
 //             // Use tar command for .tar.xz files
 //             let output = Command::new("tar")
 //                 .args(["-xf", tarball_path.to_str().unwrap(), "-C", install_dir.to_str().unwrap()])
 //                 .output()
 //                 .map_err(|e| ZvError::General(eyre!("Failed to run tar command: {}", e)))?;
-                
+
 //             if !output.status.success() {
 //                 let stderr = String::from_utf8_lossy(&output.stderr);
 //                 return Err(ZvError::General(eyre!("tar extraction failed: {}", stderr)));
@@ -1136,7 +1192,7 @@ mod constants;
 //         } else {
 //             return Err(ZvError::General(eyre!("Unsupported archive format: {}", file_name)));
 //         }
-        
+
 //         tracing::debug!(target: "libzv::extract_tarball", "Successfully extracted tarball");
 //         Ok(())
 //     }
@@ -1147,21 +1203,21 @@ mod constants;
 //         use std::io::copy;
 //         use zip::ZipArchive;
 //         use tokio::fs as async_fs;
-        
+
 //         tracing::debug!(target: "libzv::extract_zip", "Extracting ZIP file {:?} to {:?}", zip_path, extract_dir);
-        
+
 //         // Open the ZIP file
 //         let file = File::open(zip_path)
 //             .map_err(|e| ZvError::General(eyre!("Failed to open ZIP file: {}", e)))?;
-        
+
 //         let mut archive = ZipArchive::new(file)
 //             .map_err(|e| ZvError::General(eyre!("Failed to read ZIP archive: {}", e)))?;
-        
+
 //         // Extract all files
 //         for i in 0..archive.len() {
 //             let mut file = archive.by_index(i)
 //                 .map_err(|e| ZvError::General(eyre!("Failed to read ZIP entry {}: {}", i, e)))?;
-            
+
 //             let outpath = match file.enclosed_name() {
 //                 Some(path) => extract_dir.join(path),
 //                 None => {
@@ -1169,9 +1225,9 @@ mod constants;
 //                     continue;
 //                 }
 //             };
-            
+
 //             tracing::trace!(target: "libzv::extract_zip", "Extracting: {:?}", outpath);
-            
+
 //             if file.is_dir() {
 //                 // Create directory
 //                 async_fs::create_dir_all(&outpath).await
@@ -1182,27 +1238,27 @@ mod constants;
 //                     async_fs::create_dir_all(parent).await
 //                         .wrap_err("Failed to create parent directories")?;
 //                 }
-                
+
 //                 // Extract file
 //                 let mut outfile = std::fs::File::create(&outpath)
 //                     .map_err(|e| ZvError::General(eyre!("Failed to create output file {:?}: {}", outpath, e)))?;
-                
+
 //                 copy(&mut file, &mut outfile)
 //                     .map_err(|e| ZvError::General(eyre!("Failed to extract file {:?}: {}", outpath, e)))?;
 //             }
-            
+
 //             // Set permissions on Unix systems
 //             #[cfg(unix)]
 //             {
 //                 use std::os::unix::fs::PermissionsExt;
-                
+
 //                 if let Some(mode) = file.unix_mode() {
 //                     std::fs::set_permissions(&outpath, std::fs::Permissions::from_mode(mode))
 //                         .map_err(|e| ZvError::General(eyre!("Failed to set permissions for {:?}: {}", outpath, e)))?;
 //                 }
 //             }
 //         }
-        
+
 //         tracing::info!(target: "libzv::extract_zip", "Successfully extracted ZIP file with {} entries", archive.len());
 //         Ok(())
 //     }
@@ -1646,4 +1702,3 @@ mod constants;
 //         )))
 //     }
 // }
-

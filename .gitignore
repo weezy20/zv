@@ -5,3 +5,6 @@
 myapp
 zig.exe
 zig
+zls
+zls.exe
+build.ps1
