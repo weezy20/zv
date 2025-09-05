@@ -97,7 +97,11 @@ pub enum Commands {
     Clean { version: Option<ZigVersion> },
 
     /// Setup shell environment for zv (required to make zig binaries available in $PATH)
-    Setup,
+    Setup {
+        /// Show what would be changed without making any modifications
+        #[arg(long, help = "Preview changes without applying them")]
+        dry_run: bool,
+    },
 
     /// Synchronize index, mirrors list and metadata for zv.
     Sync,
@@ -140,8 +144,8 @@ impl Commands {
             },
             Commands::List => todo!(),
             Commands::Clean { version: _version } => todo!(),
-            Commands::Setup => {
-                setup::setup_shell(&mut app, using_env).await
+            Commands::Setup { dry_run } => {
+                setup::setup_shell(&mut app, using_env, dry_run).await
             },
             Commands::Sync => todo!(),
         }
@@ -178,12 +182,9 @@ fn print_welcome_message(app: App) {
     "#,
             zv_dir = app.path().display(),
             shell = app.shell.as_ref().map_or(Shell::detect(), |s| *s),
-            profile = if let Some(profile) = std::env::var("PROFILE").ok()
-                && !profile.is_empty()
-            {
-                format!("Profile: {profile}")
-            } else {
-                String::new()
+            profile = match std::env::var("PROFILE").ok() {
+                Some(profile) if !profile.is_empty() => format!("Profile: {profile}"),
+                _ => String::new(),
             }
         ))
     );
@@ -197,11 +198,7 @@ fn print_welcome_message(app: App) {
         "Current active Zig: {}{opt}",
         Paint::yellow(&active_zig.map_or_else(|| "none".to_string(), |v| v.to_string())),
         opt = if active_zig.is_none() {
-            &format!(
-                " (use {} to set one | or run {})",
-                Paint::blue("zv use <version>"),
-                Paint::blue("zv setup")
-            )
+            " (use zv use <version> to set one | or run zv setup)"
         } else {
             ""
         }
