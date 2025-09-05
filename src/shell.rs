@@ -62,6 +62,49 @@ impl Shell {
         }
     }
 
+    /// Get shell RC files that should be modified for this shell type
+    pub fn get_rc_files(&self) -> Vec<PathBuf> {
+        let home_dir = match dirs::home_dir() {
+            Some(dir) => dir,
+            None => return vec![],
+        };
+
+        match self {
+            Shell::Bash => vec![
+                home_dir.join(".profile"),
+                home_dir.join(".bashrc"),
+            ],
+            Shell::Zsh => vec![
+                home_dir.join(".profile"),
+                home_dir.join(".zshrc"),
+            ],
+            Shell::Fish => vec![
+                home_dir.join(".config/fish/config.fish"),
+            ],
+            Shell::Tcsh => vec![
+                home_dir.join(".profile"),
+                home_dir.join(".tcshrc"),
+            ],
+            Shell::Nu => vec![
+                home_dir.join(".config/nushell/config.nu"),
+            ],
+            Shell::Posix | Shell::Unknown => vec![
+                home_dir.join(".profile"),
+            ],
+            Shell::PowerShell | Shell::Cmd => vec![], // Windows doesn't use RC files
+        }
+    }
+
+    /// Generate the source command for this shell type
+    pub fn get_source_command(&self, env_file: &Path) -> String {
+        match self {
+            Shell::Fish => format!("source \"{}\"", env_file.display()),
+            Shell::Nu => format!("source \"{}\"", env_file.display()),
+            Shell::Tcsh => format!("source \"{}\"", env_file.display()),
+            _ => format!("source \"{}\"", env_file.display()), // POSIX shells (bash, zsh, etc.)
+        }
+    }
+
     /// Returns the env file path and content without writing to disk
     pub fn export_without_dump(&self, zv_dir: &Path, using_env_var: bool) -> (PathBuf, String) {
         let env_file = zv_dir.join(self.env_file_name());
