@@ -32,7 +32,7 @@ pub struct App {
     /// Network client
     network: Option<network::ZvNetwork>,
     /// <ZV_DIR>/bin in $PATH? If not prompt user to run `setup` or add `source <ZV_DIR>/env to their shell profile`
-    source_set: bool,
+    pub(crate) source_set: bool,
     /// Current detected shell
     pub(crate) shell: Option<crate::Shell>,
 }

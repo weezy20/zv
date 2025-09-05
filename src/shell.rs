@@ -55,80 +55,130 @@ impl Shell {
         match self {
             Shell::PowerShell => "env.ps1",
             Shell::Cmd => "env.bat",
-            _ => "env", // bash, zsh, fish or other *nix shells incl. Shell::Unknown
+            Shell::Fish => "env.fish",
+            Shell::Nu => "env.nu",
+            Shell::Tcsh => "env.csh",
+            _ => "env", // bash, zsh, and other POSIX shells
         }
     }
 
     /// Returns the env file path and content without writing to disk
-    pub fn export_without_dump(&self, zv_dir: &Path) -> (PathBuf, String) {
-        let env_file = zv_dir.join(self.env_file_name()); // app.env_path
-        let zv_bin_path_str =
-            if cfg!(windows) && matches!(self, Shell::Bash | Shell::Zsh | Shell::Fish) {
-                // Convert Windows path separators to Unix-style for Unix-like shells on Windows (e.g., WSL)
-                env_file.to_string_lossy().replace('\\', "/")
-            } else {
-                env_file.to_string_lossy().into_owned()
-            };
+    pub fn export_without_dump(&self, zv_dir: &Path, using_env_var: bool) -> (PathBuf, String) {
+        let env_file = zv_dir.join(self.env_file_name());
+        let bin_path = zv_dir.join("bin"); // The actual bin directory to add to PATH
+        
+        // Use ${HOME}/.zv when using default path, otherwise use absolute path
+        let (zv_dir_str, zv_bin_path_str) = if using_env_var {
+            // Using ZV_DIR env var, use absolute paths
+            (
+                zv_dir.to_string_lossy().into_owned(),
+                if cfg!(windows) && matches!(self, Shell::Bash | Shell::Zsh | Shell::Fish) {
+                    // Convert Windows path separators to Unix-style for Unix-like shells on Windows (e.g., WSL)
+                    bin_path.to_string_lossy().replace('\\', "/")
+                } else {
+                    bin_path.to_string_lossy().into_owned()
+                }
+            )
+        } else {
+            // Using default path, use ${HOME}/.zv
+            ("${HOME}/.zv".to_string(), "${HOME}/.zv/bin".to_string())
+        };
 
         let env_content = match self {
             Shell::PowerShell => {
-                // Provide helpful message for PowerShell users about system variables
                 format!(
-                    r#"# To permanently set PATH in PowerShell, run as Administrator:
+                    r#"# zv shell setup for PowerShell
+# To permanently set environment variables in PowerShell, run as Administrator:
+# [Environment]::SetEnvironmentVariable("ZV_DIR", "{zv_dir}", "User")
 # [Environment]::SetEnvironmentVariable("PATH", "{path};$env:PATH", "User")
-# Or for system-wide (requires Admin):
-# [Environment]::SetEnvironmentVariable("PATH", "{path};$env:PATH", "Machine")
-$env:PATH = "{path};$env:PATH""#,
-                    path = zv_bin_path_str
+
+$env:ZV_DIR = "{zv_dir}"
+if ($env:PATH -notlike "*{path}*") {{
+    $env:PATH = "{path};$env:PATH"
+}}"#,
+                    path = zv_bin_path_str,
+                    zv_dir = zv_dir_str
                 )
             }
             Shell::Cmd => {
-                // Provide helpful message for CMD users about system variables
                 format!(
-                    r#"REM To permanently set PATH in CMD, run as Administrator:
+                    r#"REM zv shell setup for Command Prompt
+REM To permanently set environment variables in CMD, run as Administrator:
+REM setx ZV_DIR "{zv_dir}" /M
 REM setx PATH "{path};%PATH%" /M
-REM Or for current user only:
-REM setx PATH "{path};%PATH%"
-set "PATH={path};%PATH%""#,
-                    path = zv_bin_path_str
+
+set "ZV_DIR={zv_dir}"
+echo ;%PATH%; | find /i ";{path};" >nul || set "PATH={path};%PATH%""#,
+                    path = zv_bin_path_str,
+                    zv_dir = zv_dir_str
                 )
             }
             Shell::Fish => {
-                // Fish-specific syntax for setting PATH
-                format!(r#"set -gx PATH "{path}" $PATH"#, path = zv_bin_path_str)
+                format!(
+                    r#"#!/usr/bin/env fish
+# zv shell setup for Fish shell
+set -gx ZV_DIR "{zv_dir}"
+if not contains "{path}" $PATH
+    set -gx PATH "{path}" $PATH
+end"#,
+                    path = zv_bin_path_str,
+                    zv_dir = zv_dir_str
+                )
             }
             Shell::Nu => {
-                // Nushell syntax for setting environment variables
                 format!(
-                    r#"$env.PATH = ($env.PATH | prepend "{path}")"#,
-                    path = zv_bin_path_str
+                    r#"# zv shell setup for Nushell
+$env.ZV_DIR = "{zv_dir}"
+$env.PATH = ($env.PATH | split row (char esep) | prepend "{path}" | uniq)"#,
+                    path = zv_bin_path_str,
+                    zv_dir = zv_dir_str
                 )
             }
             Shell::Tcsh => {
-                // Tcsh/csh syntax for setting PATH
-                format!(r#"setenv PATH "{path}:$PATH""#, path = zv_bin_path_str)
+                format!(
+                    r#"#!/bin/csh
+# zv shell setup for tcsh/csh
+setenv ZV_DIR "{zv_dir}"
+echo ":${{PATH}}:" | grep -q ":{path}:" || setenv PATH "{path}:$PATH""#,
+                    path = zv_bin_path_str,
+                    zv_dir = zv_dir_str
+                )
             }
-            Shell::Bash | Shell::Zsh | Shell::Posix => {
-                // POSIX-compliant syntax works for bash, zsh, and other POSIX shells
-                format!(r#"export PATH="{path}:$PATH""#, path = zv_bin_path_str)
-            }
-            Shell::Unknown => {
-                tracing::warn!("Unknown shell type detected, using POSIX shell syntax");
-                // Conservative default using POSIX syntax
-                format!(r#"export PATH="{path}:$PATH""#, path = zv_bin_path_str)
+            Shell::Bash | Shell::Zsh | Shell::Posix | Shell::Unknown => {
+                // POSIX-compliant syntax with robust PATH checking (similar to Cargo)
+                format!(
+                    r#"#!/bin/sh
+# zv shell setup
+# affix colons on either side of $PATH to simplify matching
+export ZV_DIR="{zv_dir}"
+case ":${{PATH}}:" in
+    *:"{path}":*)
+        ;;
+    *)
+        # Prepending path in case a system-installed binary needs to be overridden
+        export PATH="{path}:$PATH"
+        ;;
+esac"#,
+                    path = zv_bin_path_str,
+                    zv_dir = zv_dir_str
+                )
             }
         };
+
+        if matches!(self, Shell::Unknown) {
+            tracing::warn!("Unknown shell type detected, using POSIX shell syntax");
+        }
 
         (env_file, env_content)
     }
     /// Dumps shell specific environment variables to the env file, overwriting if read errors
     /// For CMD and PowerShell, this method does not write to disk as system variables are edited directly
-    pub async fn export(&self, zv_dir: &Path) -> Result<(), ZvError> {
+    pub async fn export(&self, zv_dir: &Path, using_env_var: bool) -> Result<(), ZvError> {
         if matches!(self, Shell::Cmd | Shell::PowerShell) {
             return Ok(());
         }
 
-        let (env_file, content) = self.export_without_dump(zv_dir);
+        let (env_file, content) = self.export_without_dump(zv_dir, using_env_var);
 
         // Check if content already exists in file
         let dump_true = if env_file.exists() {

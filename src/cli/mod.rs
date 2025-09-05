@@ -6,6 +6,7 @@ mod init;
 mod list;
 mod sync;
 mod r#use;
+mod setup;
 mod zig;
 mod zls;
 
@@ -29,7 +30,7 @@ pub async fn zv_main() -> super::Result<()> {
     })?;
 
     match zv_cli.command {
-        Some(cmd) => cmd.execute(app).await?,
+        Some(cmd) => cmd.execute(app, using_env).await?,
         None => {
             print_welcome_message(app);
         }
@@ -103,7 +104,7 @@ pub enum Commands {
 }
 
 impl Commands {
-    pub(crate) async fn execute(self, mut app: App) -> super::Result<()> {
+    pub(crate) async fn execute(self, mut app: App, using_env: bool) -> super::Result<()> {
         match self {
             Commands::Init { project_name, zig } => {
                 use crate::{Template, TemplateType};
@@ -139,7 +140,9 @@ impl Commands {
             },
             Commands::List => todo!(),
             Commands::Clean { version: _version } => todo!(),
-            Commands::Setup => todo!(),
+            Commands::Setup => {
+                setup::setup_shell(&mut app, using_env).await
+            },
             Commands::Sync => todo!(),
         }
     }
