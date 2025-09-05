@@ -368,8 +368,12 @@ pub async fn setup_shell(app: &mut App, using_env_var: bool, dry_run: bool) -> c
     if app.source_set {
         println!(
             "{}",
-            Paint::green("Shell environment already set up. No action needed.")
+            Paint::green("Shell environment already set up.")
         );
+        
+        // Even when shell environment is set up, we need to check if binary needs updating
+        // or if shims need regeneration
+        post_setup_actions(app, dry_run).await?;
         return Ok(());
     }
 
