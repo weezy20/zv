@@ -70,27 +70,12 @@ impl Shell {
         };
 
         match self {
-            Shell::Bash => vec![
-                home_dir.join(".profile"),
-                home_dir.join(".bashrc"),
-            ],
-            Shell::Zsh => vec![
-                home_dir.join(".profile"),
-                home_dir.join(".zshrc"),
-            ],
-            Shell::Fish => vec![
-                home_dir.join(".config/fish/config.fish"),
-            ],
-            Shell::Tcsh => vec![
-                home_dir.join(".profile"),
-                home_dir.join(".tcshrc"),
-            ],
-            Shell::Nu => vec![
-                home_dir.join(".config/nushell/config.nu"),
-            ],
-            Shell::Posix | Shell::Unknown => vec![
-                home_dir.join(".profile"),
-            ],
+            Shell::Bash => vec![home_dir.join(".profile"), home_dir.join(".bashrc")],
+            Shell::Zsh => vec![home_dir.join(".profile"), home_dir.join(".zshrc")],
+            Shell::Fish => vec![home_dir.join(".config/fish/config.fish")],
+            Shell::Tcsh => vec![home_dir.join(".profile"), home_dir.join(".tcshrc")],
+            Shell::Nu => vec![home_dir.join(".config/nushell/config.nu")],
+            Shell::Posix | Shell::Unknown => vec![home_dir.join(".profile")],
             Shell::PowerShell | Shell::Cmd => vec![], // Windows doesn't use RC files
         }
     }
@@ -106,9 +91,14 @@ impl Shell {
     }
 
     /// Returns the env file path and content without writing to disk
-    pub fn export_without_dump(&self, zv_dir: &Path, bin_path: &Path, using_env_var: bool) -> (PathBuf, String) {
+    pub fn export_without_dump(
+        &self,
+        zv_dir: &Path,
+        bin_path: &Path,
+        using_env_var: bool,
+    ) -> (PathBuf, String) {
         let env_file = zv_dir.join(self.env_file_name());
-        
+
         // Use ${HOME}/.zv when using default path, otherwise use absolute path
         let (zv_dir_str, zv_bin_path_str) = if using_env_var {
             // Using ZV_DIR env var, use absolute paths
@@ -119,7 +109,7 @@ impl Shell {
                     bin_path.to_string_lossy().replace('\\', "/")
                 } else {
                     bin_path.to_string_lossy().into_owned()
-                }
+                },
             )
         } else {
             // Using default path, use ${HOME}/.zv
@@ -215,7 +205,12 @@ esac"#,
     }
     /// Dumps shell specific environment variables to the env file, overwriting if read errors
     /// For CMD and PowerShell, this method does not write to disk as system variables are edited directly
-    pub async fn export(&self, zv_dir: &Path, bin_path: &Path, using_env_var: bool) -> Result<(), ZvError> {
+    pub async fn export(
+        &self,
+        zv_dir: &Path,
+        bin_path: &Path,
+        using_env_var: bool,
+    ) -> Result<(), ZvError> {
         if matches!(self, Shell::Cmd | Shell::PowerShell) {
             return Ok(());
         }
