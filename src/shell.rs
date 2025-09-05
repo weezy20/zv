@@ -11,6 +11,9 @@ pub enum Shell {
     Fish,
     PowerShell,
     Cmd,
+    Tcsh,
+    Posix,
+    Nu,
     Unknown,
 }
 
@@ -24,6 +27,12 @@ impl Shell {
                 return Shell::Zsh;
             } else if shell.contains("fish") {
                 return Shell::Fish;
+            } else if shell.contains("tcsh") || shell.contains("csh") {
+                return Shell::Tcsh;
+            } else if shell.contains("nu") {
+                return Shell::Nu;
+            } else if shell.contains("sh") && !shell.contains("bash") && !shell.contains("zsh") {
+                return Shell::Posix;
             }
         }
 
@@ -63,24 +72,46 @@ impl Shell {
 
         let env_content = match self {
             Shell::PowerShell => {
-                // No need for extra escaping; PowerShell handles paths well
-                format!(r#"$env:PATH = "{path};$env:PATH""#, path = zv_bin_path_str)
+                // Provide helpful message for PowerShell users about system variables
+                format!(
+                    r#"# To permanently set PATH in PowerShell, run as Administrator:
+# [Environment]::SetEnvironmentVariable("PATH", "{path};$env:PATH", "User")
+# Or for system-wide (requires Admin):
+# [Environment]::SetEnvironmentVariable("PATH", "{path};$env:PATH", "Machine")
+$env:PATH = "{path};$env:PATH""#, 
+                    path = zv_bin_path_str
+                )
             }
             Shell::Cmd => {
-                // Double quotes to handle spaces
-                format!(r#"set "PATH={path};%PATH%""#, path = zv_bin_path_str)
+                // Provide helpful message for CMD users about system variables
+                format!(
+                    r#"REM To permanently set PATH in CMD, run as Administrator:
+REM setx PATH "{path};%PATH%" /M
+REM Or for current user only:
+REM setx PATH "{path};%PATH%"
+set "PATH={path};%PATH%""#, 
+                    path = zv_bin_path_str
+                )
             }
             Shell::Fish => {
                 // Fish-specific syntax for setting PATH
                 format!(r#"set -gx PATH "{path}" $PATH"#, path = zv_bin_path_str)
             }
-            Shell::Bash | Shell::Zsh => {
-                // Double quotes to handle special characters
+            Shell::Nu => {
+                // Nushell syntax for setting environment variables
+                format!(r#"$env.PATH = ($env.PATH | prepend "{path}")"#, path = zv_bin_path_str)
+            }
+            Shell::Tcsh => {
+                // Tcsh/csh syntax for setting PATH
+                format!(r#"setenv PATH "{path}:$PATH""#, path = zv_bin_path_str)
+            }
+            Shell::Bash | Shell::Zsh | Shell::Posix => {
+                // POSIX-compliant syntax works for bash, zsh, and other POSIX shells
                 format!(r#"export PATH="{path}:$PATH""#, path = zv_bin_path_str)
             }
             Shell::Unknown => {
-                tracing::warn!("Unknown shell type detected, using bash shell syntax");
-                // Conservative default
+                tracing::warn!("Unknown shell type detected, using POSIX shell syntax");
+                // Conservative default using POSIX syntax
                 format!(r#"export PATH="{path}:$PATH""#, path = zv_bin_path_str)
             }
         };
@@ -88,7 +119,12 @@ impl Shell {
         (env_file, env_content)
     }
     /// Dumps shell specific environment variables to the env file, overwriting if read errors
+    /// For CMD and PowerShell, this method does not write to disk as system variables are edited directly
     pub async fn export(&self, zv_dir: &Path) -> Result<(), ZvError> {
+        if matches!(self, Shell::Cmd | Shell::PowerShell) {
+            return Ok(());
+        }
+
         let (env_file, content) = self.export_without_dump(zv_dir);
 
         // Check if content already exists in file
@@ -171,6 +207,9 @@ impl std::fmt::Display for Shell {
             Shell::PowerShell => write!(f, "powershell"),
             Shell::Fish => write!(f, "fish"),
             Shell::Cmd => write!(f, "cmd"),
+            Shell::Tcsh => write!(f, "tcsh"),
+            Shell::Posix => write!(f, "posix"),
+            Shell::Nu => write!(f, "nu"),
             Shell::Unknown => write!(f, "unknown"),
         }
     }
