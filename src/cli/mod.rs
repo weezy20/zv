@@ -171,10 +171,12 @@ fn print_welcome_message(app: App) {
         "Bash"
     };
 
-    println!(
-        "{}",
-        Paint::yellow(&format!(
-            r#"
+    // Only show ASCII art if we're attached to a TTY
+    if tools::is_tty() {
+        println!(
+            "{}",
+            Paint::yellow(&format!(
+                r#"
 ███████╗██╗   ██╗    Architecture: {architecture}
 ╚══███╔╝██║   ██║    Platform: {platform}
   ███╔╝ ██║   ██║    OS: {os}
@@ -182,16 +184,29 @@ fn print_welcome_message(app: App) {
 ███████╗╚████╔╝█     Shell: {shell}
 ╚══════╝  ╚══╝       {profile}
     "#,
-            zv_dir = app.path().display(),
-            shell = app.shell.as_ref().map_or(Shell::detect(), |s| *s),
-            profile = match std::env::var("PROFILE").ok() {
-                Some(profile) if !profile.is_empty() => format!("Profile: {profile}"),
-                _ => String::new(),
-            }
-        ))
-    );
+                zv_dir = app.path().display(),
+                shell = app.shell.as_ref().map_or(Shell::detect(), |s| *s),
+                profile = match std::env::var("PROFILE").ok() {
+                    Some(profile) if !profile.is_empty() => format!("Profile: {profile}"),
+                    _ => String::new(),
+                }
+            ))
+        );
 
-    println!();
+        println!();
+    } else {
+        // When not in TTY, show minimal info
+        println!("zv - Zig Version Manager");
+        println!("Architecture: {architecture}");
+        println!("Platform: {platform}");
+        println!("OS: {os}");
+        println!("ZV directory: {}", app.path().display());
+        println!("Shell: {}", app.shell.as_ref().map_or(Shell::detect(), |s| *s));
+        if let Some(profile) = std::env::var("PROFILE").ok().filter(|p| !p.is_empty()) {
+            println!("Profile: {profile}");
+        }
+        println!();
+    }
 
     // Current active Zig version
     let active_zig = app.get_active_version();

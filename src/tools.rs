@@ -6,6 +6,12 @@ use color_eyre::{
 use std::{borrow::Cow, path::PathBuf};
 use yansi::Paint;
 
+/// Check if we're running in a TTY environment
+#[inline]
+pub(crate) fn is_tty() -> bool {
+    yansi::is_enabled()
+}
+
 /// Macro to print standardized solution suggestions with bullet points
 ///
 /// Usage:

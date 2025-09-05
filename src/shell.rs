@@ -2,7 +2,7 @@ use color_eyre::eyre::eyre;
 use std::path::{Path, PathBuf};
 use sysinfo::{Pid, Process, System};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
-
+use crate::tools::is_tty;
 use crate::ZvError;
 
 /// Get the parent process name using sysinfo
@@ -20,11 +20,6 @@ fn get_parent_process_name() -> Option<String> {
     let parent_process = system.process(parent_pid)?;
 
     Some(parent_process.name().to_string_lossy().to_string())
-}
-
-/// Check if we're running in a TTY environment
-fn is_tty() -> bool {
-    yansi::is_enabled()
 }
 
 /// Detect shell from parent process name
@@ -67,6 +62,43 @@ pub enum Shell {
 impl Shell {
     /// Detect shell from environment with improved reliability
     pub fn detect() -> Shell {
+        // Closure to detect shell from any string containing shell information
+        let detect_shell_from_string = |shell_str: &str| -> Option<Shell> {
+            if shell_str.contains("bash") {
+                Some(Shell::Bash)
+            } else if shell_str.contains("zsh") {
+                Some(Shell::Zsh)
+            } else if shell_str.contains("fish") {
+                Some(Shell::Fish)
+            } else if shell_str.contains("powershell") || shell_str.contains("pwsh") {
+                Some(Shell::PowerShell)
+            } else if shell_str.contains("cmd") {
+                Some(Shell::Cmd)
+            } else if shell_str.contains("tcsh") || shell_str.contains("csh") {
+                Some(Shell::Tcsh)
+            } else if shell_str.contains("nu") {
+                Some(Shell::Nu)
+            } else if shell_str.contains("sh") && !shell_str.contains("bash") && !shell_str.contains("zsh") {
+                Some(Shell::Posix)
+            } else {
+                None
+            }
+        };
+
+        if cfg!(windows) {
+            // Windows-specific detection
+            Self::detect_windows_shell(detect_shell_from_string)
+        } else {
+            // Unix-like systems detection
+            Self::detect_unix_shell(detect_shell_from_string)
+        }
+    }
+
+    /// Windows-specific shell detection
+    fn detect_windows_shell<F>(detect_shell_from_string: F) -> Shell 
+    where 
+        F: Fn(&str) -> Option<Shell>
+    {
         // First, try to detect from parent process if we're in a TTY
         if is_tty() {
             if let Some(shell) = detect_shell_from_parent() {
@@ -74,86 +106,66 @@ impl Shell {
             }
         }
 
-        // Closure to detect shell from SHELL environment variable
-        let detect_from_shell_env = || -> Option<Shell> {
-            let shell = std::env::var("SHELL").ok()?;
-            if shell.contains("bash") {
-                Some(Shell::Bash)
-            } else if shell.contains("zsh") {
-                Some(Shell::Zsh)
-            } else if shell.contains("fish") {
-                Some(Shell::Fish)
-            } else if shell.contains("tcsh") || shell.contains("csh") {
-                Some(Shell::Tcsh)
-            } else if shell.contains("nu") {
-                Some(Shell::Nu)
-            } else if shell.contains("sh") && !shell.contains("bash") && !shell.contains("zsh") {
-                Some(Shell::Posix)
-            } else {
-                None
+        // Check if we're in WSL (Unix shells on Windows)
+        if std::env::var("WSL_DISTRO_NAME").is_ok() || std::env::var("WSL_INTEROP").is_ok() {
+            // In WSL, SHELL variable should work properly
+            if let Ok(shell) = std::env::var("SHELL") {
+                if let Some(detected) = detect_shell_from_string(&shell) {
+                    return detected;
+                }
             }
-        };
-
-        // Fall back to environment variable detection
-        if let Some(shell) = detect_from_shell_env() {
-            return shell;
+            return Shell::Bash; // Default for WSL
         }
 
-        // Windows shell detection (powershell/cmd prompt)
-        if cfg!(windows) {
-            // Check for PowerShell first using multiple indicators
-            if std::env::var("PSModulePath").is_ok()
-                || std::env::var("POWERSHELL_DISTRIBUTION_CHANNEL").is_ok()
-                || std::env::var("PSVersionTable").is_ok()
-            {
-                return Shell::PowerShell;
-            }
+        // Check for PowerShell environment indicators
+        if std::env::var("PSModulePath").is_ok() {
+            return Shell::PowerShell;
+        }
 
-            // Check for Windows Terminal and infer shell from other env vars
-            if let Ok(wt_session) = std::env::var("WT_SESSION") {
-                if !wt_session.is_empty() {
-                    // In Windows Terminal, check if PowerShell Core indicators are present
-                    if std::env::var("POWERSHELL_DISTRIBUTION_CHANNEL").is_ok() {
-                        return Shell::PowerShell;
+        // Additional checks for specific environments
+        if let Ok(term_program) = std::env::var("TERM_PROGRAM") {
+            if term_program == "vscode" {
+                // VS Code integrated terminal, check for shell preference
+                if let Ok(vscode_shell) = std::env::var("VSCODE_SHELL_INTEGRATION") {
+                    if let Some(shell) = detect_shell_from_string(&vscode_shell) {
+                        return shell;
                     }
                 }
             }
+        }
 
-            // Check COMSPEC for CMD
-            if let Ok(comspec) = std::env::var("COMSPEC") {
-                if comspec.to_lowercase().contains("cmd") {
-                    return Shell::Cmd;
-                }
+        // Default to PowerShell on modern Windows
+        Shell::PowerShell
+    }
+
+    /// Unix-like systems shell detection
+    fn detect_unix_shell<F>(detect_shell_from_string: F) -> Shell 
+    where 
+        F: Fn(&str) -> Option<Shell>
+    {
+        // First, try to detect from parent process if we're in a TTY
+        if is_tty() {
+            if let Some(shell) = detect_shell_from_parent() {
+                return shell;
             }
+        }
 
-            // Check if we're running under WSL or similar (Unix shells on Windows)
-            if std::env::var("WSL_DISTRO_NAME").is_ok() || std::env::var("WSL_INTEROP").is_ok() {
-                // In WSL, fall back to SHELL variable detection which should work
-                if let Some(shell) = detect_from_shell_env() {
-                    return shell;
-                }
-                return Shell::Bash; // Default for WSL
+        // Use SHELL environment variable (standard on Unix-like systems)
+        if let Ok(shell) = std::env::var("SHELL") {
+            if let Some(detected) = detect_shell_from_string(&shell) {
+                return detected;
             }
         }
 
         // Additional checks for specific environments
         if let Ok(term_program) = std::env::var("TERM_PROGRAM") {
-            match term_program.as_str() {
-                "vscode" => {
-                    // VS Code integrated terminal, check for shell preference
-                    if let Ok(vscode_shell) = std::env::var("VSCODE_SHELL_INTEGRATION") {
-                        if vscode_shell.contains("bash") {
-                            return Shell::Bash;
-                        } else if vscode_shell.contains("zsh") {
-                            return Shell::Zsh;
-                        } else if vscode_shell.contains("fish") {
-                            return Shell::Fish;
-                        } else if vscode_shell.contains("powershell") {
-                            return Shell::PowerShell;
-                        }
+            if term_program == "vscode" {
+                // VS Code integrated terminal, check for shell preference
+                if let Ok(vscode_shell) = std::env::var("VSCODE_SHELL_INTEGRATION") {
+                    if let Some(shell) = detect_shell_from_string(&vscode_shell) {
+                        return shell;
                     }
                 }
-                _ => {}
             }
         }
 
