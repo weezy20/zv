@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use yansi::Paint;
 
 use crate::{App, Shell, suggest, tools};
+use crate::tools::canonicalize;
 
 /// Check if we're using a custom ZV_DIR (not the default $HOME/.zv) and warn the user
 fn check_custom_zv_dir_warning(app: &App, using_env_var: bool) -> crate::Result<bool> {
@@ -111,7 +112,7 @@ pub async fn pre_setup_checks(
         match std::env::var("ZV_DIR") {
             Ok(env_zv_dir) => {
                 let env_path = PathBuf::from(env_zv_dir);
-                match (env_path.canonicalize(), zv_dir.canonicalize()) {
+                match (canonicalize(&env_path), canonicalize(&zv_dir)) {
                     (Ok(env_canonical), Ok(zv_canonical)) => env_canonical == zv_canonical,
                     _ => false,
                 }

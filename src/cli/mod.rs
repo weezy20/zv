@@ -2,6 +2,7 @@ use crate::{App, Shell, UserConfig, ZigVersion, ZvError, suggest, tools};
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::{Context as _, eyre};
 use yansi::Paint;
+mod clean;
 mod init;
 mod list;
 mod setup;
@@ -148,7 +149,7 @@ impl Commands {
                 }
             },
             Commands::List => todo!(),
-            Commands::Clean { version: _version } => todo!(),
+            Commands::Clean { version: _version } => clean::clean_bin(&app).await,
             Commands::Setup { dry_run } => setup::setup_shell(&mut app, using_env, dry_run).await,
             Commands::Sync => todo!(),
         }
@@ -201,7 +202,10 @@ fn print_welcome_message(app: App) {
         println!("Platform: {platform}");
         println!("OS: {os}");
         println!("ZV directory: {}", app.path().display());
-        println!("Shell: {}", app.shell.as_ref().map_or(Shell::detect(), |s| *s));
+        println!(
+            "Shell: {}",
+            app.shell.as_ref().map_or(Shell::detect(), |s| *s)
+        );
         if let Some(profile) = std::env::var("PROFILE").ok().filter(|p| !p.is_empty()) {
             println!("Profile: {profile}");
         }

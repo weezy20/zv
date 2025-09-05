@@ -3,8 +3,13 @@ use color_eyre::{
     Context as _, Result,
     eyre::{WrapErr, bail, eyre},
 };
-use std::{borrow::Cow, path::PathBuf};
+use std::{borrow::Cow, path::{Path, PathBuf}, io, fs};
 use yansi::Paint;
+
+/// Cross-platform canonicalize function that avoids UNC paths on Windows
+pub fn canonicalize<P: AsRef<Path>>(path: P) -> io::Result<PathBuf> {
+    dunce::canonicalize(path)
+}
 
 /// Check if we're running in a TTY environment
 #[inline]
@@ -116,7 +121,7 @@ pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
     };
 
     // Canonicalize the path before returning
-    let zv_dir = std::fs::canonicalize(&zv_dir).map_err(ZvError::Io)?;
+    let zv_dir = canonicalize(&zv_dir).map_err(ZvError::Io)?;
 
     Ok((zv_dir, using_env))
 }

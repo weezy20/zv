@@ -2,7 +2,7 @@ use color_eyre::eyre::eyre;
 use std::path::{Path, PathBuf};
 use sysinfo::{Pid, Process, System};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
-use crate::tools::is_tty;
+use crate::tools::{is_tty, canonicalize};
 use crate::ZvError;
 
 /// Get the parent process name using sysinfo
@@ -382,7 +382,7 @@ esac"#,
         }
 
         // Canonicalize the target path once
-        let target_path = match path.canonicalize() {
+        let target_path = match canonicalize(path) {
             Ok(p) => p,
             Err(_) => return false,
         };
@@ -400,7 +400,7 @@ esac"#,
             .filter(|p| !p.is_empty()) // Skip empty entries
             .map(Path::new)
             .filter(|p| p.is_dir()) // Only consider existing directories
-            .filter_map(|p| p.canonicalize().ok()) // Only consider paths we can canonicalize
+            .filter_map(|p| canonicalize(p).ok()) // Only consider paths we can canonicalize
             .any(|candidate_path| candidate_path == target_path)
     }
 }
