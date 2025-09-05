@@ -166,7 +166,6 @@ fn print_welcome_message(app: App) {
         "Bash"
     };
 
-    // ASCII art for ZV
     println!(
         "{}",
         Paint::yellow(&format!(
@@ -175,8 +174,8 @@ fn print_welcome_message(app: App) {
 ╚══███╔╝██║   ██║    Platform: {platform}
   ███╔╝ ██║   ██║    OS: {os}
  ███╔╝  ██║   ██║    ZV directory: {zv_dir}
-███████╗╚██████╔╝    Shell: {shell}
-╚══════╝ ╚═════╝     {profile}
+███████╗╚████╔╝█     Shell: {shell}
+╚══════╝  ╚══╝       {profile}
     "#,
             zv_dir = app.path().display(),
             shell = app.shell.as_ref().map_or(Shell::detect(), |s| *s),
