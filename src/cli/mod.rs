@@ -99,7 +99,12 @@ pub enum Commands {
     /// Setup shell environment for zv (required to make zig binaries available in $PATH)
     Setup {
         /// Show what would be changed without making any modifications
-        #[arg(long, help = "Preview changes without applying them")]
+        #[arg(
+            long,
+            alias = "dry",
+            short = 'd',
+            help = "Preview changes without applying them"
+        )]
         dry_run: bool,
     },
 

@@ -106,9 +106,8 @@ impl Shell {
     }
 
     /// Returns the env file path and content without writing to disk
-    pub fn export_without_dump(&self, zv_dir: &Path, using_env_var: bool) -> (PathBuf, String) {
+    pub fn export_without_dump(&self, zv_dir: &Path, bin_path: &Path, using_env_var: bool) -> (PathBuf, String) {
         let env_file = zv_dir.join(self.env_file_name());
-        let bin_path = zv_dir.join("bin"); // The actual bin directory to add to PATH
         
         // Use ${HOME}/.zv when using default path, otherwise use absolute path
         let (zv_dir_str, zv_bin_path_str) = if using_env_var {
@@ -216,12 +215,12 @@ esac"#,
     }
     /// Dumps shell specific environment variables to the env file, overwriting if read errors
     /// For CMD and PowerShell, this method does not write to disk as system variables are edited directly
-    pub async fn export(&self, zv_dir: &Path, using_env_var: bool) -> Result<(), ZvError> {
+    pub async fn export(&self, zv_dir: &Path, bin_path: &Path, using_env_var: bool) -> Result<(), ZvError> {
         if matches!(self, Shell::Cmd | Shell::PowerShell) {
             return Ok(());
         }
 
-        let (env_file, content) = self.export_without_dump(zv_dir, using_env_var);
+        let (env_file, content) = self.export_without_dump(zv_dir, bin_path, using_env_var);
 
         // Check if content already exists in file
         let dump_true = if env_file.exists() {

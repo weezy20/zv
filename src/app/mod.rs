@@ -114,6 +114,11 @@ impl App {
         &self.zv_base_path
     }
 
+    /// Get the app's bin path
+    pub fn bin_path(&self) -> &PathBuf {
+        &self.bin_path
+    }
+
     /// Path to zv zig binary
     pub fn zv_zig(&self) -> Option<PathBuf> {
         self.zig.clone()
