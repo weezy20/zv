@@ -1,7 +1,7 @@
 use color_eyre::eyre::eyre;
 use std::path::{Path, PathBuf};
+use sysinfo::{Pid, Process, System};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
-use sysinfo::{Process, System, Pid};
 
 use crate::ZvError;
 
@@ -9,16 +9,16 @@ use crate::ZvError;
 fn get_parent_process_name() -> Option<String> {
     let mut system = System::new();
     system.refresh_processes_specifics(
-        sysinfo::ProcessesToUpdate::All, 
+        sysinfo::ProcessesToUpdate::All,
         true,
-        sysinfo::ProcessRefreshKind::everything()
+        sysinfo::ProcessRefreshKind::everything(),
     );
-    
+
     let current_pid = sysinfo::get_current_pid().ok()?;
     let current_process = system.process(current_pid)?;
     let parent_pid = current_process.parent()?;
     let parent_process = system.process(parent_pid)?;
-    
+
     Some(parent_process.name().to_string_lossy().to_string())
 }
 
@@ -31,7 +31,7 @@ fn is_tty() -> bool {
 fn detect_shell_from_parent() -> Option<Shell> {
     let parent_name = get_parent_process_name()?;
     let parent_lower = parent_name.to_lowercase();
-    
+
     if parent_lower.contains("bash") {
         Some(Shell::Bash)
     } else if parent_lower.contains("zsh") {
@@ -74,32 +74,41 @@ impl Shell {
             }
         }
 
-        // Fall back to environment variable detection
-        if let Ok(shell) = std::env::var("SHELL") {
+        // Closure to detect shell from SHELL environment variable
+        let detect_from_shell_env = || -> Option<Shell> {
+            let shell = std::env::var("SHELL").ok()?;
             if shell.contains("bash") {
-                return Shell::Bash;
+                Some(Shell::Bash)
             } else if shell.contains("zsh") {
-                return Shell::Zsh;
+                Some(Shell::Zsh)
             } else if shell.contains("fish") {
-                return Shell::Fish;
+                Some(Shell::Fish)
             } else if shell.contains("tcsh") || shell.contains("csh") {
-                return Shell::Tcsh;
+                Some(Shell::Tcsh)
             } else if shell.contains("nu") {
-                return Shell::Nu;
+                Some(Shell::Nu)
             } else if shell.contains("sh") && !shell.contains("bash") && !shell.contains("zsh") {
-                return Shell::Posix;
+                Some(Shell::Posix)
+            } else {
+                None
             }
+        };
+
+        // Fall back to environment variable detection
+        if let Some(shell) = detect_from_shell_env() {
+            return shell;
         }
 
         // Windows shell detection (powershell/cmd prompt)
         if cfg!(windows) {
             // Check for PowerShell first using multiple indicators
-            if std::env::var("PSModulePath").is_ok() 
+            if std::env::var("PSModulePath").is_ok()
                 || std::env::var("POWERSHELL_DISTRIBUTION_CHANNEL").is_ok()
-                || std::env::var("PSVersionTable").is_ok() {
+                || std::env::var("PSVersionTable").is_ok()
+            {
                 return Shell::PowerShell;
             }
-            
+
             // Check for Windows Terminal and infer shell from other env vars
             if let Ok(wt_session) = std::env::var("WT_SESSION") {
                 if !wt_session.is_empty() {
@@ -109,23 +118,19 @@ impl Shell {
                     }
                 }
             }
-            
+
             // Check COMSPEC for CMD
             if let Ok(comspec) = std::env::var("COMSPEC") {
                 if comspec.to_lowercase().contains("cmd") {
                     return Shell::Cmd;
                 }
             }
-            
+
             // Check if we're running under WSL or similar (Unix shells on Windows)
             if std::env::var("WSL_DISTRO_NAME").is_ok() || std::env::var("WSL_INTEROP").is_ok() {
                 // In WSL, fall back to SHELL variable detection which should work
-                if let Ok(shell) = std::env::var("SHELL") {
-                    if shell.contains("bash") {
-                        return Shell::Bash;
-                    } else if shell.contains("zsh") {
-                        return Shell::Zsh;
-                    }
+                if let Some(shell) = detect_from_shell_env() {
+                    return shell;
                 }
                 return Shell::Bash; // Default for WSL
             }
