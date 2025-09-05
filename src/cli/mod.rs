@@ -167,11 +167,15 @@ fn print_welcome_message(app: App) {
   ███╔╝ ██║   ██║    OS: {os}
  ███╔╝  ██║   ██║    ZV directory: {zv_dir}
 ███████╗╚██████╔╝    Shell: {shell}
-╚══════╝ ╚═════╝     Profile: {profile}
+╚══════╝ ╚═════╝     {profile}
     "#,
             zv_dir = app.path().display(),
             shell = app.shell.as_ref().map_or(Shell::detect(), |s| *s),
-            profile = std::env::var("PROFILE").unwrap_or_else(|_| "Not set".to_string())
+            profile = if let Some(profile) = std::env::var("PROFILE").ok() && !profile.is_empty() {
+                format!("Profile: {profile}")
+            } else {
+                String::new()
+            }
         ))
     );
 
