@@ -111,10 +111,14 @@ impl Commands {
                     return init::init_project(
                         Template::new(
                             project_name,
-                            TemplateType::Zig(
-                                app.zv_zig()
-                                    .ok_or_else(|| eyre!("No Zig executable found"))?,
-                            ),
+                            TemplateType::Zig(app.zv_zig().ok_or_else(|| {
+                                tools::error(
+                                    "Cannot use `zig init` for template instantiation."
+                                );
+                                println!("● You can install a compatible Zig version with {}.", Paint::green("zv use <version>").italic());
+                                println!("● Also make sure you've run {} to set up your shell environment.", Paint::green("zv setup").italic());
+                                eyre!("No Zig executable found")
+                            })?),
                         ),
                         &app,
                     );
@@ -192,20 +196,38 @@ fn print_welcome_message(app: App) {
 
     println!();
 
-        // Help section
-        println!("{}", Paint::cyan("Usage: zv.exe [COMMAND]"));
-        println!();
-        println!("{}", Paint::yellow("Commands:").bold());
-        
-        let print_command = |cmd: &str, desc: &str| {
-            println!("\t{:<12}\t{}", Paint::green(cmd), desc);
-        };
-        
-        print_command("init", "Initialize a new Zig project from lean or standard zig template");
-        print_command("use", "Select which Zig version to use - master | latest | stable | <semver>");
-        print_command("list  | ls", "List installed Zig versions");
-        print_command("clean | rm", "Clean up Zig installations. Non-zv managed installations will not be affected");
-        print_command("setup", "Setup shell environment for zv (required to make zig binaries available in $PATH)");
-        print_command("sync", "Synchronize index, mirrors list and metadata for zv");
-        print_command("help", "Print this message or the help of the given subcommand(s)");
+    // Help section
+    println!("{}", Paint::cyan("Usage: zv.exe [COMMAND]"));
+    println!();
+    println!("{}", Paint::yellow("Commands:").bold());
+
+    let print_command = |cmd: &str, desc: &str| {
+        println!("\t{:<12}\t{}", Paint::green(cmd), desc);
+    };
+
+    print_command(
+        "init",
+        "Initialize a new Zig project from lean or standard zig template",
+    );
+    print_command(
+        "use",
+        "Select which Zig version to use - master | latest | stable | <semver>",
+    );
+    print_command("list  | ls", "List installed Zig versions");
+    print_command(
+        "clean | rm",
+        "Clean up Zig installations. Non-zv managed installations will not be affected",
+    );
+    print_command(
+        "setup",
+        "Setup shell environment for zv (required to make zig binaries available in $PATH)",
+    );
+    print_command(
+        "sync",
+        "Synchronize index, mirrors list and metadata for zv",
+    );
+    print_command(
+        "help",
+        "Print this message or the help of the given subcommand(s)",
+    );
 }

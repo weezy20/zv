@@ -17,10 +17,18 @@ async fn main() -> Result<()> {
     check_recursion()?;
 
     yansi::whenever(yansi::Condition::TTY_AND_COLOR);
+
     if yansi::is_enabled() {
-        color_eyre::install()?;
+        HookBuilder::default()
+            .display_env_section(cfg!(debug_assertions))
+            .display_location_section(cfg!(debug_assertions))
+            .install()?;
     } else {
-        HookBuilder::default().theme(Theme::new()).install()?;
+        HookBuilder::default()
+            .theme(Theme::new())
+            .display_env_section(cfg!(debug_assertions))
+            .display_location_section(cfg!(debug_assertions))
+            .install()?;
     }
 
     #[cfg(feature = "dotenv")]

@@ -88,15 +88,17 @@ pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
 }
 
 /// Print a warning message in yellow if stderr is a TTY
+#[inline]
 pub fn warn(message: impl Into<Cow<'static, str>>) {
     let msg = message.into();
-    eprintln!("{}: {}", "Warning".yellow().bold(), msg.bright_yellow());
+    eprintln!("{}: {}", "Warning".yellow().bold(), msg);
 }
 
 /// Print an error message in red if stderr is a TTY
+#[inline]
 pub fn error(message: impl Into<Cow<'static, str>>) {
     let msg = message.into();
-    eprintln!("{}: {}", "Error".red().bold(), msg.bright_red());
+    eprintln!("{}: {}", "Error".red().bold(), msg);
 }
 
 /// Get the zig tarball name based on HOST arch-os
