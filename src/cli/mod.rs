@@ -15,51 +15,13 @@ pub use zls::zls_main;
 pub async fn zv_main() -> super::Result<()> {
     let zv_cli = <ZvCli as clap::Parser>::parse();
     let (zv_dir, using_env) = tools::fetch_zv_dir()?;
-
+    if using_env {
+        tracing::info!("Using ZV_DIR from environment: {}", zv_dir.display());
+    }
     // TODO: Allow force flags to skip prompts in ZvCli
     // let allow_shell = zv_cli.allow_shell || zv_cli.force;
     // let force = zv_cli.force;
     // let g = Genie { allow_shell, force };
-
-    // Init ZV_DIR
-    match zv_dir.try_exists() {
-        Ok(true) => {
-            if !zv_dir.is_dir() {
-                tools::error(format!(
-                    "zv directory exists but is not a directory: {}. Please check ZV_DIR env var. Aborting...",
-                    zv_dir.display()
-                ));
-                std::process::exit(1);
-            }
-        }
-        Ok(false) => {
-            if using_env {
-                std::fs::create_dir_all(&zv_dir)
-                    .map_err(ZvError::Io)
-                    .wrap_err_with(|| {
-                        format!(
-                            "Error creating ZV_DIR from env var ZV_DIR={}",
-                            std::env::var("ZV_DIR").expect("Handled in zv_fetch_dir()")
-                        )
-                    })?;
-            } else {
-                // Using fallback path $HOME/.zv (or $CWD/.zv in rare fallback)
-                std::fs::create_dir(&zv_dir)
-                    .map_err(ZvError::Io)
-                    .wrap_err_with(|| {
-                        format!("Failed to create default .zv at {}", zv_dir.display())
-                    })?;
-            }
-        }
-        Err(e) => {
-            tools::error(format!(
-                "Failed to check zv directory at {:?}",
-                zv_dir.display(),
-            ));
-            return Err(ZvError::Io(e).into());
-        }
-    };
-    let zv_dir = std::fs::canonicalize(&zv_dir).map_err(ZvError::Io)?;
 
     let app = App::init(UserConfig {
         path: zv_dir,
@@ -176,42 +138,23 @@ impl Commands {
             Commands::Use { version, path } => {
                 match (version, path) {
                     (Some(version), None) => r#use::use_version(version, &mut app).await,
-                    (None, Some(path)) => {
-                        // --path without version means use system Zig at that path
-                        let system_version = ZigVersion::System {
-                            version: None,
-                            path: Some(path),
-                        };
-                        r#use::use_version(system_version, &mut app).await
+                    (None, Some(_path)) => {
+                        eprintln!(
+                            "{}",
+                            Paint::red("Error: --path option is no longer supported. System Zig handling has been simplified.")
+                        );
+                        std::process::exit(1);
                     }
                     (None, None) => {
                         eprintln!("{}", Paint::red("Error: Version must be specified"));
                         std::process::exit(1);
                     }
-                    (Some(version), Some(path)) => {
-                        // Only allow --path with System variants
-                        match &version {
-                            ZigVersion::System { .. } => {
-                                // Create a new System version with the provided path
-                                let system_version_with_path = match &version {
-                                    ZigVersion::System { version: v, .. } => ZigVersion::System {
-                                        version: v.clone(),
-                                        path: Some(path),
-                                    },
-                                    _ => unreachable!(), // We already matched System above
-                                };
-                                r#use::use_version(system_version_with_path, &mut app).await
-                            }
-                            _ => {
-                                eprintln!(
-                                    "{}",
-                                    Paint::red(
-                                        "Error: --path can only be used with system versions (e.g., 'system' or 'system@0.14.0')"
-                                    )
-                                );
-                                std::process::exit(1);
-                            }
-                        }
+                    (Some(_version), Some(_path)) => {
+                        eprintln!(
+                            "{}",
+                            Paint::red("Error: --path option is no longer supported. System Zig handling has been simplified.")
+                        );
+                        std::process::exit(1);
                     }
                 }
             }

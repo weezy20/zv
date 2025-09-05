@@ -1,25 +1,10 @@
-use crate::ZigVersion;
-use color_eyre::{Result, eyre::eyre};
+use crate::{ZigVersion, ZvError};
+use color_eyre::{Context as _, Result, eyre::WrapErr, eyre::eyre};
 use std::{borrow::Cow, path::PathBuf};
 use yansi::Paint;
 
-/// Return PATH to the default fallback zv directory which is $HOME/.zv
-fn get_default_zv_dir() -> Result<PathBuf> {
-    dirs::home_dir()
-        .map(|home| home.join(".zv"))
-        .or_else(|| {
-            warn("Unable to locate home directory, falling back to current working directory");
-            warn("zv may not be able to resume from expected state next time as current-working-dir is an ephemeral location");
-            std::env::current_dir().ok().map(|cwd| cwd.join(".zv"))
-        })
-        .ok_or_else(|| {
-            eyre!(
-                "Unable to locate home directory or current working directory.\
-                Please set `ZV_DIR` to use zv. If you think this is a bug please open an issue at <https://github.com/weezy20/zv/issues>"
-            )
-        })
-}
 /// Fetch the zv directory PATH set using env var or fallback PATH ($HOME/.zv -> $CWD/.zv)
+/// This function also handles the initialization and creation of the ZV_DIR if it doesn't exist
 pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
     let zv_dir_env = match std::env::var("ZV_DIR") {
         Ok(dir) if !dir.is_empty() => Some(dir),
@@ -34,11 +19,68 @@ pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
             }
         },
     };
-    Ok(if let Some(zv_dir) = zv_dir_env {
+
+    let (zv_dir, using_env) = if let Some(zv_dir) = zv_dir_env {
         (PathBuf::from(zv_dir), true /* using-env true */)
     } else {
-        (get_default_zv_dir()?, false /* Using fallback path */)
-    })
+        (
+            ({
+                dirs::home_dir()
+                    .map(|home| home.join(".zv"))
+                    .ok_or_else(|| {
+                        eyre!(
+                            "Unable to locate home directory.\
+                            Please set `ZV_DIR` to use zv. If you think this is a bug please open an issue at <https://github.com/weezy20/zv/issues>"
+                        )
+                    })
+            })?,
+            false, /* Using fallback path */
+        )
+    };
+
+    // Init ZV_DIR - create it if it doesn't exist
+    match zv_dir.try_exists() {
+        Ok(true) => {
+            if !zv_dir.is_dir() {
+                error(format!(
+                    "zv directory exists but is not a directory: {}. Please check ZV_DIR env var. Aborting...",
+                    zv_dir.display()
+                ));
+                std::process::exit(1);
+            }
+        }
+        Ok(false) => {
+            if using_env {
+                std::fs::create_dir_all(&zv_dir)
+                    .map_err(ZvError::Io)
+                    .wrap_err_with(|| {
+                        format!(
+                            "Error creating ZV_DIR from env var ZV_DIR={}",
+                            std::env::var("ZV_DIR").expect("Handled in fetch_zv_dir()")
+                        )
+                    })?;
+            } else {
+                // Using fallback path $HOME/.zv (or $CWD/.zv in rare fallback)
+                std::fs::create_dir(&zv_dir)
+                    .map_err(ZvError::Io)
+                    .wrap_err_with(|| {
+                        format!("Failed to create default .zv at {}", zv_dir.display())
+                    })?;
+            }
+        }
+        Err(e) => {
+            error(format!(
+                "Failed to check zv directory at {:?}",
+                zv_dir.display(),
+            ));
+            return Err(ZvError::Io(e).into());
+        }
+    };
+
+    // Canonicalize the path before returning
+    let zv_dir = std::fs::canonicalize(&zv_dir).map_err(ZvError::Io)?;
+
+    Ok((zv_dir, using_env))
 }
 
 /// Print a warning message in yellow if stderr is a TTY
@@ -61,13 +103,12 @@ pub fn sys_info() -> String {
 /// Get the zig tarball name based on HOST arch-os
 pub fn zig_tarball(version: ZigVersion) -> Option<String> {
     use target_lexicon::HOST;
-    // Return None for Unknown and System variants
+    // Return None for Unknown variant
     let semver_version = match version {
         ZigVersion::Semver(v) => v,
         ZigVersion::Master(v) => v,
         ZigVersion::Stable(v) => v,
         ZigVersion::Latest(v) => v,
-        ZigVersion::System { .. } => return None,
         ZigVersion::Unknown => return None,
     };
 
