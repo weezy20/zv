@@ -4,9 +4,9 @@ use color_eyre::eyre::{Context as _, eyre};
 use yansi::Paint;
 mod init;
 mod list;
+mod setup;
 mod sync;
 mod r#use;
-mod setup;
 mod zig;
 mod zls;
 
@@ -144,9 +144,7 @@ impl Commands {
             },
             Commands::List => todo!(),
             Commands::Clean { version: _version } => todo!(),
-            Commands::Setup { dry_run } => {
-                setup::setup_shell(&mut app, using_env, dry_run).await
-            },
+            Commands::Setup { dry_run } => setup::setup_shell(&mut app, using_env, dry_run).await,
             Commands::Sync => todo!(),
         }
     }
@@ -198,7 +196,11 @@ fn print_welcome_message(app: App) {
         "Current active Zig: {}{opt}",
         Paint::yellow(&active_zig.map_or_else(|| "none".to_string(), |v| v.to_string())),
         opt = if active_zig.is_none() {
-            " (use zv use <version> to set one | or run zv setup)"
+            &format!(
+                " (use {} to set one | or run {})",
+                Paint::blue("zv use <version>"),
+                Paint::blue("zv setup")
+            )
         } else {
             ""
         }
