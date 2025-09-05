@@ -192,33 +192,20 @@ fn print_welcome_message(app: App) {
 
     println!();
 
-    // Help section
-    println!("{}", Paint::cyan("Usage: zv.exe [COMMAND]"));
-    println!();
-    println!("{}", Paint::yellow("Commands:").bold());
-    println!(
-        "\t{}\tInitialize a new Zig project from lean or standard zig template",
-        Paint::blue("init")
-    );
-    println!(
-        "\t{}\tSelect which Zig version to use - master | latest | stable | <semver>",
-        Paint::blue("use")
-    );
-    println!("\t{}\tList installed Zig versions", Paint::blue("list"));
-    println!(
-        "\t{}\tClean up Zig installations. Non-zv managed installations will not be affected",
-        Paint::blue("clean")
-    );
-    println!(
-        "\t{}\tSetup shell environment for zv (required to make zig binaries available in $PATH)",
-        Paint::blue("setup")
-    );
-    println!(
-        "\t{}\tSynchronize index, mirrors list and metadata for zv",
-        Paint::blue("sync")
-    );
-    println!(
-        "\t{}\tPrint this message or the help of the given subcommand(s)",
-        Paint::blue("help")
-    );
+        // Help section
+        println!("{}", Paint::cyan("Usage: zv.exe [COMMAND]"));
+        println!();
+        println!("{}", Paint::yellow("Commands:").bold());
+        
+        let print_command = |cmd: &str, desc: &str| {
+            println!("\t{:<12}\t{}", Paint::green(cmd), desc);
+        };
+        
+        print_command("init", "Initialize a new Zig project from lean or standard zig template");
+        print_command("use", "Select which Zig version to use - master | latest | stable | <semver>");
+        print_command("list  | ls", "List installed Zig versions");
+        print_command("clean | rm", "Clean up Zig installations. Non-zv managed installations will not be affected");
+        print_command("setup", "Setup shell environment for zv (required to make zig binaries available in $PATH)");
+        print_command("sync", "Synchronize index, mirrors list and metadata for zv");
+        print_command("help", "Print this message or the help of the given subcommand(s)");
 }
