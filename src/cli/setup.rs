@@ -1,10 +1,12 @@
 use color_eyre::eyre::{Context as _, eyre};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::io::Read;
 use yansi::Paint;
 
 use crate::{App, Shell, suggest, tools};
-use crate::tools::canonicalize;
+use crate::tools::{canonicalize, calculate_file_hash, files_have_same_hash};
 
 /// Check if we're using a custom ZV_DIR (not the default $HOME/.zv) and warn the user
 fn check_custom_zv_dir_warning(app: &App, using_env_var: bool) -> crate::Result<bool> {
@@ -89,16 +91,41 @@ pub async fn pre_setup_checks(
     // Check if bin path is already in system PATH - this is the most important check
     let path_already_in_system = shell.check_path_in_system(&bin_path);
 
-    // If bin path is already in PATH, we're essentially done
-    if path_already_in_system {
+    // Check if the zv binary in bin path is up to date (hash comparison)
+    let current_exe = std::env::current_exe()
+        .map_err(|e| eyre!("Failed to get current executable path: {}", e))?;
+    
+    let target_exe = if cfg!(windows) {
+        app.bin_path().join("zv.exe")
+    } else {
+        app.bin_path().join("zv")
+    };
+
+    let binary_up_to_date = if target_exe.exists() {
+        match files_have_same_hash(&current_exe, &target_exe) {
+            Ok(same) => same,
+            Err(_) => false, // If we can't compare, assume it needs updating
+        }
+    } else {
+        false // Binary doesn't exist, needs copying
+    };
+
+    // If bin path is already in PATH and binary is up to date, we're essentially done
+    if path_already_in_system && binary_up_to_date {
         println!("{}", Paint::green("✓ zv is already configured"));
         println!(
             "  • {} is already in PATH",
             Paint::green(&bin_path.display().to_string())
         );
+        println!(
+            "  • {} is up to date",
+            Paint::green(&target_exe.display().to_string())
+        );
         println!();
-        println!("No setup action needed. You can start using zv!");
-        return Ok(false); // No setup needed
+        
+        // Still check if shims need regeneration
+        println!("Checking if shim regeneration is needed...");
+        return Ok(false); // No setup needed, but post-setup will be checked separately
     }
 
     // Check for custom ZV_DIR and warn user if needed (only if setup is actually needed)
@@ -138,6 +165,23 @@ pub async fn pre_setup_checks(
         "  ✗ {} is not in PATH",
         Paint::red(&bin_path.display().to_string())
     );
+
+    if binary_up_to_date {
+        println!(
+            "  ✓ {} is up to date",
+            Paint::green(&target_exe.display().to_string())
+        );
+    } else if target_exe.exists() {
+        println!(
+            "  ✗ {} exists but is outdated (hash mismatch)",
+            Paint::red(&target_exe.display().to_string())
+        );
+    } else {
+        println!(
+            "  ✗ {} does not exist",
+            Paint::red(&target_exe.display().to_string())
+        );
+    }
 
     if using_env_var {
         if zv_dir_set {
@@ -193,6 +237,133 @@ async fn check_shell_rc_files_configured(shell: &Shell, zv_dir: &Path) -> bool {
     false
 }
 
+/// Copy the current zv binary to the bin directory if needed
+async fn copy_zv_binary_if_needed(app: &App, dry_run: bool) -> crate::Result<()> {
+    let current_exe = std::env::current_exe()
+        .map_err(|e| eyre!("Failed to get current executable path: {}", e))?;
+    
+    let target_exe = if cfg!(windows) {
+        app.bin_path().join("zv.exe")
+    } else {
+        app.bin_path().join("zv")
+    };
+
+    // Check if target exists and compare hashes
+    if target_exe.exists() {
+        match files_have_same_hash(&current_exe, &target_exe) {
+            Ok(true) => {
+                println!("  ✓ zv binary is up to date in bin directory");
+                return Ok(());
+            }
+            Ok(false) => {
+                if dry_run {
+                    println!("  {} zv binary in bin directory (hash mismatch)", Paint::yellow("Would update"));
+                } else {
+                    println!("  • Updating zv binary in bin directory (hash mismatch)");
+                }
+            }
+            Err(e) => {
+                println!("  • {} hash comparison: {}, will copy anyway", Paint::yellow("Warning"), e);
+            }
+        }
+    } else {
+        if dry_run {
+            println!("  {} zv binary to bin directory", Paint::yellow("Would copy"));
+        } else {
+            println!("  • Copying zv binary to bin directory");
+        }
+    }
+
+    if !dry_run {
+        // Create bin directory if it doesn't exist
+        tokio::fs::create_dir_all(app.bin_path())
+            .await
+            .map_err(|e| eyre!("Failed to create bin directory: {}", e))?;
+
+        // Copy the current executable to the target location
+        tokio::fs::copy(&current_exe, &target_exe)
+            .await
+            .map_err(|e| eyre!("Failed to copy zv binary to bin directory: {}", e))?;
+
+        println!("    {} Copied {} to {}", 
+            Paint::green("✓"), 
+            current_exe.display(), 
+            target_exe.display()
+        );
+    }
+
+    Ok(())
+}
+
+/// Regenerate hardlinks/shims for zig and zls if they exist and config is available
+async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crate::Result<()> {
+    let zig_shim = if cfg!(windows) {
+        app.bin_path().join("zig.exe")
+    } else {
+        app.bin_path().join("zig")
+    };
+
+    let zls_shim = if cfg!(windows) {
+        app.bin_path().join("zls.exe")
+    } else {
+        app.bin_path().join("zls")
+    };
+
+    let has_zig_shim = zig_shim.exists();
+    let has_zls_shim = zls_shim.exists();
+
+    if !has_zig_shim && !has_zls_shim {
+        println!("  • No zig/zls shims found - nothing to regenerate");
+        return Ok(());
+    }
+
+    // Check if config.toml exists
+    let config_path = app.path().join("config.toml");
+    if !config_path.exists() {
+        if has_zig_shim || has_zls_shim {
+            println!("  {} config.toml not found - cannot regenerate shims", Paint::yellow("⚠"));
+            println!("    Consider running 'zv use <version>' to set up configuration");
+        }
+        return Ok(());
+    }
+
+    if dry_run {
+        if has_zig_shim {
+            println!("  {} zig shim based on config.toml", Paint::yellow("Would regenerate"));
+        }
+        if has_zls_shim {
+            println!("  {} zls shim based on config.toml", Paint::yellow("Would regenerate"));
+        }
+    } else {
+        // TODO: Implement actual shim regeneration based on config.toml reading
+        // For now, just notify the user
+        if has_zig_shim || has_zls_shim {
+            println!("  {} Shim regeneration based on config.toml", Paint::yellow("TODO"));
+            println!("    This feature will be implemented to read config.toml and regenerate hardlinks");
+            suggest!("Run {} to ensure shims are properly configured", cmd = "zv use <version>");
+        }
+    }
+
+    Ok(())
+}
+
+/// Perform post-setup actions: copy zv binary and regenerate shims
+async fn post_setup_actions(app: &App, dry_run: bool) -> crate::Result<()> {
+    if dry_run {
+        println!("\n{} post-setup actions:", Paint::yellow("Would perform"));
+    } else {
+        println!("\nPerforming post-setup actions:");
+    }
+
+    // Copy zv binary to bin directory if needed
+    copy_zv_binary_if_needed(app, dry_run).await?;
+
+    // Regenerate shims if needed
+    regenerate_shims_if_needed(app, dry_run).await?;
+
+    Ok(())
+}
+
 pub async fn setup_shell(app: &mut App, using_env_var: bool, dry_run: bool) -> crate::Result<()> {
     if app.source_set {
         println!(
@@ -208,6 +379,8 @@ pub async fn setup_shell(app: &mut App, using_env_var: bool, dry_run: bool) -> c
     if !dry_run {
         let setup_needed = pre_setup_checks(app, &shell, using_env_var).await?;
         if !setup_needed {
+            // Even if setup is not needed, we still need to check post-setup actions
+            post_setup_actions(app, dry_run).await?;
             return Ok(());
         }
     }
@@ -230,6 +403,9 @@ pub async fn setup_shell(app: &mut App, using_env_var: bool, dry_run: bool) -> c
     } else {
         setup_unix_environment(app, &shell, using_env_var, dry_run).await?;
     }
+
+    // Perform post-setup actions: copy zv binary and regenerate shims
+    post_setup_actions(app, dry_run).await?;
 
     Ok(())
 }

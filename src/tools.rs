@@ -182,6 +182,40 @@ pub fn zig_tarball(version: ZigVersion) -> Option<String> {
     Some(format!("zig-{os}-{arch}-{semver_version}.{ext}"))
 }
 
+/// Calculate CRC32 hash of a file
+pub fn calculate_file_hash(path: &Path) -> Result<u32> {
+    use crc32fast::Hasher;
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)
+        .wrap_err_with(|| format!("Failed to open file for hashing: {}", path.display()))?;
+
+    let mut hasher = Hasher::new();
+    let mut buffer = [0; 8192]; // 8KB buffer
+
+    loop {
+        let bytes_read = file.read(&mut buffer)
+            .wrap_err_with(|| format!("Failed to read file for hashing: {}", path.display()))?;
+        
+        if bytes_read == 0 {
+            break;
+        }
+        
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    Ok(hasher.finalize())
+}
+
+/// Compare file hashes to determine if files are identical
+pub fn files_have_same_hash(path1: &Path, path2: &Path) -> Result<bool> {
+    if !path1.exists() || !path2.exists() {
+        return Ok(false);
+    }
+
+    Ok(calculate_file_hash(path1)? == calculate_file_hash(path2)?)   
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
