@@ -229,7 +229,7 @@ impl Template {
 
         // Get the zig path from the app
         let zig_path = app
-            .zv_zig_or_system()
+            .zv_zig()
             .ok_or_else(|| ZvError::TemplateError(eyre!("No zig executable found")))?;
 
         let output = app

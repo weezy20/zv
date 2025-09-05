@@ -11,7 +11,7 @@ pub(crate) async fn use_version(version: ZigVersion, app: &mut App) -> Result<()
         Paint::blue("Using Zig version:").bold(),
         version
     );
-    let set_zig_version = app.set_zig_version(version).await?;
+    let set_zig_version = app.set_active_version(version).await?;
     println!(
         "{} {:#?}",
         Paint::green("✓ Set Zig version to:").bold(),

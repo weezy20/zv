@@ -40,7 +40,8 @@ toml_edit = "0.23.4"
 thiserror = "2.0.16"
 ahash = "0.8.12"
 walkdir = "2.5.0"
-which = "8.0.0"
+# which = "8.0.0"
+same-file = "1.0.6"
 
 [target."cfg(windows)".dependencies]
 windows-registry = "0.5.0"

@@ -1,140 +1,126 @@
+use same_file::Handle;
 use std::path::{Path, PathBuf};
 
-/// Windows-specific function to check if two paths refer to the same file using metadata
-/// This reliably detects hard links by comparing file_index and volume_serial_number
-#[cfg(target_os = "windows")]
-pub fn same_file_win(a: &Path, b: &Path) -> bool {
-    // Unfortunately, file_index() and volume_serial_number() are unstable features
-    // So we'll use the canonical path comparison and basic metadata for now
-    if let (Ok(canon_a), Ok(canon_b)) = (a.canonicalize(), b.canonicalize()) {
-        if canon_a == canon_b {
+/// Enum representing the type of shim to detect
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shim {
+    Zig,
+    Zls,
+}
+
+impl Shim {
+    /// Returns the executable name for this shim
+    fn executable_name(&self) -> &'static str {
+        match self {
+            Shim::Zig => {
+                if cfg!(target_os = "windows") {
+                    "zig.exe"
+                } else {
+                    "zig"
+                }
+            }
+            Shim::Zls => {
+                if cfg!(target_os = "windows") {
+                    "zls.exe"
+                } else {
+                    "zls"
+                }
+            }
+        }
+    }
+}
+
+/// Checks if a file is a valid zv shim by comparing it with the current executable
+fn is_zv_shim(shim_path: &Path, current_exe_handle: &Handle) -> bool {
+    // First check for hard links using same-file crate
+    if let Ok(shim_handle) = Handle::from_path(shim_path) {
+        if shim_handle == *current_exe_handle {
+            tracing::debug!("Found ZV shim (hard link) at {:?}", shim_path);
             return true;
         }
     }
-    
-    // Fallback: compare basic metadata (size, times) for hard link detection
-    if let (Ok(ma), Ok(mb)) = (std::fs::metadata(a), std::fs::metadata(b)) {
-        ma.len() == mb.len()
-            && ma.created().ok() == mb.created().ok()
-            && ma.modified().ok() == mb.modified().ok()
-    } else {
-        false
-    }
-}
 
-/// Cross-platform function to check if two paths refer to the same file
-/// On Unix, uses inode comparison. On Windows, uses file_index + volume_serial_number
-pub fn is_same_file(a: &Path, b: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        
-        if let (Ok(ma), Ok(mb)) = (std::fs::metadata(a), std::fs::metadata(b)) {
-            ma.dev() == mb.dev() && ma.ino() == mb.ino()
-        } else {
-            false
+    // Check for symlinks
+    if shim_path.is_symlink() {
+        if let Ok(target) = std::fs::read_link(shim_path) {
+            // Handle both absolute and relative symlink targets
+            let resolved_target = if target.is_absolute() {
+                target.canonicalize()
+            } else {
+                // For relative symlinks, resolve relative to the symlink's parent directory
+                if let Some(parent) = shim_path.parent() {
+                    parent.join(&target).canonicalize()
+                } else {
+                    target.canonicalize()
+                }
+            };
+
+            if let Ok(resolved_target) = resolved_target {
+                // Compare the resolved target with current exe using same-file
+                if let Ok(target_handle) = Handle::from_path(&resolved_target) {
+                    if target_handle == *current_exe_handle {
+                        tracing::debug!("Found ZV shim (symlink) at {:?}", shim_path);
+                        return true;
+                    }
+                }
+            }
         }
     }
-    
-    #[cfg(target_os = "windows")]
-    {
-        same_file_win(a, b)
-    }
-    
-    #[cfg(not(any(unix, target_os = "windows")))]
-    {
-        // Fallback for other platforms: canonicalize and compare paths
-        if let (Ok(canon_a), Ok(canon_b)) = (a.canonicalize(), b.canonicalize()) {
-            canon_a == canon_b
-        } else {
-            false
-        }
-    }
+
+    false
 }
 
-/// Detect and validate ZV zig shim in the bin directory
-/// Returns the canonicalized path if a valid ZV zig shim is found
-pub fn detect_zig_shim(bin_path: &Path) -> Option<PathBuf> {
-    let zig_file = if cfg!(target_os = "windows") {
-        bin_path.join("zig.exe")
-    } else {
-        bin_path.join("zig")
-    };
+/// Detect and validate ZV shim in the bin directory
+/// Returns the canonicalized path if a valid ZV shim is found
+pub fn detect_shim(bin_path: &Path, shim: Shim) -> Option<PathBuf> {
+    let shim_file = bin_path.join(shim.executable_name());
 
-    if !zig_file.exists() || !zig_file.is_file() {
+    // Basic existence and file type check
+    if !shim_file.exists() || !shim_file.is_file() {
         return None;
     }
 
+    // Get current executable handle for comparison
+    let current_exe_path = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(e) => {
+            tracing::warn!("Failed to get current executable path: {}", e);
+            return None;
+        }
+    };
+
+    let current_exe_handle = match Handle::from_path(&current_exe_path) {
+        Ok(handle) => handle,
+        Err(e) => {
+            tracing::warn!("Failed to create handle for current executable: {}", e);
+            return None;
+        }
+    };
+
     #[cfg(unix)]
     {
-        // On Unix, check if it's executable and if it's our zv binary (hard link/symlink detection)
-        if let Ok(metadata) = std::fs::metadata(&zig_file) {
+        // On Unix, also check if the file is executable
+        if let Ok(metadata) = std::fs::metadata(&shim_file) {
             use std::os::unix::fs::PermissionsExt;
-            if metadata.permissions().mode() & 0o111 != 0 {
-                if let Ok(current_exe) = std::env::current_exe() {
-                    if is_same_file(&zig_file, &current_exe) {
-                        tracing::debug!("Found ZV zig shim (hard link or same inode) at {:?}", zig_file);
-                        return zig_file.canonicalize().ok();
-                    }
-                    // Check if it's a symlink pointing to our binary
-                    else if zig_file.is_symlink() {
-                        if let Ok(target) = std::fs::read_link(&zig_file) {
-                            if let Ok(resolved_target) = target.canonicalize() {
-                                if resolved_target == current_exe {
-                                    tracing::debug!("Found ZV zig shim (symlink) at {:?}", zig_file);
-                                    return zig_file.canonicalize().ok();
-                                }
-                            }
-                        }
-                    }
-                    // If we still haven't found it, but we know it exists and is executable, assume it's our shim
-                    else {
-                        tracing::debug!("Found executable zig in ZV bin dir, assuming it's our shim: {:?}", zig_file);
-                        return zig_file.canonicalize().ok();
-                    }
-                } else {
-                    // Fallback: assume it's our shim if it's executable
-                    return zig_file.canonicalize().ok();
-                }
+            if metadata.permissions().mode() & 0o111 == 0 {
+                tracing::debug!(
+                    "File {} exists but is not executable",
+                    shim.executable_name()
+                );
+                return None;
             }
         }
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        // On Windows, check if zig.exe is actually our zv.exe (hard link detection)
-        if let Ok(current_exe) = std::env::current_exe() {
-            if same_file_win(&zig_file, &current_exe) {
-                tracing::debug!("Found ZV zig shim (hard link or same file) at {:?}", zig_file);
-                return zig_file.canonicalize().ok();
-            }
-            // Check if it's a symlink pointing to our binary
-            else if zig_file.is_symlink() {
-                if let Ok(target) = std::fs::read_link(&zig_file) {
-                    if let Ok(resolved_target) = target.canonicalize() {
-                        if resolved_target == current_exe {
-                            tracing::debug!("Found ZV zig shim (symlink) at {:?}", zig_file);
-                            return zig_file.canonicalize().ok();
-                        }
-                    }
-                }
-            }
-            // If we still haven't found it, but we know it exists in our bin dir, assume it's our shim
-            else {
-                tracing::debug!("Found zig executable in ZV bin dir, assuming it's our shim: {:?}", zig_file);
-                return zig_file.canonicalize().ok();
-            }
-        } else {
-            // Fallback: assume .exe is our shim if it exists and is a file
-            return zig_file.canonicalize().ok();
-        }
+    // Check if this is actually a zv shim
+    if is_zv_shim(&shim_file, &current_exe_handle) {
+        shim_file.canonicalize().ok()
+    } else {
+        tracing::debug!(
+            "File {} exists but is not a zv shim at {:?}",
+            shim.executable_name(),
+            shim_file
+        );
+        None
     }
-
-    #[cfg(not(any(unix, target_os = "windows")))]
-    {
-        // For other platforms, assume executable if file exists
-        return zig_file.canonicalize().ok();
-    }
-
-    None
 }

@@ -13,7 +13,7 @@ use std::process::{Command, Output};
 #[derive(Debug, Default)]
 pub struct App {
     /// <ZV_DIR> - Home for zv
-    path: PathBuf,
+    zv_base_path: PathBuf,
     /// <ZV_DIR>/bin - Binary symlink location
     bin_path: PathBuf,
     /// <ZV_DIR>/bin/zig - Zv managed zig executable if any
@@ -34,52 +34,69 @@ pub struct App {
     /// <ZV_DIR>/bin in $PATH? If not prompt user to run `setup` or add `source <ZV_DIR>/env to their shell profile`
     source_set: bool,
     /// Current detected shell
-    shell: crate::Shell,
+    pub(crate) shell: Option<crate::Shell>,
 }
 
 impl App {
     /// Minimal App path initialization & directory creation
-    pub fn init(UserConfig { path, shell }: UserConfig) -> Result<Self, ZvError> {
+    pub fn init(
+        UserConfig {
+            zv_base_path,
+            shell,
+        }: UserConfig,
+    ) -> Result<Self, ZvError> {
         /* path is canonicalized in tools::fetch_zv_dir() so we don't need to do that here */
-        let bin_path = path.join("bin");
+        let bin_path = zv_base_path.join("bin");
+
         let mut zig = None;
+        let mut zls = None;
+
         if !bin_path.try_exists().unwrap_or_default() {
             std::fs::create_dir_all(&bin_path)
                 .map_err(ZvError::Io)
                 .wrap_err("Creation of bin directory failed")?;
-        } else {
-            // Check for existing ZV zig shim in bin directory
-            zig = utils::detect_zig_shim(&bin_path);
         }
-        let versions_path = path.join("versions");
+
+        // Check for existing ZV zig/zls shims in bin directory
+        zig = utils::detect_shim(&bin_path, utils::Shim::Zig);
+        zls = utils::detect_shim(&bin_path, utils::Shim::Zls);
+
+        let versions_path = zv_base_path.join("versions");
         if !versions_path.try_exists().unwrap_or(false) {
             std::fs::create_dir_all(&versions_path)
                 .map_err(ZvError::Io)
                 .wrap_err("Creation of versions directory failed")?;
         }
 
-        let config_path = path.join("config.toml");
+        let config_path = zv_base_path.join("config.toml");
 
-        // let config = None;
-        let env_path = path.join("env");
+        let config = None;
+
+        #[cfg(unix)]
+        let env_path = zv_base_path.join("env");
 
         let app = App {
-            // network: None,
+            network: None,
             zig,
-            // source_set: shell.check_path_in_system(&bin_path),
-            path,
+            zls,
+            source_set: shell
+                .as_ref()
+                .map_or(false, |s| s.check_path_in_system(&bin_path)),
+            zv_base_path,
             bin_path,
-            // config_path,
-            // env_path,
-            // config,
-            // versions_path,
-            // shell: shell,
+            config_path,
+            #[cfg(unix)]
+            env_path,
+            config,
+            versions_path,
+            shell: shell,
         };
         Ok(app)
     }
+
     /// Set the active Zig version
-    pub async fn set_zig_version(&mut self, version: ZigVersion) -> Result<ZigVersion, ZvError> {
-        println!("App::set_zig_version called with version: {:?}", version);
+    pub async fn set_active_version(&mut self, version: ZigVersion) -> Result<ZigVersion, ZvError> {
+        println!("App::set_active_version called with version: {:?}", version);
         println!("This is a placeholder implementation");
 
         // self.active_version = Some(version.clone());
@@ -94,20 +111,12 @@ impl App {
 
     /// Get the app's base path
     pub fn path(&self) -> &PathBuf {
-        &self.path
+        &self.zv_base_path
     }
 
-    /// Returns first available zig executable, first looking for ZV_DIR/bin or PATH if not set
-    pub fn zv_zig_or_system(&self) -> Option<PathBuf> {
-        if let Some(ref path) = self.zig {
-            return Some(path.to_path_buf());
-        }
-        which::which(if cfg!(target_os = "windows") {
-            "zig.exe"
-        } else {
-            "zig"
-        })
-        .ok()
+    /// Path to zv zig binary
+    pub fn zv_zig(&self) -> Option<PathBuf> {
+        self.zig.clone()
     }
 
     /// Spawn a zig process with recursion guard management

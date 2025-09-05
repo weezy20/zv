@@ -12,6 +12,6 @@ pub use zigversion::*;
 #[derive(Debug, Clone, Default)]
 /// Application configuration provided by frontend
 pub struct UserConfig {
-    pub path: std::path::PathBuf,
-    pub shell: crate::Shell,
+    pub zv_base_path: std::path::PathBuf,
+    pub shell: Option<crate::Shell>,
 }

@@ -99,11 +99,6 @@ pub fn error(message: impl Into<Cow<'static, str>>) {
     eprintln!("{}: {}", "Error".red().bold(), msg.bright_red());
 }
 
-pub fn sys_info() -> String {
-    use target_lexicon::HOST;
-    format!("{}", HOST)
-}
-
 /// Get the zig tarball name based on HOST arch-os
 pub fn zig_tarball(version: ZigVersion) -> Option<String> {
     use target_lexicon::HOST;

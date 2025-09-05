@@ -14,9 +14,9 @@ pub use zls::zls_main;
 
 pub async fn zv_main() -> super::Result<()> {
     let zv_cli = <ZvCli as clap::Parser>::parse();
-    let (zv_dir, using_env) = tools::fetch_zv_dir()?;
+    let (zv_base_path, using_env) = tools::fetch_zv_dir()?;
     if using_env {
-        tracing::info!("Using ZV_DIR from environment: {}", zv_dir.display());
+        tracing::debug!("Using ZV_DIR from environment: {}", zv_base_path.display());
     }
     // TODO: Allow force flags to skip prompts in ZvCli
     // let allow_shell = zv_cli.allow_shell || zv_cli.force;
@@ -24,15 +24,14 @@ pub async fn zv_main() -> super::Result<()> {
     // let g = Genie { allow_shell, force };
 
     let app = App::init(UserConfig {
-        path: zv_dir,
-        shell: Shell::detect(),
+        zv_base_path,
+        shell: Some(Shell::detect()),
     })?;
 
     match zv_cli.command {
         Some(cmd) => cmd.execute(app).await?,
         None => {
-            println!("~ ZV ~");
-            println!("{}", tools::sys_info());
+            print_welcome_message(app);
         }
     }
     Ok(())
@@ -113,7 +112,7 @@ impl Commands {
                         Template::new(
                             project_name,
                             TemplateType::Zig(
-                                app.zv_zig_or_system()
+                                app.zv_zig()
                                     .ok_or_else(|| eyre!("No Zig executable found"))?,
                             ),
                         ),
@@ -136,4 +135,90 @@ impl Commands {
             Commands::Sync => todo!(),
         }
     }
+}
+
+fn print_welcome_message(app: App) {
+    use target_lexicon::HOST;
+
+    // Parse the target triplet (format: arch-platform-os)
+    let architecture = HOST.architecture;
+    let platform = HOST.vendor;
+    let os = HOST.operating_system;
+
+    // Get shell information
+    let shell = if cfg!(windows) {
+        "PowerShell"
+    } else {
+        // You might want to detect the actual shell on Unix systems
+        "Bash"
+    };
+
+    // ASCII art for ZV
+    println!(
+        "{}",
+        Paint::yellow(&format!(
+            r#"
+███████╗██╗   ██╗    Architecture: {architecture}
+╚══███╔╝██║   ██║    Platform: {platform}
+  ███╔╝ ██║   ██║    OS: {os}
+ ███╔╝  ██║   ██║    ZV directory: {zv_dir}
+███████╗╚██████╔╝    Shell: {shell}
+╚══════╝ ╚═════╝     Profile: {profile}
+    "#,
+            zv_dir = app.path().display(),
+            shell = app.shell.as_ref().map_or(Shell::detect(), |s| *s),
+            profile = std::env::var("PROFILE").unwrap_or_else(|_| "Not set".to_string())
+        ))
+    );
+
+    println!();
+
+    // Current active Zig version
+    let active_zig = app.get_active_version();
+
+    println!(
+        "Current active Zig: {}{opt}",
+        Paint::yellow(&active_zig.map_or_else(|| "none".to_string(), |v| v.to_string())),
+        opt = if active_zig.is_none() {
+            &format!(
+                " (use {} to set one | or run {})",
+                Paint::blue("zv use <version>"),
+                Paint::blue("zv setup")
+            )
+        } else {
+            ""
+        }
+    );
+
+    println!();
+
+    // Help section
+    println!("{}", Paint::cyan("Usage: zv.exe [COMMAND]"));
+    println!();
+    println!("{}", Paint::yellow("Commands:").bold());
+    println!(
+        "\t{}\tInitialize a new Zig project from lean or standard zig template",
+        Paint::blue("init")
+    );
+    println!(
+        "\t{}\tSelect which Zig version to use - master | latest | stable | <semver>",
+        Paint::blue("use")
+    );
+    println!("\t{}\tList installed Zig versions", Paint::blue("list"));
+    println!(
+        "\t{}\tClean up Zig installations. Non-zv managed installations will not be affected",
+        Paint::blue("clean")
+    );
+    println!(
+        "\t{}\tSetup shell environment for zv (required to make zig binaries available in $PATH)",
+        Paint::blue("setup")
+    );
+    println!(
+        "\t{}\tSynchronize index, mirrors list and metadata for zv",
+        Paint::blue("sync")
+    );
+    println!(
+        "\t{}\tPrint this message or the help of the given subcommand(s)",
+        Paint::blue("help")
+    );
 }
