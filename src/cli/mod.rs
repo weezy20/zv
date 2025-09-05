@@ -1,4 +1,4 @@
-use crate::{App, Shell, UserConfig, ZigVersion, ZvError, tools};
+use crate::{App, Shell, UserConfig, ZigVersion, ZvError, tools, suggest};
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::{Context as _, eyre};
 use yansi::Paint;
@@ -115,8 +115,8 @@ impl Commands {
                                 tools::error(
                                     "Cannot use `zig init` for template instantiation."
                                 );
-                                println!("● You can install a compatible Zig version with {}.", Paint::green("zv use <version>").italic());
-                                println!("● Also make sure you've run {} to set up your shell environment.", Paint::green("zv setup").italic());
+                                suggest!("You can install a compatible Zig version with {}", cmd = "zv use <version>");
+                                suggest!("Also make sure you've run {} to set up your shell environment", cmd = "zv setup");
                                 eyre!("No Zig executable found")
                             })?),
                         ),

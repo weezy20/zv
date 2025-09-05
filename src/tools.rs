@@ -6,6 +6,34 @@ use color_eyre::{
 use std::{borrow::Cow, path::PathBuf};
 use yansi::Paint;
 
+/// Macro to print standardized solution suggestions with bullet points
+/// 
+/// Usage:
+/// ```
+/// suggest!("You can install a compatible Zig version with {}", cmd = "zv use <version>");
+/// suggest!("Make sure you've run {}", cmd = "zv setup");
+/// suggest!("Simple message without command");
+/// ```
+#[macro_export]
+macro_rules! suggest {
+    // Pattern with cmd parameter
+    ($fmt:expr, cmd = $cmd:expr $(, $($args:tt)*)?) => {
+        println!(
+            "• {}",
+            format!($fmt, $crate::tools::format_cmd($cmd) $(, $($args)*)?)
+        );
+    };
+    // Pattern without cmd parameter
+    ($fmt:expr $(, $($args:tt)*)?) => {
+        println!("• {}", format!($fmt $(, $($args)*)?));
+    };
+}
+
+/// Helper function to format commands with green italic styling
+pub fn format_cmd(cmd: &str) -> String {
+    Paint::green(cmd).italic().to_string()
+}
+
 /// Fetch the zv directory PATH set using env var or fallback PATH ($HOME/.zv)
 /// This function also handles the initialization and creation of the ZV_DIR if it doesn't exist
 /// Returns a canonicalized PathBuf and a bool indicating if the path was set via env var
