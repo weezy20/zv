@@ -227,8 +227,7 @@ impl<'de> Deserialize<'de> for ZigVersion {
     }
 }
 
-impl ZigVersion {
-}
+impl ZigVersion {}
 
 impl fmt::Display for ZigVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

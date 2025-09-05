@@ -1,4 +1,4 @@
-use crate::{App, Shell, UserConfig, ZigVersion, ZvError, tools, suggest};
+use crate::{App, Shell, UserConfig, ZigVersion, ZvError, suggest, tools};
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::{Context as _, eyre};
 use yansi::Paint;
@@ -112,11 +112,15 @@ impl Commands {
                         Template::new(
                             project_name,
                             TemplateType::Zig(app.zv_zig().ok_or_else(|| {
-                                tools::error(
-                                    "Cannot use `zig init` for template instantiation."
+                                tools::error("Cannot use `zig init` for template instantiation.");
+                                suggest!(
+                                    "You can install a compatible Zig version with {}",
+                                    cmd = "zv use <version>"
                                 );
-                                suggest!("You can install a compatible Zig version with {}", cmd = "zv use <version>");
-                                suggest!("Also make sure you've run {} to set up your shell environment", cmd = "zv setup");
+                                suggest!(
+                                    "Also make sure you've run {} to set up your shell environment",
+                                    cmd = "zv setup"
+                                );
                                 eyre!("No Zig executable found")
                             })?),
                         ),
@@ -171,7 +175,9 @@ fn print_welcome_message(app: App) {
     "#,
             zv_dir = app.path().display(),
             shell = app.shell.as_ref().map_or(Shell::detect(), |s| *s),
-            profile = if let Some(profile) = std::env::var("PROFILE").ok() && !profile.is_empty() {
+            profile = if let Some(profile) = std::env::var("PROFILE").ok()
+                && !profile.is_empty()
+            {
                 format!("Profile: {profile}")
             } else {
                 String::new()

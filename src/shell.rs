@@ -78,7 +78,7 @@ impl Shell {
 # [Environment]::SetEnvironmentVariable("PATH", "{path};$env:PATH", "User")
 # Or for system-wide (requires Admin):
 # [Environment]::SetEnvironmentVariable("PATH", "{path};$env:PATH", "Machine")
-$env:PATH = "{path};$env:PATH""#, 
+$env:PATH = "{path};$env:PATH""#,
                     path = zv_bin_path_str
                 )
             }
@@ -89,7 +89,7 @@ $env:PATH = "{path};$env:PATH""#,
 REM setx PATH "{path};%PATH%" /M
 REM Or for current user only:
 REM setx PATH "{path};%PATH%"
-set "PATH={path};%PATH%""#, 
+set "PATH={path};%PATH%""#,
                     path = zv_bin_path_str
                 )
             }
@@ -99,7 +99,10 @@ set "PATH={path};%PATH%""#,
             }
             Shell::Nu => {
                 // Nushell syntax for setting environment variables
-                format!(r#"$env.PATH = ($env.PATH | prepend "{path}")"#, path = zv_bin_path_str)
+                format!(
+                    r#"$env.PATH = ($env.PATH | prepend "{path}")"#,
+                    path = zv_bin_path_str
+                )
             }
             Shell::Tcsh => {
                 // Tcsh/csh syntax for setting PATH

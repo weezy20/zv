@@ -7,7 +7,7 @@ use std::{borrow::Cow, path::PathBuf};
 use yansi::Paint;
 
 /// Macro to print standardized solution suggestions with bullet points
-/// 
+///
 /// Usage:
 /// ```
 /// suggest!("You can install a compatible Zig version with {}", cmd = "zv use <version>");
