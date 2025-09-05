@@ -1,10 +1,14 @@
 use crate::{ZigVersion, ZvError};
-use color_eyre::{Context as _, Result, eyre::WrapErr, eyre::eyre};
+use color_eyre::{
+    Context as _, Result,
+    eyre::{WrapErr, bail, eyre},
+};
 use std::{borrow::Cow, path::PathBuf};
 use yansi::Paint;
 
-/// Fetch the zv directory PATH set using env var or fallback PATH ($HOME/.zv -> $CWD/.zv)
+/// Fetch the zv directory PATH set using env var or fallback PATH ($HOME/.zv)
 /// This function also handles the initialization and creation of the ZV_DIR if it doesn't exist
+/// Returns a canonicalized PathBuf and a bool indicating if the path was set via env var
 pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
     let zv_dir_env = match std::env::var("ZV_DIR") {
         Ok(dir) if !dir.is_empty() => Some(dir),
@@ -46,7 +50,7 @@ pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
                     "zv directory exists but is not a directory: {}. Please check ZV_DIR env var. Aborting...",
                     zv_dir.display()
                 ));
-                std::process::exit(1);
+                bail!(eyre!("ZV_DIR exists but is not a directory"));
             }
         }
         Ok(false) => {

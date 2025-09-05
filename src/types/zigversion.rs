@@ -206,23 +206,14 @@ impl<'de> Deserialize<'de> for ZigVersion {
                 }
             }
             ZigVersionHelper::Map(map) => {
-                // Handle specific variant keys first
+                // Handle master variant
                 if let Some(master_str) = map.get("master") {
                     let version = Version::parse(master_str).map_err(de::Error::custom)?;
                     return Ok(ZigVersion::Master(version));
                 }
 
-                if let Some(stable_str) = map.get("stable") {
-                    let version = Version::parse(stable_str).map_err(de::Error::custom)?;
-                    return Ok(ZigVersion::Stable(version));
-                }
-
-                if let Some(latest_str) = map.get("latest") {
-                    let version = Version::parse(latest_str).map_err(de::Error::custom)?;
-                    return Ok(ZigVersion::Latest(version));
-                }
-
                 // Handle generic "version" key - treat as Semver
+                // (Stable and Latest variants are also serialized with "version" key)
                 if let Some(version_str) = map.get("version") {
                     let version = Version::parse(version_str).map_err(de::Error::custom)?;
                     return Ok(ZigVersion::Semver(version));

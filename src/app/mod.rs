@@ -1,5 +1,6 @@
 mod config;
 mod constants;
+mod network;
 mod utils;
 
 use color_eyre::eyre::{Context as _, eyre};
@@ -17,26 +18,29 @@ pub struct App {
     bin_path: PathBuf,
     /// <ZV_DIR>/bin/zig - Zv managed zig executable if any
     zig: Option<PathBuf>,
-    // /// <ZV_DIR>/versions - Installed versions
-    // versions_path: PathBuf,
-    // /// <ZV_DIR>/config.toml - Config path
-    // config_path: PathBuf,
-    // /// <ZV_DIR>/env or /env.ps1 or /env.bat - OS specific env file
-    // env_path: PathBuf,
-    // /// <ZV_DIR>/config.toml - Configuration implementation
-    // config: Option<ZvConfig>,
-    // /// Network client
-    // network: Option<ZvNetwork>,
-    // /// <ZV_DIR>/bin in $PATH? If not prompt user to run `setup` or add `source <ZV_DIR>/env to their shell profile`
-    // source_set: bool,
-    // /// Current detected shell
-    // shell: crate::Shell,
+    /// <ZV_DIR>/bin/zls - Zv managed zls executable if any
+    zls: Option<PathBuf>,
+    /// <ZV_DIR>/versions - Installed versions
+    versions_path: PathBuf,
+    /// <ZV_DIR>/config.toml - Config path
+    config_path: PathBuf,
+    #[cfg(unix)]
+    /// <ZV_DIR>/env for *nix. For powershell/cmd prompt we rely on direct PATH variable manipulation.
+    env_path: PathBuf,
+    /// <ZV_DIR>/config.toml - Configuration implementation
+    config: Option<config::ZvConfig>,
+    /// Network client
+    network: Option<network::ZvNetwork>,
+    /// <ZV_DIR>/bin in $PATH? If not prompt user to run `setup` or add `source <ZV_DIR>/env to their shell profile`
+    source_set: bool,
+    /// Current detected shell
+    shell: crate::Shell,
 }
 
 impl App {
     /// Minimal App path initialization & directory creation
     pub fn init(UserConfig { path, shell }: UserConfig) -> Result<Self, ZvError> {
-        /* path is canonicalized in zv::main so we don't need to do that here */
+        /* path is canonicalized in tools::fetch_zv_dir() so we don't need to do that here */
         let bin_path = path.join("bin");
         let mut zig = None;
         if !bin_path.try_exists().unwrap_or_default() {
@@ -161,6 +165,15 @@ impl App {
                 command: "zig ".to_string() + &args.join(" "),
             }
         })
+    }
+
+    /// Fetch a compatible ZLS version for the given Zig version
+    /// This is a placeholder implementation that will be expanded with proper compatibility logic
+    pub fn fetch_compatible_zls(&mut self, zig_version: &ZigVersion) -> Result<PathBuf, ZvError> {
+        tracing::info!("Fetching compatible ZLS for Zig version: {:?}", zig_version);
+
+        // Determine compatible ZLS version
+        todo!()
     }
 }
 

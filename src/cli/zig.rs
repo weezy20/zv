@@ -1,7 +1,7 @@
+use crate::{App, Shell, UserConfig, ZigVersion, tools};
 use color_eyre::eyre::{bail, eyre};
-use std::process::{Command, Stdio};
 use std::path::PathBuf;
-use crate::{ZigVersion, App, UserConfig, Shell, tools};
+use std::process::{Command, Stdio};
 
 const MAX_RECURSION: u32 = 10;
 
@@ -17,16 +17,18 @@ pub fn zig_main() -> crate::Result<()> {
     args.remove(0); // drop program name
 
     // Check for +version override
-    let version_override = args.iter()
+    let version_override = args
+        .iter()
         .position(|arg| arg.starts_with('+'))
         .map(|pos| args.remove(pos))
         .map(|arg| arg.strip_prefix('+').unwrap().to_string());
 
     let zig_path = if let Some(version_str) = version_override {
         // Parse the version override
-        let version = version_str.parse::<ZigVersion>()
+        let version = version_str
+            .parse::<ZigVersion>()
             .map_err(|e| eyre!("Invalid version override '+{}': {}", version_str, e))?;
-        
+
         find_zig_for_version(&version)?
     } else {
         // Default to system zig or zv-managed zig
@@ -53,12 +55,14 @@ pub fn zig_main() -> crate::Result<()> {
 fn find_zig_for_version(version: &ZigVersion) -> crate::Result<PathBuf> {
     // Initialize app to access zv directory structure
     let (zv_dir, _) = tools::fetch_zv_dir()?;
-    let zv_dir = std::fs::canonicalize(&zv_dir).map_err(|e| eyre!("Failed to canonicalize zv dir: {}", e))?;
-    
+    let zv_dir = std::fs::canonicalize(&zv_dir)
+        .map_err(|e| eyre!("Failed to canonicalize zv dir: {}", e))?;
+
     let app = App::init(UserConfig {
         path: zv_dir.clone(),
         shell: Shell::detect(),
-    }).map_err(|e| eyre!("Failed to initialize app: {}", e))?;
+    })
+    .map_err(|e| eyre!("Failed to initialize app: {}", e))?;
 
     match version {
         ZigVersion::Semver(v) => {
@@ -69,11 +73,15 @@ fn find_zig_for_version(version: &ZigVersion) -> crate::Result<PathBuf> {
             } else {
                 version_dir.join("zig")
             };
-            
+
             if zig_exe.exists() {
                 Ok(zig_exe)
             } else {
-                Err(eyre!("Zig version {} is not installed. Run 'zv install {}' first.", v, v))
+                Err(eyre!(
+                    "Zig version {} is not installed. Run 'zv install {}' first.",
+                    v,
+                    v
+                ))
             }
         }
         ZigVersion::Master(_) => {
@@ -84,21 +92,23 @@ fn find_zig_for_version(version: &ZigVersion) -> crate::Result<PathBuf> {
             } else {
                 master_dir.join("zig")
             };
-            
+
             if zig_exe.exists() {
                 Ok(zig_exe)
             } else {
-                Err(eyre!("Zig master version is not installed. Run 'zv install master' first."))
+                Err(eyre!(
+                    "Zig master version is not installed. Run 'zv install master' first."
+                ))
             }
         }
         ZigVersion::Stable(_) | ZigVersion::Latest(_) => {
             // For stable/latest, we need to resolve to actual version first
             // For now, fall back to system zig
-            Err(eyre!("Stable/latest version resolution not yet implemented. Use specific version."))
+            Err(eyre!(
+                "Stable/latest version resolution not yet implemented. Use specific version."
+            ))
         }
-        ZigVersion::Unknown => {
-            Err(eyre!("Cannot use unknown version"))
-        }
+        ZigVersion::Unknown => Err(eyre!("Cannot use unknown version")),
     }
 }
 
@@ -106,18 +116,16 @@ fn find_zig_for_version(version: &ZigVersion) -> crate::Result<PathBuf> {
 fn find_default_zig() -> crate::Result<PathBuf> {
     // Try to get zv-managed zig first
     if let Ok((zv_dir, _)) = tools::fetch_zv_dir() {
-        if let Ok(zv_dir) = std::fs::canonicalize(&zv_dir) {
-            if let Ok(app) = App::init(UserConfig {
-                path: zv_dir,
-                shell: Shell::detect(),
-            }) {
-                if let Some(zig_path) = app.zv_zig_or_system() {
-                    return Ok(zig_path);
-                }
+        if let Ok(app) = App::init(UserConfig {
+            path: zv_dir,
+            shell: Shell::detect(),
+        }) {
+            if let Some(zig_path) = app.zv_zig_or_system() {
+                return Ok(zig_path);
             }
         }
     }
-    
+
     // Fall back to system zig
     which::which("zig").map_err(|_| eyre!("Could not find zig executable"))
 }
