@@ -30,7 +30,7 @@ semver = "1.0.26"
 color-eyre = "0.6.5"
 dirs = "6.0.0"
 tracing = "0.1.41"
-chrono = "0.4.41"
+chrono = { version = "0.4.41", features = ["serde"] }
 yansi = { version = "1.0.1", features = ["detect-tty", "detect-env"] }
 target-lexicon = "0.13.2"
 serde_json = "1.0.143"

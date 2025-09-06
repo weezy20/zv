@@ -76,6 +76,7 @@ impl App {
         let env_path = if let Some(ref shell_type) = shell {
             zv_base_path.join(shell_type.env_file_name())
         } else {
+            // In non-shell mode, it doesn't really matter what the file is
             zv_base_path.join("env")
         };
 
