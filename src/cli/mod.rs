@@ -1,4 +1,7 @@
-use crate::{App, Shell, UserConfig, ZigVersion, ZvError, suggest, tools};
+use crate::{
+    App, Shell, UserConfig, ZigVersion, ZvError, suggest,
+    tools::{self, error},
+};
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::{Context as _, eyre};
 use yansi::Paint;
@@ -153,7 +156,7 @@ impl Commands {
             Commands::Use { version } => match version {
                 Some(version) => r#use::use_version(version, &mut app).await,
                 None => {
-                    eprintln!("{}", Paint::red("Error: Version must be specified"));
+                    error("Version must be specified. e.g., `zv use latest` or `zv use 0.15.1`");
                     std::process::exit(1);
                 }
             },
