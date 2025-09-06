@@ -207,7 +207,7 @@ impl Template {
             .created_new_dir
         {
             // If we created the directory, remove the entire directory
-            let _ = fs::remove_dir_all(
+            let _ = rda::remove_dir_all(
                 &self
                     .context
                     .as_ref()
@@ -236,14 +236,14 @@ impl Template {
             .spawn_with_guard(&zig_path, &["init"], Some(target_dir))
             .map_err(|e| {
                 if self.context.as_ref().unwrap().created_new_dir {
-                    let _ = fs::remove_dir_all(target_dir);
+                    let _ = rda::remove_dir_all(target_dir);
                 }
                 e
             })?;
 
         if !output.status.success() {
             if self.context.as_ref().unwrap().created_new_dir {
-                let _ = fs::remove_dir_all(target_dir);
+                let _ = rda::remove_dir_all(target_dir);
             }
 
             let stderr = String::from_utf8_lossy(&output.stderr);
