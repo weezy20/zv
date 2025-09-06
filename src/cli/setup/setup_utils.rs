@@ -1,5 +1,6 @@
 use crate::{
-    path_utils, suggest, tools::{canonicalize, files_have_same_hash}, App, Shell
+    App, Shell, path_utils, suggest,
+    tools::{canonicalize, files_have_same_hash},
 };
 use color_eyre::eyre::{Result, eyre};
 use dirs;
@@ -94,8 +95,12 @@ pub async fn pre_setup_checks(
     let path_already_in_system = path_utils::check_dir_in_path(&bin_path);
 
     // Check if the zv binary in bin path is up to date (hash comparison)
-    let current_exe = std::env::current_exe()
-        .map_err(|e| eyre!("Pre-setup check: Failed to get current executable path: {}", e))?;
+    let current_exe = std::env::current_exe().map_err(|e| {
+        eyre!(
+            "Pre-setup check: Failed to get current executable path: {}",
+            e
+        )
+    })?;
 
     let target_exe = if cfg!(windows) {
         app.bin_path().join("zv.exe")
