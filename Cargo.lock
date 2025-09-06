@@ -2582,6 +2582,7 @@ name = "zv"
 version = "1.0.0"
 dependencies = [
  "ahash",
+ "cfg-if",
  "chrono",
  "clap",
  "color-eyre",
