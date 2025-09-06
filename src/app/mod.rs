@@ -5,9 +5,9 @@ mod utils;
 
 use color_eyre::eyre::{Context as _, eyre};
 
-use crate::types::*;
-use crate::tools::canonicalize;
 use crate::Shell;
+use crate::tools::canonicalize;
+use crate::types::*;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 

@@ -41,7 +41,8 @@ fn detect_shell_from_string(shell_str: &str) -> Option<Shell> {
         Some(Shell::Tcsh)
     } else if shell_str.contains("nu") {
         Some(Shell::Nu)
-    } else if shell_str.contains("sh") && !shell_str.contains("bash") && !shell_str.contains("zsh") {
+    } else if shell_str.contains("sh") && !shell_str.contains("bash") && !shell_str.contains("zsh")
+    {
         Some(Shell::Posix)
     } else {
         None

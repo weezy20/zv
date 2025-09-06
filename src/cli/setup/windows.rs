@@ -1,6 +1,6 @@
+use cfg_if::cfg_if;
 use color_eyre::eyre::eyre;
 use yansi::Paint;
-use cfg_if::cfg_if;
 
 use crate::App;
 

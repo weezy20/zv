@@ -53,7 +53,6 @@ pub struct ZvConfig {
     // /// Installed versions and their installation paths
     // #[serde(default)]
     // pub zig: AHashMap<ZigVersion, ZigEntry>,
-
     /// Path to the config file
     #[serde(skip)]
     pub config_path: PathBuf,

@@ -304,7 +304,8 @@ mod tests {
 
     #[test]
     fn test_generate_cleanup_content() {
-        let cleanup = generate_cleanup_content(&Shell::Fish, "/home/user/.zv", "/home/user/.zv/bin");
+        let cleanup =
+            generate_cleanup_content(&Shell::Fish, "/home/user/.zv", "/home/user/.zv/bin");
         assert!(cleanup.contains("set -e ZV_DIR"));
         assert!(cleanup.contains("set -e PATH"));
     }

@@ -1,10 +1,10 @@
+use cfg_if::cfg_if;
 use color_eyre::eyre::{Context as _, eyre};
 use std::fs::File;
 use std::io::Read;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use yansi::Paint;
-use cfg_if::cfg_if;
 
 use crate::tools::{calculate_file_hash, canonicalize, files_have_same_hash};
 use crate::{App, Shell, ZigVersion, suggest, tools};
@@ -17,7 +17,7 @@ cfg_if! {
 }
 
 pub mod unix;
-pub use unix::{setup_unix_environment, add_source_to_shell_files, add_source_to_file};
+pub use unix::{add_source_to_file, add_source_to_shell_files, setup_unix_environment};
 
 /// Check if we're using a custom ZV_DIR (not the default $HOME/.zv) and warn the user
 fn check_custom_zv_dir_warning(app: &App, using_env_var: bool) -> crate::Result<bool> {

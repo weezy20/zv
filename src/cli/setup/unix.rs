@@ -193,7 +193,10 @@ async fn check_shell_rc_files_configured(shell: &Shell, zv_dir: &Path) -> bool {
     false
 }
 
-pub async fn add_source_to_shell_files(shell: &Shell, env_file: &Path) -> crate::Result<Vec<PathBuf>> {
+pub async fn add_source_to_shell_files(
+    shell: &Shell,
+    env_file: &Path,
+) -> crate::Result<Vec<PathBuf>> {
     let home_dir = dirs::home_dir().ok_or_else(|| eyre!("Could not determine home directory"))?;
 
     // Generate appropriate source command for the shell
