@@ -195,8 +195,16 @@ impl Shell {
         };
 
         match self {
-            Shell::Bash => vec![home_dir.join(".profile"), home_dir.join(".bashrc")],
-            Shell::Zsh => vec![home_dir.join(".profile"), home_dir.join(".zshrc")],
+            Shell::Bash => vec![
+                home_dir.join(".profile"),
+                home_dir.join(".bashrc"),
+                home_dir.join(".bash_profile"),
+            ],
+            Shell::Zsh => vec![
+                home_dir.join(".zshenv"),
+                home_dir.join(".zshrc"),
+                home_dir.join(".zprofile"),
+            ],
             Shell::Fish => vec![home_dir.join(".config/fish/config.fish")],
             Shell::Tcsh => vec![home_dir.join(".profile"), home_dir.join(".tcshrc")],
             Shell::Nu => vec![home_dir.join(".config/nushell/config.nu")],

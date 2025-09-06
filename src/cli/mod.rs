@@ -107,6 +107,15 @@ pub enum Commands {
             help = "Preview changes without applying them"
         )]
         dry_run: bool,
+        /// Optional: Specify a specific zig version to set up. By default it set's up the latest active version.
+        #[arg(
+            long,
+            alias = "version",
+            short = 'v',
+            value_parser = clap::value_parser!(ZigVersion),
+            help = "Specify a specific zig version to set up. By default it set's up the latest active version."
+        )]
+        default_version: Option<ZigVersion>,
     },
 
     /// Synchronize index, mirrors list and metadata for zv.
@@ -150,7 +159,20 @@ impl Commands {
             },
             Commands::List => todo!(),
             Commands::Clean { version: _version } => clean::clean_bin(&app).await,
-            Commands::Setup { dry_run } => setup::setup_shell(&mut app, using_env, dry_run).await,
+            Commands::Setup {
+                dry_run,
+                default_version,
+            } => {
+                setup::setup_shell(
+                    &mut app,
+                    using_env,
+                    dry_run,
+                    default_version.unwrap_or_else(|| {
+                        ZigVersion::placeholder_for_variant("latest").expect("valid zigversion")
+                    }),
+                )
+                .await
+            }
             Commands::Sync => todo!(),
         }
     }

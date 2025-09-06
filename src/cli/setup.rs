@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use yansi::Paint;
 
 use crate::tools::{calculate_file_hash, canonicalize, files_have_same_hash};
-use crate::{App, Shell, suggest, tools};
+use crate::{App, Shell, ZigVersion, suggest, tools};
 
 /// Check if we're using a custom ZV_DIR (not the default $HOME/.zv) and warn the user
 fn check_custom_zv_dir_warning(app: &App, using_env_var: bool) -> crate::Result<bool> {
@@ -392,7 +392,12 @@ async fn post_setup_actions(app: &App, dry_run: bool) -> crate::Result<()> {
     Ok(())
 }
 
-pub async fn setup_shell(app: &mut App, using_env_var: bool, dry_run: bool) -> crate::Result<()> {
+pub async fn setup_shell(
+    app: &mut App,
+    using_env_var: bool,
+    dry_run: bool,
+    default_version: ZigVersion,
+) -> crate::Result<()> {
     if app.source_set {
         println!("{}", Paint::green("Shell environment already set up."));
 

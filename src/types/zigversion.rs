@@ -27,7 +27,7 @@ pub enum ZigVersion {
 
 impl ZigVersion {
     /// Creates a placeholder version (0.0.0) for the given variant type
-    fn placeholder_for_variant(variant: &str) -> Result<Self, ZvError> {
+    pub fn placeholder_for_variant(variant: &str) -> Result<Self, ZvError> {
         let placeholder = Version::parse("0.0.0").unwrap();
         match variant {
             "master" => Ok(ZigVersion::Master(placeholder)),
