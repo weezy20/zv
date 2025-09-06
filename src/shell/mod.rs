@@ -11,6 +11,12 @@ pub use env_export::*;
 pub use generators::*;
 pub use path_utils::*;
 
+impl Default for Shell {
+    fn default() -> Self {
+        Self::detect()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shell {
     Bash,
@@ -86,12 +92,6 @@ impl Shell {
     /// Based on current shell type, inspect if `path` is in SHELL's PATH
     pub fn check_path_in_system(&self, path: &Path) -> bool {
         path_utils::check_path_in_system(path)
-    }
-}
-
-impl Default for Shell {
-    fn default() -> Self {
-        Self::detect()
     }
 }
 

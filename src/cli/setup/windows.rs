@@ -1,17 +1,15 @@
-use cfg_if::cfg_if;
 use color_eyre::eyre::eyre;
 use yansi::Paint;
 
 use crate::App;
 
-cfg_if! {
-    if #[cfg(target_os = "windows")] {
-        pub async fn setup_windows_environment(
-            app: &App,
-            using_env_var: bool,
-            dry_run: bool,
-        ) -> crate::Result<()> {
-            use windows_registry::{CURRENT_USER, Value};
+#[cfg(target_os = "windows")]
+pub async fn setup_windows_environment(
+    app: &App,
+    using_env_var: bool,
+    dry_run: bool,
+) -> crate::Result<()> {
+    use windows_registry::{CURRENT_USER, Value};
 
     let zv_dir = app.path();
     let bin_path = app.bin_path();
@@ -144,15 +142,14 @@ cfg_if! {
         );
     }
 
-            Ok(())
-        }
-    } else {
-        pub async fn setup_windows_environment(
-            _app: &App,
-            _using_env_var: bool,
-            _dry_run: bool,
-        ) -> crate::Result<()> {
-            unreachable!("Windows setup should not be called on non-Windows platforms")
-        }
-    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub async fn setup_windows_environment(
+    _app: &App,
+    _using_env_var: bool,
+    _dry_run: bool,
+) -> crate::Result<()> {
+    unreachable!("Windows setup should not be called on non-Windows platforms")
 }
