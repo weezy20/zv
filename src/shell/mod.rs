@@ -175,7 +175,11 @@ impl Shell {
 
         Shell::Unknown
     }
-
+    /// Is non-windows shell?
+    #[inline]
+    pub fn is_unix_shell(&self) -> bool {
+        !matches!(self, Shell::Cmd | Shell::PowerShell)
+    }
     /// Get the appropriate env file name based on shell type
     pub fn env_file_name(&self) -> &'static str {
         match self {
@@ -220,36 +224,157 @@ impl Shell {
     }
 
     /// Returns the env file path and content without writing to disk
-    pub fn export_without_dump<'a>(
-        &self,
-        app: &'a App,
-        using_env_var: bool,
-    ) -> (&'a Path, String) {
+    pub fn export_without_dump<'a>(&self, app: &'a App, using_env_var: bool) -> (&'a Path, String) {
+        let env_file = app.env_path().as_path();
+        let (zv_dir_str, zv_bin_path_str) = self.get_path_strings(app, using_env_var);
+        let env_content = self.generate_env_content(&zv_dir_str, &zv_bin_path_str);
+
+        (env_file, env_content)
+    }
+
+    /// Dumps shell specific environment variables to the env file, overwriting if content differs
+    /// For CMD and PowerShell, this method does not write to disk as system variables are edited directly
+    pub async fn export(&self, app: &App, using_env_var: bool) -> Result<(), ZvError> {
+        // Skip file operations for Windows shells that use direct system variable edits
+        if self.uses_direct_system_variables() {
+            return Ok(());
+        }
+
+        let (env_file, content) = self.export_without_dump(app, using_env_var);
+        self.write_env_file_if_needed(env_file, &content).await
+    }
+
+    /// Helper method to determine path string formatting based on shell and environment
+    fn get_path_strings(&self, app: &App, using_env_var: bool) -> (String, String) {
         let zv_dir = app.path();
         let bin_path = app.bin_path();
-        let env_file = app.env_path().as_path();
 
-        // Use ${HOME}/.zv when using default path, otherwise use absolute path
-        let (zv_dir_str, zv_bin_path_str) = if using_env_var {
+        if using_env_var {
             // Using ZV_DIR env var, use absolute paths
-            (
-                zv_dir.to_string_lossy().into_owned(),
-                if cfg!(windows) && matches!(self, Shell::Bash | Shell::Zsh | Shell::Fish) {
-                    // Convert Windows path separators to Unix-style for Unix-like shells on Windows (e.g., WSL)
-                    bin_path.to_string_lossy().replace('\\', "/")
-                } else {
-                    bin_path.to_string_lossy().into_owned()
-                },
-            )
+            self.format_absolute_paths(zv_dir, bin_path)
         } else {
             // Using default path, use ${HOME}/.zv
-            ("${HOME}/.zv".to_string(), "${HOME}/.zv/bin".to_string())
+            self.get_default_path_strings()
+        }
+    }
+
+    /// Format absolute paths, handling Windows path conversion for Unix-like shells
+    fn format_absolute_paths(&self, zv_dir: &Path, bin_path: &Path) -> (String, String) {
+        if cfg!(windows) && self.is_unix_shell() {
+            // Convert both paths consistently for Unix-like shells on Windows
+            (
+                zv_dir.to_string_lossy().replace('\\', "/"),
+                bin_path.to_string_lossy().replace('\\', "/"),
+            )
+        } else {
+            (
+                zv_dir.to_string_lossy().into_owned(),
+                bin_path.to_string_lossy().into_owned(),
+            )
+        }
+    }
+
+    /// Get default path strings using environment variables
+    fn get_default_path_strings(&self) -> (String, String) {
+        match self {
+            Shell::PowerShell | Shell::Cmd => {
+                // Windows shells use different environment variable syntax
+                if matches!(self, Shell::PowerShell) {
+                    (
+                        "$env:HOME\\.zv".to_string(),
+                        "$env:HOME\\.zv\\bin".to_string(),
+                    )
+                } else {
+                    (
+                        "%USERPROFILE%\\.zv".to_string(),
+                        "%USERPROFILE%\\.zv\\bin".to_string(),
+                    )
+                }
+            }
+            _ => {
+                // Unix-like shells
+                ("${HOME}/.zv".to_string(), "${HOME}/.zv/bin".to_string())
+            }
+        }
+    }
+
+    /// Generate shell-specific environment content
+    fn generate_env_content(&self, zv_dir: &str, zv_bin_path: &str) -> String {
+        match self {
+            Shell::PowerShell => self.generate_powershell_content(zv_dir, zv_bin_path),
+            Shell::Cmd => self.generate_cmd_content(zv_dir, zv_bin_path),
+            Shell::Fish => self.generate_fish_content(zv_dir, zv_bin_path),
+            Shell::Nu => self.generate_nu_content(zv_dir, zv_bin_path),
+            Shell::Tcsh => self.generate_tcsh_content(zv_dir, zv_bin_path),
+            Shell::Bash | Shell::Zsh | Shell::Posix | Shell::Unknown => {
+                if matches!(self, Shell::Unknown) {
+                    tracing::warn!("Unknown shell type detected, using POSIX shell syntax");
+                }
+                self.generate_posix_content(zv_dir, zv_bin_path)
+            }
+        }
+    }
+
+    /// Check if shell uses direct system variable edits (no file writing needed)
+    fn uses_direct_system_variables(&self) -> bool {
+        matches!(self, Shell::Cmd | Shell::PowerShell)
+    }
+
+    /// Write environment file only if content is different or file doesn't exist
+    async fn write_env_file_if_needed(
+        &self,
+        env_file: &Path,
+        content: &str,
+    ) -> Result<(), ZvError> {
+        let should_write = if env_file.exists() {
+            match tokio::fs::read_to_string(env_file).await {
+                Ok(existing_content) => existing_content.trim() != content.trim(),
+                Err(_) => {
+                    tracing::warn!("Could not read existing env file, will overwrite");
+                    true
+                }
+            }
+        } else {
+            true
         };
 
-        let env_content = match self {
-            Shell::PowerShell => {
-                format!(
-                    r#"# zv shell setup for PowerShell
+        if should_write {
+            self.write_env_file(env_file, content).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Write content to environment file
+    async fn write_env_file(&self, env_file: &Path, content: &str) -> Result<(), ZvError> {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(env_file)
+            .await
+            .map_err(|e| {
+                ZvError::ZvExportError(eyre!(e).wrap_err(format!(
+                    "Failed to open env file for writing: {}",
+                    env_file.display()
+                )))
+            })?;
+
+        file.write_all(content.as_bytes()).await.map_err(|e| {
+            ZvError::ZvExportError(eyre!(e).wrap_err("Failed to write to env file"))
+        })?;
+
+        file.write_all(b"\n").await.map_err(|e| {
+            ZvError::ZvExportError(eyre!(e).wrap_err("Failed to write newline to env file"))
+        })?;
+
+        Ok(())
+    }
+
+    // Shell-specific content generators
+    fn generate_powershell_content(&self, zv_dir: &str, zv_bin_path: &str) -> String {
+        format!(
+            r#"# zv shell setup for PowerShell
 # To permanently set environment variables in PowerShell, run as Administrator:
 # [Environment]::SetEnvironmentVariable("ZV_DIR", "{zv_dir}", "User")
 # [Environment]::SetEnvironmentVariable("PATH", "{path};$env:PATH", "User")
@@ -258,58 +383,62 @@ $env:ZV_DIR = "{zv_dir}"
 if ($env:PATH -notlike "*{path}*") {{
     $env:PATH = "{path};$env:PATH"
 }}"#,
-                    path = zv_bin_path_str,
-                    zv_dir = zv_dir_str
-                )
-            }
-            Shell::Cmd => {
-                format!(
-                    r#"REM zv shell setup for Command Prompt
+            path = zv_bin_path,
+            zv_dir = zv_dir
+        )
+    }
+
+    fn generate_cmd_content(&self, zv_dir: &str, zv_bin_path: &str) -> String {
+        format!(
+            r#"REM zv shell setup for Command Prompt
 REM To permanently set environment variables in CMD, run as Administrator:
 REM setx ZV_DIR "{zv_dir}" /M
 REM setx PATH "{path};%PATH%" /M
 
 set "ZV_DIR={zv_dir}"
 echo ;%PATH%; | find /i ";{path};" >nul || set "PATH={path};%PATH%""#,
-                    path = zv_bin_path_str,
-                    zv_dir = zv_dir_str
-                )
-            }
-            Shell::Fish => {
-                format!(
-                    r#"#!/usr/bin/env fish
+            path = zv_bin_path,
+            zv_dir = zv_dir
+        )
+    }
+
+    fn generate_fish_content(&self, zv_dir: &str, zv_bin_path: &str) -> String {
+        format!(
+            r#"#!/usr/bin/env fish
 # zv shell setup for Fish shell
 set -gx ZV_DIR "{zv_dir}"
 if not contains "{path}" $PATH
     set -gx PATH "{path}" $PATH
 end"#,
-                    path = zv_bin_path_str,
-                    zv_dir = zv_dir_str
-                )
-            }
-            Shell::Nu => {
-                format!(
-                    r#"# zv shell setup for Nushell
+            path = zv_bin_path,
+            zv_dir = zv_dir
+        )
+    }
+
+    fn generate_nu_content(&self, zv_dir: &str, zv_bin_path: &str) -> String {
+        format!(
+            r#"# zv shell setup for Nushell
 $env.ZV_DIR = "{zv_dir}"
 $env.PATH = ($env.PATH | split row (char esep) | prepend "{path}" | uniq)"#,
-                    path = zv_bin_path_str,
-                    zv_dir = zv_dir_str
-                )
-            }
-            Shell::Tcsh => {
-                format!(
-                    r#"#!/bin/csh
+            path = zv_bin_path,
+            zv_dir = zv_dir
+        )
+    }
+
+    fn generate_tcsh_content(&self, zv_dir: &str, zv_bin_path: &str) -> String {
+        format!(
+            r#"#!/bin/csh
 # zv shell setup for tcsh/csh
 setenv ZV_DIR "{zv_dir}"
 echo ":${{PATH}}:" | grep -q ":{path}:" || setenv PATH "{path}:$PATH""#,
-                    path = zv_bin_path_str,
-                    zv_dir = zv_dir_str
-                )
-            }
-            Shell::Bash | Shell::Zsh | Shell::Posix | Shell::Unknown => {
-                // POSIX-compliant syntax with robust PATH checking (similar to Cargo)
-                format!(
-                    r#"#!/bin/sh
+            path = zv_bin_path,
+            zv_dir = zv_dir
+        )
+    }
+
+    fn generate_posix_content(&self, zv_dir: &str, zv_bin_path: &str) -> String {
+        format!(
+            r#"#!/bin/sh
 # zv shell setup
 # affix colons on either side of $PATH to simplify matching
 export ZV_DIR="{zv_dir}"
@@ -321,65 +450,9 @@ case ":${{PATH}}:" in
         export PATH="{path}:$PATH"
         ;;
 esac"#,
-                    path = zv_bin_path_str,
-                    zv_dir = zv_dir_str
-                )
-            }
-        };
-
-        if matches!(self, Shell::Unknown) {
-            tracing::warn!("Unknown shell type detected, using POSIX shell syntax");
-        }
-
-        (env_file, env_content)
-    }
-    /// Dumps shell specific environment variables to the env file, overwriting if read errors
-    /// For CMD and PowerShell, this method does not write to disk as system variables are edited directly
-    pub async fn export(
-        &self,
-        app: &App,
-        using_env_var: bool,
-    ) -> Result<(), ZvError> {
-        if matches!(self, Shell::Cmd | Shell::PowerShell) {
-            return Ok(());
-        }
-
-        let (env_file, content) = self.export_without_dump(app, using_env_var);
-
-        // Check if content already exists in file
-        let dump_true = if env_file.exists() {
-            let existing_content = tokio::fs::read_to_string(&env_file)
-                .await
-                .ok()
-                .unwrap_or_default();
-            !existing_content.contains(&content)
-        } else {
-            true
-        };
-
-        if dump_true {
-            let mut file = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(&env_file)
-                .await
-                .map_err(|e: std::io::Error| {
-                    ZvError::ZvExportError(eyre!(e).wrap_err("Failed to open env file for writing"))
-                })?;
-
-            AsyncWriteExt::write_all(&mut file, content.as_bytes())
-                .await
-                .map_err(|e: std::io::Error| {
-                    ZvError::ZvExportError(eyre!(e).wrap_err("Failed to write to env file"))
-                })?;
-            AsyncWriteExt::write_all(&mut file, b"\n")
-                .await
-                .map_err(|e: std::io::Error| {
-                    ZvError::ZvExportError(eyre!(e).wrap_err("Failed to write newline to env file"))
-                })?;
-        }
-        Ok(())
+            path = zv_bin_path,
+            zv_dir = zv_dir
+        )
     }
 
     /// Based on current shell type, inspect `path` is in SHELL's PATH
