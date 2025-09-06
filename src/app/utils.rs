@@ -1,6 +1,6 @@
+use crate::tools::canonicalize;
 use same_file::Handle;
 use std::path::{Path, PathBuf};
-use crate::tools::canonicalize;
 
 /// Enum representing the type of shim to detect
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

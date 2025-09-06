@@ -1,12 +1,12 @@
 use color_eyre::eyre::{Context as _, eyre};
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
 use std::fs::File;
 use std::io::Read;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use yansi::Paint;
 
+use crate::tools::{calculate_file_hash, canonicalize, files_have_same_hash};
 use crate::{App, Shell, suggest, tools};
-use crate::tools::{canonicalize, calculate_file_hash, files_have_same_hash};
 
 /// Check if we're using a custom ZV_DIR (not the default $HOME/.zv) and warn the user
 fn check_custom_zv_dir_warning(app: &App, using_env_var: bool) -> crate::Result<bool> {
@@ -94,7 +94,7 @@ pub async fn pre_setup_checks(
     // Check if the zv binary in bin path is up to date (hash comparison)
     let current_exe = std::env::current_exe()
         .map_err(|e| eyre!("Failed to get current executable path: {}", e))?;
-    
+
     let target_exe = if cfg!(windows) {
         app.bin_path().join("zv.exe")
     } else {
@@ -122,7 +122,7 @@ pub async fn pre_setup_checks(
             Paint::green(&target_exe.display().to_string())
         );
         println!();
-        
+
         // Still check if shims need regeneration
         println!("Checking if shim regeneration is needed...");
         return Ok(false); // No setup needed, but post-setup will be checked separately
@@ -241,7 +241,7 @@ async fn check_shell_rc_files_configured(shell: &Shell, zv_dir: &Path) -> bool {
 async fn copy_zv_binary_if_needed(app: &App, dry_run: bool) -> crate::Result<()> {
     let current_exe = std::env::current_exe()
         .map_err(|e| eyre!("Failed to get current executable path: {}", e))?;
-    
+
     let target_exe = if cfg!(windows) {
         app.bin_path().join("zv.exe")
     } else {
@@ -257,18 +257,28 @@ async fn copy_zv_binary_if_needed(app: &App, dry_run: bool) -> crate::Result<()>
             }
             Ok(false) => {
                 if dry_run {
-                    println!("  {} zv binary in bin directory (hash mismatch)", Paint::yellow("Would update"));
+                    println!(
+                        "  {} zv binary in bin directory (hash mismatch)",
+                        Paint::yellow("Would update")
+                    );
                 } else {
                     println!("  • Updating zv binary in bin directory (hash mismatch)");
                 }
             }
             Err(e) => {
-                println!("  • {} hash comparison: {}, will copy anyway", Paint::yellow("Warning"), e);
+                println!(
+                    "  • {} hash comparison: {}, will copy anyway",
+                    Paint::yellow("Warning"),
+                    e
+                );
             }
         }
     } else {
         if dry_run {
-            println!("  {} zv binary to bin directory", Paint::yellow("Would copy"));
+            println!(
+                "  {} zv binary to bin directory",
+                Paint::yellow("Would copy")
+            );
         } else {
             println!("  • Copying zv binary to bin directory");
         }
@@ -285,9 +295,10 @@ async fn copy_zv_binary_if_needed(app: &App, dry_run: bool) -> crate::Result<()>
             .await
             .map_err(|e| eyre!("Failed to copy zv binary to bin directory: {}", e))?;
 
-        println!("    {} Copied {} to {}", 
-            Paint::green("✓"), 
-            current_exe.display(), 
+        println!(
+            "    {} Copied {} to {}",
+            Paint::green("✓"),
+            current_exe.display(),
             target_exe.display()
         );
     }
@@ -321,7 +332,10 @@ async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crate::Result<(
     let config_path = app.path().join("config.toml");
     if !config_path.exists() {
         if has_zig_shim || has_zls_shim {
-            println!("  {} config.toml not found - cannot regenerate shims", Paint::yellow("⚠"));
+            println!(
+                "  {} config.toml not found - cannot regenerate shims",
+                Paint::yellow("⚠")
+            );
             println!("    Consider running 'zv use <version>' to set up configuration");
         }
         return Ok(());
@@ -329,18 +343,32 @@ async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crate::Result<(
 
     if dry_run {
         if has_zig_shim {
-            println!("  {} zig shim based on config.toml", Paint::yellow("Would regenerate"));
+            println!(
+                "  {} zig shim based on config.toml",
+                Paint::yellow("Would regenerate")
+            );
         }
         if has_zls_shim {
-            println!("  {} zls shim based on config.toml", Paint::yellow("Would regenerate"));
+            println!(
+                "  {} zls shim based on config.toml",
+                Paint::yellow("Would regenerate")
+            );
         }
     } else {
         // TODO: Implement actual shim regeneration based on config.toml reading
         // For now, just notify the user
         if has_zig_shim || has_zls_shim {
-            println!("  {} Shim regeneration based on config.toml", Paint::yellow("TODO"));
-            println!("    This feature will be implemented to read config.toml and regenerate hardlinks");
-            suggest!("Run {} to ensure shims are properly configured", cmd = "zv use <version>");
+            println!(
+                "  {} Shim regeneration based on config.toml",
+                Paint::yellow("TODO")
+            );
+            println!(
+                "    This feature will be implemented to read config.toml and regenerate hardlinks"
+            );
+            suggest!(
+                "Run {} to ensure shims are properly configured",
+                cmd = "zv use <version>"
+            );
         }
     }
 
@@ -366,11 +394,8 @@ async fn post_setup_actions(app: &App, dry_run: bool) -> crate::Result<()> {
 
 pub async fn setup_shell(app: &mut App, using_env_var: bool, dry_run: bool) -> crate::Result<()> {
     if app.source_set {
-        println!(
-            "{}",
-            Paint::green("Shell environment already set up.")
-        );
-        
+        println!("{}", Paint::green("Shell environment already set up."));
+
         // Even when shell environment is set up, we need to check if binary needs updating
         // or if shims need regeneration
         post_setup_actions(app, dry_run).await?;

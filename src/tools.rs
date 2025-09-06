@@ -3,7 +3,11 @@ use color_eyre::{
     Context as _, Result,
     eyre::{WrapErr, bail, eyre},
 };
-use std::{borrow::Cow, path::{Path, PathBuf}, io, fs};
+use std::{
+    borrow::Cow,
+    fs, io,
+    path::{Path, PathBuf},
+};
 use yansi::Paint;
 
 /// Cross-platform canonicalize function that avoids UNC paths on Windows
@@ -194,13 +198,14 @@ pub fn calculate_file_hash(path: &Path) -> Result<u32> {
     let mut buffer = [0; 8192]; // 8KB buffer
 
     loop {
-        let bytes_read = file.read(&mut buffer)
+        let bytes_read = file
+            .read(&mut buffer)
             .wrap_err_with(|| format!("Failed to read file for hashing: {}", path.display()))?;
-        
+
         if bytes_read == 0 {
             break;
         }
-        
+
         hasher.update(&buffer[..bytes_read]);
     }
 
@@ -213,7 +218,7 @@ pub fn files_have_same_hash(path1: &Path, path2: &Path) -> Result<bool> {
         return Ok(false);
     }
 
-    Ok(calculate_file_hash(path1)? == calculate_file_hash(path2)?)   
+    Ok(calculate_file_hash(path1)? == calculate_file_hash(path2)?)
 }
 
 #[cfg(test)]

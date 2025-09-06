@@ -1,9 +1,9 @@
+use crate::ZvError;
+use crate::tools::{canonicalize, is_tty};
 use color_eyre::eyre::eyre;
 use std::path::{Path, PathBuf};
 use sysinfo::{Pid, Process, System};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
-use crate::tools::{is_tty, canonicalize};
-use crate::ZvError;
 
 /// Get the parent process name using sysinfo
 fn get_parent_process_name() -> Option<String> {
@@ -78,7 +78,10 @@ impl Shell {
                 Some(Shell::Tcsh)
             } else if shell_str.contains("nu") {
                 Some(Shell::Nu)
-            } else if shell_str.contains("sh") && !shell_str.contains("bash") && !shell_str.contains("zsh") {
+            } else if shell_str.contains("sh")
+                && !shell_str.contains("bash")
+                && !shell_str.contains("zsh")
+            {
                 Some(Shell::Posix)
             } else {
                 None
@@ -95,9 +98,9 @@ impl Shell {
     }
 
     /// Windows-specific shell detection
-    fn detect_windows_shell<F>(detect_shell_from_string: F) -> Shell 
-    where 
-        F: Fn(&str) -> Option<Shell>
+    fn detect_windows_shell<F>(detect_shell_from_string: F) -> Shell
+    where
+        F: Fn(&str) -> Option<Shell>,
     {
         // First, try to detect from parent process if we're in a TTY
         if is_tty() {
@@ -139,9 +142,9 @@ impl Shell {
     }
 
     /// Unix-like systems shell detection
-    fn detect_unix_shell<F>(detect_shell_from_string: F) -> Shell 
-    where 
-        F: Fn(&str) -> Option<Shell>
+    fn detect_unix_shell<F>(detect_shell_from_string: F) -> Shell
+    where
+        F: Fn(&str) -> Option<Shell>,
     {
         // First, try to detect from parent process if we're in a TTY
         if is_tty() {
