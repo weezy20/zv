@@ -1,9 +1,9 @@
 use crate::{
-    App, Shell, suggest,
-    tools::{canonicalize, files_have_same_hash},
+    path_utils, suggest, tools::{canonicalize, files_have_same_hash}, App, Shell
 };
 use color_eyre::eyre::{Result, eyre};
 use dirs;
+use std::process::Command;
 use std::{
     io::{self, Write},
     path::{Path, PathBuf},
@@ -91,11 +91,11 @@ pub async fn pre_setup_checks(
     let bin_path = app.bin_path();
 
     // Check if bin path is already in system PATH - this is the most important check
-    let path_already_in_system = shell.check_path_in_system(&bin_path);
+    let path_already_in_system = path_utils::check_dir_in_path(&bin_path);
 
     // Check if the zv binary in bin path is up to date (hash comparison)
     let current_exe = std::env::current_exe()
-        .map_err(|e| eyre!("Failed to get current executable path: {}", e))?;
+        .map_err(|e| eyre!("Pre-setup check: Failed to get current executable path: {}", e))?;
 
     let target_exe = if cfg!(windows) {
         app.bin_path().join("zv.exe")
@@ -103,14 +103,7 @@ pub async fn pre_setup_checks(
         app.bin_path().join("zv")
     };
 
-    let binary_up_to_date = if target_exe.exists() {
-        match files_have_same_hash(&current_exe, &target_exe) {
-            Ok(same) => same,
-            Err(_) => false, // If we can't compare, assume it needs updating
-        }
-    } else {
-        false // Binary doesn't exist, needs copying
-    };
+    let binary_up_to_date = !binary_needs_update(&current_exe, &target_exe);
 
     // If bin path is already in PATH and binary is up to date, we're essentially done
     if path_already_in_system && binary_up_to_date {
@@ -134,24 +127,6 @@ pub async fn pre_setup_checks(
     if !check_custom_zv_dir_warning(app, using_env_var)? {
         return Ok(false); // User chose to abort
     }
-
-    // Check if ZV_DIR environment variable is set correctly (for informational purposes)
-    let zv_dir_set = if using_env_var {
-        // When using custom ZV_DIR, verify it matches what we expect
-        match std::env::var("ZV_DIR") {
-            Ok(env_zv_dir) => {
-                let env_path = PathBuf::from(env_zv_dir);
-                match (canonicalize(&env_path), canonicalize(&zv_dir)) {
-                    (Ok(env_canonical), Ok(zv_canonical)) => env_canonical == zv_canonical,
-                    _ => false,
-                }
-            }
-            Err(_) => false,
-        }
-    } else {
-        // When using default path, ZV_DIR should not be set (or we don't care)
-        true
-    };
 
     // For Unix systems, check if shell RC files contain the source command
     let shell_rc_configured = if cfg!(windows) {
@@ -186,11 +161,7 @@ pub async fn pre_setup_checks(
     }
 
     if using_env_var {
-        if zv_dir_set {
-            println!("  ✓ ZV_DIR environment variable is set correctly");
-        } else {
-            println!("  ✗ ZV_DIR environment variable mismatch");
-        }
+        println!("  ✓ ZV_DIR environment variable is set correctly");
     } else {
         println!(
             "  • ZV_DIR: {} (using default path)",
@@ -375,4 +346,68 @@ pub(super) async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crat
     }
 
     Ok(())
+}
+
+/// Get version from a zv binary executable
+fn get_binary_version(exe_path: &Path) -> Result<String> {
+    let output = Command::new(exe_path)
+        .arg("-V")
+        .output()
+        .map_err(|e| eyre!("Failed to execute {} -V: {}", exe_path.display(), e))?;
+
+    if !output.status.success() {
+        return Err(eyre!("Command {} -V failed", exe_path.display()));
+    }
+
+    let version = String::from_utf8(output.stdout)
+        .map_err(|e| eyre!("Invalid UTF-8 in version output: {}", e))?
+        .trim()
+        .to_string();
+
+    Ok(version)
+}
+
+/// Compare versions of two executables
+fn versions_match(current_exe: &Path, target_exe: &Path) -> Result<bool> {
+    let current_version = get_binary_version(current_exe)?;
+    let target_version = get_binary_version(target_exe)?;
+    Ok(current_version == target_version)
+}
+
+/// Check if binary needs updating based on version and hash
+fn binary_needs_update(current_exe: &Path, target_exe: &Path) -> bool {
+    if !target_exe.exists() {
+        return true;
+    }
+
+    match versions_match(current_exe, target_exe) {
+        Ok(true) => {
+            // Versions match - use hash as integrity check
+            match files_have_same_hash(current_exe, target_exe) {
+                Ok(same) => {
+                    if !same {
+                        println!(
+                            "  {} Version match but hash differs - possible corruption",
+                            Paint::yellow("⚠")
+                        );
+                    }
+                    !same
+                }
+                Err(_) => {
+                    println!(
+                        "  {} Hash check failed but versions match",
+                        Paint::yellow("⚠")
+                    );
+                    false // Assume it's fine if versions match
+                }
+            }
+        }
+        Ok(false) => true, // Different versions - needs update
+        Err(_) => {
+            // Version check failed - fall back to hash comparison
+            files_have_same_hash(current_exe, target_exe)
+                .map(|same| !same)
+                .unwrap_or(true) // If all checks fail, assume update needed
+        }
+    }
 }

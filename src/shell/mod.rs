@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 mod detection;
 mod env_export;
 mod generators;
-mod path_utils;
+pub mod path_utils;
 
 pub use detection::detect_shell_from_parent;
 pub use env_export::*;
@@ -87,11 +87,6 @@ impl Shell {
             Shell::Fish => format!("source \"{}\"", env_file.display()),
             _ => format!("source \"{}\"", env_file.display()),
         }
-    }
-
-    /// Based on current shell type, inspect if `path` is in SHELL's PATH
-    pub fn check_path_in_system(&self, path: &Path) -> bool {
-        path_utils::check_path_in_system(path)
     }
 }
 

@@ -51,8 +51,8 @@ pub fn get_default_path_strings(shell: &Shell) -> (String, String) {
     }
 }
 
-/// Check if path is in system PATH
-pub fn check_path_in_system(path: &Path) -> bool {
+/// Check if path/to/dir is in system PATH
+pub fn check_dir_in_path(path: &Path) -> bool {
     if !path.is_dir() {
         return false;
     }
