@@ -6,6 +6,8 @@ mod utils;
 use color_eyre::eyre::{Context as _, eyre};
 
 use crate::types::*;
+use crate::tools::canonicalize;
+use crate::Shell;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -24,7 +26,6 @@ pub struct App {
     versions_path: PathBuf,
     /// <ZV_DIR>/config.toml - Config path
     config_path: PathBuf,
-    #[cfg(unix)]
     /// <ZV_DIR>/env for *nix. For powershell/cmd prompt we rely on direct PATH variable manipulation.
     env_path: PathBuf,
     /// <ZV_DIR>/config.toml - Configuration implementation
@@ -72,8 +73,11 @@ impl App {
 
         let config = None;
 
-        #[cfg(unix)]
-        let env_path = zv_base_path.join("env");
+        let env_path = if let Some(ref shell_type) = shell {
+            zv_base_path.join(shell_type.env_file_name())
+        } else {
+            zv_base_path.join("env")
+        };
 
         let app = App {
             network: None,
@@ -85,7 +89,6 @@ impl App {
             zv_base_path,
             bin_path,
             config_path,
-            #[cfg(unix)]
             env_path,
             config,
             versions_path,
@@ -117,6 +120,11 @@ impl App {
     /// Get the app's bin path
     pub fn bin_path(&self) -> &PathBuf {
         &self.bin_path
+    }
+
+    /// Get the environment file path
+    pub fn env_path(&self) -> &PathBuf {
+        &self.env_path
     }
 
     /// Path to zv zig binary

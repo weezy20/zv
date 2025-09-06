@@ -1,4 +1,5 @@
 use crate::ZvError;
+use crate::app::App;
 use crate::tools::{canonicalize, is_tty};
 use color_eyre::eyre::eyre;
 use std::path::{Path, PathBuf};
@@ -196,8 +197,8 @@ impl Shell {
 
         match self {
             Shell::Bash => vec![
-                home_dir.join(".profile"),
                 home_dir.join(".bashrc"),
+                home_dir.join(".profile"),
                 home_dir.join(".bash_profile"),
             ],
             Shell::Zsh => vec![
@@ -215,22 +216,18 @@ impl Shell {
 
     /// Generate the source command for this shell type
     pub fn get_source_command(&self, env_file: &Path) -> String {
-        match self {
-            Shell::Fish => format!("source \"{}\"", env_file.display()),
-            Shell::Nu => format!("source \"{}\"", env_file.display()),
-            Shell::Tcsh => format!("source \"{}\"", env_file.display()),
-            _ => format!("source \"{}\"", env_file.display()), // POSIX shells (bash, zsh, etc.)
-        }
+        format!("source \"{}\"", env_file.display())
     }
 
     /// Returns the env file path and content without writing to disk
-    pub fn export_without_dump(
+    pub fn export_without_dump<'a>(
         &self,
-        zv_dir: &Path,
-        bin_path: &Path,
+        app: &'a App,
         using_env_var: bool,
-    ) -> (PathBuf, String) {
-        let env_file = zv_dir.join(self.env_file_name());
+    ) -> (&'a Path, String) {
+        let zv_dir = app.path();
+        let bin_path = app.bin_path();
+        let env_file = app.env_path().as_path();
 
         // Use ${HOME}/.zv when using default path, otherwise use absolute path
         let (zv_dir_str, zv_bin_path_str) = if using_env_var {
@@ -340,15 +337,14 @@ esac"#,
     /// For CMD and PowerShell, this method does not write to disk as system variables are edited directly
     pub async fn export(
         &self,
-        zv_dir: &Path,
-        bin_path: &Path,
+        app: &App,
         using_env_var: bool,
     ) -> Result<(), ZvError> {
         if matches!(self, Shell::Cmd | Shell::PowerShell) {
             return Ok(());
         }
 
-        let (env_file, content) = self.export_without_dump(zv_dir, bin_path, using_env_var);
+        let (env_file, content) = self.export_without_dump(app, using_env_var);
 
         // Check if content already exists in file
         let dump_true = if env_file.exists() {

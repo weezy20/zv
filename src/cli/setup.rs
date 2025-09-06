@@ -596,7 +596,7 @@ async fn setup_windows_environment(
 }
 
 async fn setup_unix_environment(
-    app: &App,
+    app: &mut App,
     shell: &Shell,
     using_env_var: bool,
     dry_run: bool,
@@ -604,7 +604,7 @@ async fn setup_unix_environment(
     let zv_dir = app.path();
 
     // Generate shell environment file
-    let (env_file, env_content) = shell.export_without_dump(zv_dir, app.bin_path(), using_env_var);
+    let (env_file, env_content) = shell.export_without_dump(app, using_env_var);
 
     // Check if environment file needs to be created/updated
     let env_file_needs_update = if env_file.exists() {
@@ -674,7 +674,7 @@ async fn setup_unix_environment(
     if !dry_run && env_file_needs_update {
         // Write the environment file
         shell
-            .export(zv_dir, app.bin_path(), using_env_var)
+            .export(app, using_env_var)
             .await
             .map_err(|e| eyre!("Failed to create environment file: {}", e))?;
 
