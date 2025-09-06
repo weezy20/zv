@@ -389,7 +389,7 @@ async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crate::Result<(
 /// Perform post-setup actions: copy zv binary and regenerate shims
 async fn post_setup_actions(app: &App, dry_run: bool) -> crate::Result<()> {
     if dry_run {
-        println!("\n{} post-setup actions:", Paint::yellow("Would perform"));
+        println!("\n{} post-setup actions:", Paint::yellow("Dry run - would perform"));
     } else {
         println!("\nPerforming post-setup actions:");
     }
@@ -407,10 +407,10 @@ pub async fn setup_shell(
     app: &mut App,
     using_env_var: bool,
     dry_run: bool,
-    default_version: ZigVersion,
+    default_version: Option<ZigVersion>,
 ) -> crate::Result<()> {
     if app.source_set {
-        println!("{}", Paint::green("Shell environment already set up."));
+        println!("{}", Paint::green("Shell environment PATH is already set up."));
 
         // Even when shell environment is set up, we need to check if binary needs updating
         // or if shims need regeneration

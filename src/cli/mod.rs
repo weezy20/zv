@@ -119,6 +119,11 @@ pub enum Commands {
             help = "Specify a specific zig version to set up. By default it set's up the latest active version."
         )]
         default_version: Option<ZigVersion>,
+        #[arg(
+            long = "no-zig",
+            help = "Skip installing default zig compiler toolchain"
+        )]
+        no_zig: bool,
     },
 
     /// Synchronize index, mirrors list and metadata for zv.
@@ -157,7 +162,7 @@ impl Commands {
                 Some(version) => r#use::use_version(version, &mut app).await,
                 None => {
                     error("Version must be specified. e.g., `zv use latest` or `zv use 0.15.1`");
-                    std::process::exit(1);
+                    std::process::exit(2);
                 }
             },
             Commands::List => todo!(),
@@ -165,13 +170,24 @@ impl Commands {
             Commands::Setup {
                 dry_run,
                 default_version,
+                no_zig,
             } => {
+                // Validate that no_zig and default_version are not both specified
+                if no_zig && default_version.is_some() {
+                    error(
+                        "The '--no-zig' and '--version' options cannot be used together as they're contradictory.",
+                    );
+                    std::process::exit(2);
+                }
+
                 setup::setup_shell(
                     &mut app,
                     using_env,
                     dry_run,
-                    default_version.unwrap_or_else(|| {
-                        ZigVersion::placeholder_for_variant("latest").expect("valid zigversion")
+                    (!no_zig).then(|| {
+                        default_version.unwrap_or_else(|| {
+                            ZigVersion::placeholder_for_variant("latest").expect("valid zigversion")
+                        })
                     }),
                 )
                 .await
