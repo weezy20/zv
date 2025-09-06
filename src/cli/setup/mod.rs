@@ -45,7 +45,7 @@ fn check_custom_zv_dir_warning(app: &App, using_env_var: bool) -> crate::Result<
     println!("{}", Paint::yellow("Important considerations:"));
     println!(
         "• ZV_DIR must be {} set in your environment",
-        Paint::red("permanently")
+        Paint::red("permanently").bold()
     );
     println!(
         "• Temporary ZV_DIR settings will break zv in new sessions unless the next session also has it set"
