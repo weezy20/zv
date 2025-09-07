@@ -5,9 +5,9 @@ mod utils;
 
 use color_eyre::eyre::{Context as _, eyre};
 
-use crate::Shell;
 use crate::tools::canonicalize;
 use crate::types::*;
+use crate::{Shell, path_utils};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -84,9 +84,7 @@ impl App {
             network: None,
             zig,
             zls,
-            source_set: shell
-                .as_ref()
-                .map_or(false, |s| s.check_path_in_system(&bin_path)),
+            source_set: path_utils::check_dir_in_path(&bin_path),
             zv_base_path,
             bin_path,
             config_path,
