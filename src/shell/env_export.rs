@@ -7,28 +7,28 @@ use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 impl Shell {
     /// Returns the env file path and content without writing to disk
     pub fn export_without_dump<'a>(&self, app: &'a App, using_env_var: bool) -> (&'a Path, String) {
-        let env_file = app.env_path().as_path();
         let (zv_dir_str, zv_bin_path_str) = get_path_strings(self, app, using_env_var);
         let env_content = generate_env_content(self, &zv_dir_str, &zv_bin_path_str);
 
-        (env_file, env_content)
+        (app.env_path().as_path(), env_content)
     }
 
-    /// Dumps shell specific environment variables to the env file
-    pub async fn export(&self, app: &App, using_env_var: bool) -> Result<(), ZvError> {
+    /// Dumps shell specific environment variables to the env file - Skips for windows shell
+    pub async fn export_unix(&self, app: &App, using_env_var: bool) -> Result<(), ZvError> {
         // Skip file operations for Windows shells that use direct system variable edits
-        if uses_direct_system_variables(self) {
+        // But allow PowerShell on Unix to create env files
+        if self.windows_shell() && !self.is_powershell_in_unix() {
             return Ok(());
         }
 
         let (env_file, content) = self.export_without_dump(app, using_env_var);
         write_env_file_if_needed(env_file, &content).await
     }
-}
-
-/// Check if shell uses direct system variable edits (no file writing needed)
-fn uses_direct_system_variables(shell: &Shell) -> bool {
-    matches!(shell, Shell::Cmd | Shell::PowerShell)
+    /// Check if shell uses direct system variable edits (no file writing needed)
+    #[inline]
+    fn windows_shell(&self) -> bool {
+        matches!(self, Shell::Cmd | Shell::PowerShell)
+    }
 }
 
 /// Write environment file only if content is different or file doesn't exist

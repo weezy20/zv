@@ -1,0 +1,4 @@
+To setup zv for Zsh:
+1. For current session: source "{env_file_path}"
+2. For permanent setup, add to ~/.zshrc or ~/.zprofile:
+   source "{env_file_path}"

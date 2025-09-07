@@ -1,0 +1,4 @@
+To setup zv for Bash:
+1. For current session: source "{env_file_path}"
+2. For permanent setup, add to ~/.bashrc or ~/.profile:
+   source "{env_file_path}"

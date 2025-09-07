@@ -84,7 +84,11 @@ impl App {
             network: None,
             zig,
             zls,
-            source_set: path_utils::check_dir_in_path(&bin_path),
+            source_set: if let Some(ref shell_type) = shell {
+                path_utils::check_dir_in_path_for_shell(shell_type, &bin_path)
+            } else {
+                path_utils::check_dir_in_path(&bin_path)
+            },
             zv_base_path,
             bin_path,
             config_path,

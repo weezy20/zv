@@ -3,30 +3,38 @@ use std::path::{Path, PathBuf};
 use yansi::Paint;
 
 use crate::{App, Shell, suggest};
+use super::setup_utils::{SetupRequirements, set_zv_dir_env_var};
 
 pub async fn setup_unix_environment(
     app: &mut App,
     shell: &Shell,
-    using_env_var: bool,
+    requirements: &SetupRequirements,
     dry_run: bool,
 ) -> crate::Result<()> {
     let zv_dir = app.path();
 
-    // Generate shell environment file
-    let (env_file, env_content) = shell.export_without_dump(app, using_env_var);
-
-    // Check if environment file needs to be created/updated
-    let env_file_needs_update = if env_file.exists() {
-        match tokio::fs::read_to_string(&env_file).await {
-            Ok(existing_content) => existing_content.trim() != env_content.trim(),
-            Err(_) => true,
-        }
+    // Generate shell environment file if needed
+    let env_file = zv_dir.join(shell.env_file_name());
+    let (env_file_needs_update, env_content) = if requirements.generate_env_file {
+        let (_, env_content) = shell.export_without_dump(app, requirements.set_zv_dir_env);
+        
+        // Check if environment file needs to be created/updated
+        let env_file_needs_update = if env_file.exists() {
+            match tokio::fs::read_to_string(&env_file).await {
+                Ok(existing_content) => existing_content.trim() != env_content.trim(),
+                Err(_) => true,
+            }
+        } else {
+            true
+        };
+        (env_file_needs_update, env_content)
     } else {
-        true
+        // If we're not generating env file, assume it exists and is up to date
+        (false, String::new())
     };
 
     // Check if shell RC files need to be updated
-    let rc_files_need_update = !check_shell_rc_files_configured(shell, zv_dir).await;
+    let rc_files_need_update = requirements.edit_rc_file;
 
     // If no updates are needed, inform the user
     if !env_file_needs_update && !rc_files_need_update {
@@ -42,7 +50,19 @@ pub async fn setup_unix_environment(
             "  • Shell startup files: {} (already configured)",
             Paint::dim("no changes needed")
         );
+        
+        // Still set ZV_DIR environment variable if requested
+        if requirements.set_zv_dir_env {
+            set_zv_dir_env_var(app, shell, dry_run).await?;
+        }
+        
         return Ok(());
+    }
+
+    // Set ZV_DIR environment variable if requested
+    if requirements.set_zv_dir_env {
+        set_zv_dir_env_var(app, shell, dry_run).await?;
+        println!();
     }
 
     // Show what will be written to the environment file
@@ -83,7 +103,7 @@ pub async fn setup_unix_environment(
     if !dry_run && env_file_needs_update {
         // Write the environment file
         shell
-            .export(app, using_env_var)
+            .export_unix(app, requirements.set_zv_dir_env)
             .await
             .map_err(|e| eyre!("Failed to create environment file: {}", e))?;
 

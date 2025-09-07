@@ -11,22 +11,30 @@ use std::{
 };
 use yansi::Paint;
 
-/// Check if we're using a custom ZV_DIR (not the default $HOME/.zv) and warn the user
-fn check_custom_zv_dir_warning(app: &App, using_env_var: bool) -> crate::Result<bool> {
+/// Setup actions
+#[derive(Debug, Clone)]
+pub struct SetupRequirements {
+    pub set_zv_dir_env: bool,
+    pub generate_env_file: bool,
+    pub edit_rc_file: bool,
+    pub perform_post_setup_action: bool,
+}
+
+/// Check if we're using a custom ZV_DIR (not the default $HOME/.zv) and offer to set it permanently
+fn check_custom_zv_dir_warning(app: &App, using_env_var: bool, shell: &Shell) -> crate::Result<bool> {
     if !using_env_var {
-        // Using default path, no warning needed
-        return Ok(true);
+        // Using default path, no action needed for ZV_DIR
+        return Ok(false);
     }
 
     let zv_dir = app.path();
     let home_dir = dirs::home_dir().ok_or_else(|| eyre!("Could not determine home directory"))?;
     let default_zv_dir = home_dir.join(".zv");
 
-    // Show warning about custom ZV_DIR
-    println!("{}", Paint::yellow("⚠ Custom ZV_DIR Warning").bold());
-    println!();
+    // Show info about custom ZV_DIR
+    println!("{}\n", Paint::yellow("⚠ Custom ZV_DIR detected").bold());
     println!(
-        "You are using a custom ZV_DIR path: {}",
+        "Your environment has ZV_DIR set to path: {}",
         Paint::cyan(&zv_dir.display().to_string())
     );
     println!(
@@ -34,20 +42,20 @@ fn check_custom_zv_dir_warning(app: &App, using_env_var: bool) -> crate::Result<
         Paint::dim(&default_zv_dir.display().to_string())
     );
     println!();
-    println!("{}", Paint::yellow("Important considerations:"));
-    println!(
-        "• ZV_DIR must be {} set in your environment",
-        Paint::red("permanently").bold()
-    );
-    println!(
-        "• Temporary ZV_DIR settings will break zv in new sessions unless the next session also has it set"
-    );
-    println!("• Ensure ZV_DIR is permanently set in your shell profile or system environment");
-    println!("• If yes you can ignore this warning");
-    println!();
 
-    // Prompt for confirmation
-    print!("Do you want to continue with the custom ZV_DIR path? [y/N]: ");
+    // Determine the target for permanent setting
+    let target_description = if cfg!(windows) {
+        "system environment variables"
+    } else {
+        ".profile"
+    };
+
+    // Offer to set ZV_DIR permanently
+    print!(
+        "Do you want zv to make ZV_DIR={} permanent by adding it to {}? [y/N]: ",
+        Paint::cyan(&zv_dir.display().to_string()),
+        Paint::green(&target_description)
+    );
     io::stdout()
         .flush()
         .map_err(|e| eyre!("Failed to flush stdout: {}", e))?;
@@ -58,27 +66,142 @@ fn check_custom_zv_dir_warning(app: &App, using_env_var: bool) -> crate::Result<
         .map_err(|e| eyre!("Failed to read user input: {}", e))?;
 
     let response = input.trim().to_lowercase();
-    let should_continue = matches!(response.as_str(), "y" | "yes");
+    let should_set_permanent = matches!(response.as_str(), "y" | "yes");
 
-    if !should_continue {
+    if !should_set_permanent {
+        // User chose not to set permanently, show warnings
         println!();
-        println!("{}", Paint::yellow("Setup aborted by user."));
+        println!("{}", Paint::yellow("⚠ Important considerations:"));
+        println!(
+            "• Temporary ZV_DIR settings will break zv in new sessions unless the next session also has it set"
+        );
+        println!("• Ensure ZV_DIR is permanently set in your shell profile or system environment");
         println!();
-        println!("To use the default ZV_DIR path, unset the ZV_DIR environment variable:");
-        if cfg!(windows) {
-            println!("  {}", Paint::green("Remove-Item Env:ZV_DIR"));
-        } else {
-            println!("  {}", Paint::green("unset ZV_DIR"));
-        }
-        println!("Then run {} again.", Paint::green("zv setup"));
-        return Ok(false);
+        return Ok(false); // Don't set ZV_DIR permanently
     }
 
     println!();
-    println!("{}", Paint::green("Continuing with custom ZV_DIR path..."));
+    println!("{}", Paint::green("zv will set ZV_DIR permanently during setup..."));
     println!();
 
-    Ok(true)
+    Ok(true) // Set ZV_DIR permanently
+}
+
+/// Set ZV_DIR environment variable permanently
+pub async fn set_zv_dir_env_var(app: &App, shell: &Shell, dry_run: bool) -> crate::Result<()> {
+    let zv_dir = app.path();
+    
+    if dry_run {
+        println!(
+            "{} ZV_DIR={} permanently",
+            Paint::yellow("Would set"),
+            Paint::cyan(&zv_dir.display().to_string())
+        );
+        
+        if cfg!(windows) {
+            println!("  • Method: Windows registry (system environment variables)");
+        } else {
+            let rc_files = shell.get_rc_files();
+            let preferred_rc = rc_files.first()
+                .map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string())
+                .unwrap_or_else(|| ".profile".to_string());
+            println!("  • Method: Adding export to {}", Paint::cyan(&preferred_rc));
+        }
+        return Ok(());
+    }
+
+    if cfg!(windows) {
+        // On Windows, set in system environment variables
+        set_windows_env_var("ZV_DIR", &zv_dir.display().to_string())?;
+        println!(
+            "{} ZV_DIR={}",
+            Paint::green("✓ Set"),
+            Paint::cyan(&zv_dir.display().to_string())
+        );
+        println!("  • Location: System environment variables");
+    } else {
+        // On Unix, add to shell RC file
+        set_unix_env_var(shell, zv_dir).await?;
+        println!(
+            "{} ZV_DIR={}",
+            Paint::green("✓ Set"),
+            Paint::cyan(&zv_dir.display().to_string())
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn set_windows_env_var(var_name: &str, var_value: &str) -> crate::Result<()> {
+    use windows_registry::{CURRENT_USER, Value};
+    
+    let environment_key = CURRENT_USER
+        .open("Environment")
+        .map_err(|e| eyre!("Failed to open Environment registry key: {}", e))?;
+    
+    environment_key
+        .set_value(var_name, &Value::String(var_value.into()))
+        .map_err(|e| eyre!("Failed to set {} environment variable: {}", var_name, e))?;
+    
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn set_windows_env_var(_var_name: &str, _var_value: &str) -> crate::Result<()> {
+    unreachable!("Windows environment variable setting should not be called on non-Windows platforms")
+}
+
+async fn set_unix_env_var(shell: &Shell, zv_dir: &Path) -> crate::Result<()> {
+    let rc_files = shell.get_rc_files();
+    let export_line = format!("export ZV_DIR=\"{}\"", zv_dir.display());
+    
+    // Find the first existing RC file, or create the preferred one
+    let target_rc = rc_files.iter()
+        .find(|&rc| rc.exists())
+        .or_else(|| rc_files.first())
+        .ok_or_else(|| eyre!("No suitable RC file found for {} shell", shell))?;
+
+    // Check if ZV_DIR is already set in this file
+    if target_rc.exists() {
+        let content = tokio::fs::read_to_string(target_rc).await
+            .map_err(|e| eyre!("Failed to read {}: {}", target_rc.display(), e))?;
+        
+        // Check if ZV_DIR export already exists
+        let already_has_export = content.lines().any(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with("export ZV_DIR=") || trimmed.starts_with("ZV_DIR=")
+        });
+        
+        if already_has_export {
+            println!("  • ZV_DIR export already exists in {}", 
+                     Paint::dim(&target_rc.display().to_string()));
+            return Ok(());
+        }
+    }
+
+    // Add the export line to the RC file
+    let mut content = if target_rc.exists() {
+        tokio::fs::read_to_string(target_rc).await
+            .map_err(|e| eyre!("Failed to read {}: {}", target_rc.display(), e))?
+    } else {
+        String::new()
+    };
+
+    // Add a comment and the export
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str("# Added by zv setup for ZV_DIR\n");
+    content.push_str(&export_line);
+    content.push('\n');
+
+    // Write back to the file
+    tokio::fs::write(target_rc, content).await
+        .map_err(|e| eyre!("Failed to write to {}: {}", target_rc.display(), e))?;
+
+    println!("  • Added to {}", Paint::cyan(&target_rc.display().to_string()));
+    Ok(())
 }
 
 /// Check if setup is needed by verifying if zv bin path is already in PATH
@@ -87,12 +210,12 @@ pub async fn pre_setup_checks(
     app: &App,
     shell: &Shell,
     using_env_var: bool,
-) -> crate::Result<bool> {
+) -> crate::Result<Option<SetupRequirements>> {
     let zv_dir = app.path();
     let bin_path = app.bin_path();
 
     // Check if bin path is already in system PATH - this is the most important check
-    let path_already_in_system = path_utils::check_dir_in_path(&bin_path);
+    let path_already_in_system = path_utils::check_dir_in_path_for_shell(shell, &bin_path);
 
     // Check if the zv binary in bin path is up to date (hash comparison)
     let current_exe = std::env::current_exe().map_err(|e| {
@@ -125,13 +248,11 @@ pub async fn pre_setup_checks(
 
         // Still check if shims need regeneration
         println!("Checking if shim regeneration is needed...");
-        return Ok(false); // No setup needed, but post-setup will be checked separately
+        return Ok(None); // No setup needed, but post-setup will be checked separately
     }
 
-    // Check for custom ZV_DIR and warn user if needed (only if setup is actually needed)
-    if !check_custom_zv_dir_warning(app, using_env_var)? {
-        return Ok(false); // User chose to abort
-    }
+    // Check for custom ZV_DIR and handle environment variable setting
+    let set_zv_dir_env = check_custom_zv_dir_warning(app, using_env_var, shell)?;
 
     // For Unix systems, check if shell RC files contain the source command
     let shell_rc_configured = if cfg!(windows) {
@@ -166,7 +287,11 @@ pub async fn pre_setup_checks(
     }
 
     if using_env_var {
-        println!("  ✓ ZV_DIR environment variable is set correctly");
+        if set_zv_dir_env {
+            println!("  ✓ ZV_DIR environment variable will be set permanently");
+        } else {
+            println!("  • ZV_DIR environment variable is already set (temporary)");
+        }
     } else {
         println!(
             "  • ZV_DIR: {} (using default path)",
@@ -184,7 +309,15 @@ pub async fn pre_setup_checks(
 
     println!();
 
-    Ok(true) // Setup is needed
+    // Determine what setup actions are needed
+    let requirements = SetupRequirements {
+        set_zv_dir_env,
+        generate_env_file: cfg!(unix), // Unix systems need env files
+        edit_rc_file: cfg!(unix) && !shell_rc_configured, // Only edit RC if not configured
+        perform_post_setup_action: true, // Always perform post-setup actions
+    };
+
+    Ok(Some(requirements)) // Setup is needed
 }
 
 /// Check if shell RC files are already configured with zv setup
@@ -236,16 +369,16 @@ pub(super) async fn copy_zv_binary_if_needed(app: &App, dry_run: bool) -> crate:
             Ok(false) => {
                 if dry_run {
                     println!(
-                        "  {} zv binary in bin directory (hash mismatch)",
+                        "  {} zv binary in bin directory (checksum mismatch)",
                         Paint::yellow("Would update")
                     );
                 } else {
-                    println!("  • Updating zv binary in bin directory (hash mismatch)");
+                    println!("  • Updating zv binary in bin directory (checksum mismatch)");
                 }
             }
             Err(e) => {
                 println!(
-                    "  • {} hash comparison: {}, will copy anyway",
+                    "  • {} checksum comparison: {}, will copy anyway",
                     Paint::yellow("Warning"),
                     e
                 );
@@ -314,7 +447,7 @@ pub(super) async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crat
                 "  {} config.toml not found - cannot regenerate shims",
                 Paint::yellow("⚠")
             );
-            println!("    Consider running 'zv use <version>' to set up configuration");
+            suggest!("Run {} to set up configuration", cmd = "zv use <version>");
         }
         return Ok(());
     }
@@ -374,9 +507,7 @@ fn get_binary_version(exe_path: &Path) -> Result<String> {
 
 /// Compare versions of two executables
 fn versions_match(current_exe: &Path, target_exe: &Path) -> Result<bool> {
-    let current_version = get_binary_version(current_exe)?;
-    let target_version = get_binary_version(target_exe)?;
-    Ok(current_version == target_version)
+    Ok(get_binary_version(current_exe)? == get_binary_version(target_exe)?)
 }
 
 /// Check if binary needs updating based on version and hash

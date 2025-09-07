@@ -1,22 +1,24 @@
 use color_eyre::eyre::eyre;
 use yansi::Paint;
 
-use crate::App;
+use crate::{App, shell::path_utils::*};
+use super::setup_utils::{SetupRequirements, set_zv_dir_env_var};
 
 #[cfg(target_os = "windows")]
 pub async fn setup_windows_environment(
     app: &App,
-    using_env_var: bool,
+    requirements: &SetupRequirements,
     dry_run: bool,
 ) -> crate::Result<()> {
     use windows_registry::{CURRENT_USER, Value};
 
     let zv_dir = app.path();
     let bin_path = app.bin_path();
-
-    // Set ZV_DIR environment variable
-    let zv_dir_str = zv_dir.to_string_lossy();
-    let bin_path_str = bin_path.to_string_lossy();
+    
+    // Use shell-aware path formatting
+    let shell = app.shell().unwrap_or(&crate::shell::Shell::Cmd);
+    let zv_dir_str = normalize_path_for_shell(shell, zv_dir);
+    let bin_path_str = normalize_path_for_shell(shell, bin_path);
 
     if dry_run {
         println!(
@@ -43,24 +45,23 @@ pub async fn setup_windows_environment(
         Err(_) => String::new(),
     };
 
-    // We should never set ZV_DIR in the Windows registry
-    // - Default path: Let the app use $HOME/.zv when ZV_DIR is not set
-    // - Custom path: User has already set ZV_DIR environment variable
-    let zv_dir_needs_update = false;
+    // ZV_DIR handling
+    let zv_dir_needs_update = requirements.set_zv_dir_env && current_zv_dir.is_none();
 
     let path_already_contains_bin = current_path.split(';').any(|p| p.trim() == bin_path_str);
     let path_needs_update = !path_already_contains_bin;
 
     // If no changes are needed, inform the user
-    if !path_needs_update {
+    if !path_needs_update && !zv_dir_needs_update {
         println!(
             "{}",
             Paint::green("✓ Windows environment variables are already configured correctly")
         );
-        if using_env_var {
+        if requirements.set_zv_dir_env {
             println!(
-                "  • ZV_DIR: {} (using environment variable)",
-                Paint::dim("custom path")
+                "  • ZV_DIR: {} ({})",
+                Paint::green(&zv_dir_str),
+                if current_zv_dir.is_some() { "already set" } else { "using environment variable" }
             );
         } else {
             println!(
@@ -75,19 +76,27 @@ pub async fn setup_windows_environment(
         return Ok(());
     }
 
+    // Set ZV_DIR environment variable if requested
+    if requirements.set_zv_dir_env {
+        set_zv_dir_env_var(app, shell, dry_run).await?;
+        println!();
+    }
+
     // Show what will be changed
     println!("\nRegistry changes to be made:");
 
-    // ZV_DIR info (we never change it)
-    if using_env_var {
+    // ZV_DIR changes
+    if zv_dir_needs_update {
+        println!("  ZV_DIR: setting to {}", Paint::green(&zv_dir_str));
+    } else if requirements.set_zv_dir_env {
         println!(
-            "  ZV_DIR: {} (using environment variable, not modifying registry)",
-            Paint::dim("custom path")
+            "  ZV_DIR: {} (already set)",
+            Paint::dim(&current_zv_dir.as_deref().unwrap_or("using environment variable"))
         );
     } else {
         println!(
-            "  ZV_DIR: {} (using default path, not setting in registry)",
-            Paint::dim("not needed")
+            "  ZV_DIR: {} (using default path)",
+            Paint::dim("not setting in registry")
         );
     }
 
@@ -148,7 +157,7 @@ pub async fn setup_windows_environment(
 #[cfg(not(target_os = "windows"))]
 pub async fn setup_windows_environment(
     _app: &App,
-    _using_env_var: bool,
+    _requirements: &SetupRequirements,
     _dry_run: bool,
 ) -> crate::Result<()> {
     unreachable!("Windows setup should not be called on non-Windows platforms")

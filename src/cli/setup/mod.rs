@@ -30,6 +30,7 @@ async fn post_setup_actions(app: &App, dry_run: bool) -> crate::Result<()> {
     }
 
     // Copy zv binary to bin directory if needed
+    // Replaces previous bin if current-exe is newer or if same versions, but different hashes.
     copy_zv_binary_if_needed(app, dry_run).await?;
 
     // Regenerate shims if needed
@@ -61,37 +62,73 @@ pub async fn setup_shell(
 
     // Perform pre-setup checks to see if setup is actually needed
     if !dry_run {
-        let setup_needed = pre_setup_checks(app, &shell, using_env_var).await?;
-        if !setup_needed {
-            // Even if setup is not needed, we still need to check post-setup actions
-            post_setup_actions(app, dry_run).await?;
-            return Ok(());
-        }
-    }
+        let setup_requirements = pre_setup_checks(app, &shell, using_env_var).await?;
+        match setup_requirements {
+            None => {
+                // No setup needed, but still check post-setup actions
+                post_setup_actions(app, dry_run).await?;
+                return Ok(());
+            }
+            Some(requirements) => {
+                // Setup is needed, proceed with the requirements
+                if dry_run {
+                    println!(
+                        "{} zv setup for {} shell...",
+                        Paint::yellow("Previewing"),
+                        Paint::cyan(&shell.to_string())
+                    );
+                } else {
+                    println!(
+                        "Setting up zv for {} shell...",
+                        Paint::cyan(&shell.to_string())
+                    );
+                }
 
-    if dry_run {
+                cfg_if! {
+                    if #[cfg(target_os = "windows")] {
+                        setup_windows_environment(app, &requirements, dry_run).await?;
+                    } else {
+                        setup_unix_environment(app, &shell, &requirements, dry_run).await?;
+                    }
+                }
+
+                // Perform post-setup actions if required
+                if requirements.perform_post_setup_action {
+                    post_setup_actions(app, dry_run).await?;
+                }
+            }
+        }
+    } else {
+        // For dry run, show what would be done
         println!(
             "{} zv setup for {} shell...",
             Paint::yellow("Previewing"),
             Paint::cyan(&shell.to_string())
         );
-    } else {
-        println!(
-            "Setting up zv for {} shell...",
-            Paint::cyan(&shell.to_string())
-        );
-    }
 
-    cfg_if! {
-        if #[cfg(target_os = "windows")] {
-            setup_windows_environment(app, using_env_var, dry_run).await?;
-        } else {
-            setup_unix_environment(app, &shell, using_env_var, dry_run).await?;
+        cfg_if! {
+            if #[cfg(target_os = "windows")] {
+                let dummy_requirements = setup_utils::SetupRequirements {
+                    set_zv_dir_env: using_env_var,
+                    generate_env_file: false,
+                    edit_rc_file: false,
+                    perform_post_setup_action: true,
+                };
+                setup_windows_environment(app, &dummy_requirements, dry_run).await?;
+            } else {
+                let dummy_requirements = setup_utils::SetupRequirements {
+                    set_zv_dir_env: using_env_var,
+                    generate_env_file: true,
+                    edit_rc_file: true,
+                    perform_post_setup_action: true,
+                };
+                setup_unix_environment(app, &shell, &dummy_requirements, dry_run).await?;
+            }
         }
-    }
 
-    // Perform post-setup actions: copy zv binary and regenerate shims
-    post_setup_actions(app, dry_run).await?;
+        // For dry run, always show what post-setup actions would be done
+        post_setup_actions(app, dry_run).await?;
+    }
 
     Ok(())
 }

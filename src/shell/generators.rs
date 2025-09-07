@@ -1,275 +1,87 @@
-use super::Shell;
+use super::{Shell, path_utils::*};
 
-/// Generate shell-specific environment content
+/// Generate shell-specific environment content with proper path escaping
+/// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_env_content(shell: &Shell, zv_dir: &str, zv_bin_path: &str) -> String {
-    match shell {
-        Shell::PowerShell => generate_powershell_content(zv_dir, zv_bin_path),
-        Shell::Cmd => generate_cmd_content(zv_dir, zv_bin_path),
-        Shell::Fish => generate_fish_content(zv_dir, zv_bin_path),
-        Shell::Nu => generate_nu_content(zv_dir, zv_bin_path),
-        Shell::Tcsh => generate_tcsh_content(zv_dir, zv_bin_path),
-        Shell::Bash | Shell::Zsh | Shell::Posix | Shell::Unknown => {
-            if matches!(shell, Shell::Unknown) {
-                tracing::warn!("Unknown shell type detected, using POSIX shell syntax");
-            }
-            generate_posix_content(zv_dir, zv_bin_path)
-        }
-    }
+    shell.generate_env_content(zv_dir, zv_bin_path)
 }
 
 /// Generate PowerShell environment setup script
+/// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_powershell_content(zv_dir: &str, zv_bin_path: &str) -> String {
-    format!(
-        r#"# zv shell setup for PowerShell
-# To permanently set environment variables in PowerShell, run as Administrator:
-# [Environment]::SetEnvironmentVariable("ZV_DIR", "{zv_dir}", "User")
-# [Environment]::SetEnvironmentVariable("PATH", "{path};$env:PATH", "User")
-
-$env:ZV_DIR = "{zv_dir}"
-if ($env:PATH -notlike "*{path}*") {{
-    $env:PATH = "{path};$env:PATH"
-}}"#,
-        path = zv_bin_path,
-        zv_dir = zv_dir
-    )
+    Shell::PowerShell.generate_env_content(zv_dir, zv_bin_path)
 }
 
 /// Generate Windows Command Prompt batch script
+/// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_cmd_content(zv_dir: &str, zv_bin_path: &str) -> String {
-    format!(
-        r#"REM zv shell setup for Command Prompt
-REM To permanently set environment variables in CMD, run as Administrator:
-REM setx ZV_DIR "{zv_dir}" /M
-REM setx PATH "{path};%PATH%" /M
-
-set "ZV_DIR={zv_dir}"
-echo ;%PATH%; | find /i ";{path};" >nul || set "PATH={path};%PATH%""#,
-        path = zv_bin_path,
-        zv_dir = zv_dir
-    )
+    Shell::Cmd.generate_env_content(zv_dir, zv_bin_path)
 }
 
 /// Generate Fish shell setup script
+/// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_fish_content(zv_dir: &str, zv_bin_path: &str) -> String {
-    format!(
-        r#"#!/usr/bin/env fish
-# zv shell setup for Fish shell
-set -gx ZV_DIR "{zv_dir}"
-if not contains "{path}" $PATH
-    set -gx PATH "{path}" $PATH
-end"#,
-        path = zv_bin_path,
-        zv_dir = zv_dir
-    )
+    Shell::Fish.generate_env_content(zv_dir, zv_bin_path)
 }
 
 /// Generate Nushell setup script
+/// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_nu_content(zv_dir: &str, zv_bin_path: &str) -> String {
-    format!(
-        r#"# zv shell setup for Nushell
-$env.ZV_DIR = "{zv_dir}"
-$env.PATH = ($env.PATH | split row (char esep) | prepend "{path}" | uniq)"#,
-        path = zv_bin_path,
-        zv_dir = zv_dir
-    )
+    Shell::Nu.generate_env_content(zv_dir, zv_bin_path)
 }
 
 /// Generate tcsh/csh setup script
+/// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_tcsh_content(zv_dir: &str, zv_bin_path: &str) -> String {
-    format!(
-        r#"#!/bin/csh
-# zv shell setup for tcsh/csh
-setenv ZV_DIR "{zv_dir}"
-echo ":${{PATH}}:" | grep -q ":{path}:" || setenv PATH "{path}:$PATH""#,
-        path = zv_bin_path,
-        zv_dir = zv_dir
-    )
+    Shell::Tcsh.generate_env_content(zv_dir, zv_bin_path)
 }
 
 /// Generate POSIX-compliant shell setup script (bash, zsh, sh)
+/// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_posix_content(zv_dir: &str, zv_bin_path: &str) -> String {
-    format!(
-        r#"#!/bin/sh
-# zv shell setup
-# affix colons on either side of $PATH to simplify matching
-export ZV_DIR="{zv_dir}"
-case ":${{PATH}}:" in
-    *:"{path}":*)
-        ;;
-    *)
-        # Prepending path in case a system-installed binary needs to be overridden
-        export PATH="{path}:$PATH"
-        ;;
-esac"#,
-        path = zv_bin_path,
-        zv_dir = zv_dir
-    )
+    Shell::Bash.generate_env_content(zv_dir, zv_bin_path)
 }
 
 /// Generate shell-specific uninstall/cleanup script
+/// This function is now a wrapper around the Shell::generate_cleanup_content method
 pub fn generate_cleanup_content(shell: &Shell, zv_dir: &str, zv_bin_path: &str) -> String {
-    match shell {
-        Shell::PowerShell => generate_powershell_cleanup(zv_dir, zv_bin_path),
-        Shell::Cmd => generate_cmd_cleanup(zv_dir, zv_bin_path),
-        Shell::Fish => generate_fish_cleanup(zv_dir, zv_bin_path),
-        Shell::Nu => generate_nu_cleanup(zv_dir, zv_bin_path),
-        Shell::Tcsh => generate_tcsh_cleanup(zv_dir, zv_bin_path),
-        Shell::Bash | Shell::Zsh | Shell::Posix | Shell::Unknown => {
-            generate_posix_cleanup(zv_dir, zv_bin_path)
-        }
-    }
+    shell.generate_cleanup_content(zv_dir, zv_bin_path)
 }
 
 /// Generate PowerShell cleanup script
 fn generate_powershell_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
-    format!(
-        r#"# zv cleanup script for PowerShell
-# Remove zv from environment variables
-
-Remove-Item Env:ZV_DIR -ErrorAction SilentlyContinue
-$env:PATH = ($env:PATH -split ';' | Where-Object {{ $_ -ne "{path}" }}) -join ';'
-
-Write-Host "zv environment cleaned up for current session"
-Write-Host "To permanently remove, run as Administrator:"
-Write-Host "[Environment]::SetEnvironmentVariable('ZV_DIR', `$null, 'User')"
-Write-Host "Update PATH manually in System Properties -> Environment Variables""#,
-        path = zv_bin_path
-    )
+    Shell::PowerShell.generate_cleanup_content(zv_dir, zv_bin_path)
 }
 
 /// Generate CMD cleanup script
 fn generate_cmd_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
-    format!(
-        r#"REM zv cleanup script for Command Prompt
-set "ZV_DIR="
-set "PATH=%PATH:{path};=%"
-set "PATH=%PATH:;{path}=%"
-
-echo zv environment cleaned up for current session
-echo To permanently remove, run as Administrator:
-echo setx ZV_DIR "" /M
-echo Update PATH manually in System Properties"#,
-        path = zv_bin_path
-    )
+    Shell::Cmd.generate_cleanup_content(zv_dir, zv_bin_path)
 }
 
 /// Generate Fish cleanup script
 fn generate_fish_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
-    format!(
-        r#"#!/usr/bin/env fish
-# zv cleanup script for Fish shell
-
-set -e ZV_DIR
-if set -l index (contains -i "{path}" $PATH)
-    set -e PATH[$index]
-end
-
-echo "zv environment cleaned up""#,
-        path = zv_bin_path
-    )
+    Shell::Fish.generate_cleanup_content(zv_dir, zv_bin_path)
 }
 
-/// Generate Nushell cleanup script  
+/// Generate Nushell cleanup script
 fn generate_nu_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
-    format!(
-        r#"# zv cleanup script for Nushell
-
-hide-env ZV_DIR
-$env.PATH = ($env.PATH | split row (char esep) | where $it != "{path}")
-
-print "zv environment cleaned up""#,
-        path = zv_bin_path
-    )
+    Shell::Nu.generate_cleanup_content(zv_dir, zv_bin_path)
 }
 
 /// Generate tcsh cleanup script
 fn generate_tcsh_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
-    format!(
-        r#"#!/bin/csh  
-# zv cleanup script for tcsh/csh
-
-unsetenv ZV_DIR
-setenv PATH `echo $PATH | sed 's|{path}:||g' | sed 's|:{path}||g'`
-
-echo "zv environment cleaned up""#,
-        path = zv_bin_path
-    )
+    Shell::Tcsh.generate_cleanup_content(zv_dir, zv_bin_path)
 }
 
 /// Generate POSIX cleanup script
 fn generate_posix_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
-    format!(
-        r#"#!/bin/sh
-# zv cleanup script
-
-unset ZV_DIR
-case ":$PATH:" in
-    *:"{path}":*)
-        PATH=$(echo "$PATH" | sed -e "s|{path}:||g" -e "s|:{path}||g")
-        export PATH
-        ;;
-esac
-
-echo "zv environment cleaned up""#,
-        path = zv_bin_path
-    )
+    Shell::Bash.generate_cleanup_content(zv_dir, zv_bin_path)
 }
 
 /// Generate shell-specific instructions for manual setup
+/// This function is now a wrapper around the Shell::generate_setup_instructions method
 pub fn generate_setup_instructions(shell: &Shell, env_file_path: &str) -> String {
-    match shell {
-        Shell::PowerShell => format!(
-            r#"To setup zv for PowerShell:
-1. For current session: . "{env_file_path}"
-2. For permanent setup, add to your PowerShell profile:
-   - Run: notepad $PROFILE
-   - Add: . "{env_file_path}"
-   - Or run as Administrator for system-wide:
-     [Environment]::SetEnvironmentVariable("ZV_DIR", "your_path", "Machine")"#
-        ),
-        Shell::Cmd => format!(
-            r#"To setup zv for Command Prompt:
-1. For current session: call "{env_file_path}"
-2. For permanent setup, run as Administrator:
-   setx PATH "%PATH%;your_bin_path" /M"#
-        ),
-        Shell::Fish => format!(
-            r#"To setup zv for Fish shell:
-1. For current session: source "{env_file_path}"
-2. For permanent setup, add to ~/.config/fish/config.fish:
-   source "{env_file_path}""#
-        ),
-        Shell::Nu => format!(
-            r#"To setup zv for Nushell:
-1. For current session: source "{env_file_path}"  
-2. For permanent setup, add to ~/.config/nushell/config.nu:
-   source "{env_file_path}""#
-        ),
-        Shell::Bash => format!(
-            r#"To setup zv for Bash:
-1. For current session: source "{env_file_path}"
-2. For permanent setup, add to ~/.bashrc or ~/.profile:
-   source "{env_file_path}""#
-        ),
-        Shell::Zsh => format!(
-            r#"To setup zv for Zsh:
-1. For current session: source "{env_file_path}"
-2. For permanent setup, add to ~/.zshrc or ~/.zprofile:
-   source "{env_file_path}""#
-        ),
-        Shell::Tcsh => format!(
-            r#"To setup zv for tcsh/csh:
-1. For current session: source "{env_file_path}"
-2. For permanent setup, add to ~/.tcshrc or ~/.cshrc:
-   source "{env_file_path}""#
-        ),
-        Shell::Posix | Shell::Unknown => format!(
-            r#"To setup zv for your shell:
-1. For current session: source "{env_file_path}"
-2. For permanent setup, add to your shell's profile file:
-   source "{env_file_path}""#
-        ),
-    }
+    shell.generate_setup_instructions(env_file_path)
 }
 
 #[cfg(test)]
@@ -307,7 +119,7 @@ mod tests {
         let cleanup =
             generate_cleanup_content(&Shell::Fish, "/home/user/.zv", "/home/user/.zv/bin");
         assert!(cleanup.contains("set -e ZV_DIR"));
-        assert!(cleanup.contains("set -e PATH"));
+        assert!(cleanup.contains("contains -i"));
     }
 
     #[test]

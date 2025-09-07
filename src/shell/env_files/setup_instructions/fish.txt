@@ -1,0 +1,4 @@
+To setup zv for Fish shell:
+1. For current session: source "{env_file_path}"
+2. For permanent setup, add to ~/.config/fish/config.fish:
+   source "{env_file_path}"
