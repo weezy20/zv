@@ -1,10 +1,24 @@
 # zv (zig version) manager
 
-`zv` is a blazing fast, cross-platform, simple-to-use, compiler toolchain manager for Ziglang, written in Rust. `zv` aims to be the only tool you need for zig stuff on your machine. If you need per-project zig versions, we have it. If you need to just run a single `zig build` with a different zig version that's possible as well. `zv` enables you to write stuff like `zig +master build` and it'll fetch run the build command with master build if you don't have it locally. You can also specify `zig +0.15.1 build` or any other `zig` command really. You also have the option of pinning per-project zig versions using a `.zigversion` file with a valid version number or even strings like `latest` or `master` to make sure you're always using the latest or master branch.
+`zv` is a blazing fast, cross-platform, simple-to-use, compiler toolchain manager for zig, written in Rust. `zv` aims to be a fast & dependable manager zig/zls both system-wide & project specific with either inline syntax `zig +<version>` or using a `.zigversion` file in your project root. A `version` could be a semver, `master`, `latest` for latest stable. These values are fetched from the cached ziglang download index available at `https://ziglang.org/download/index.json`
 
-It also doubles up as a project template starter, providing multiple variants of a zig project from a barebones template with just enough code to run `zig build run` or the standard zig project template. Find out more in `zv init --help`.
+With `zv` binaries you can now build with the master branch without changing your default system zig version: 
+```sh
+zig +master build
+```
+Caching is built in so you never have to wait any longer than strictly necessary. 
 
-`zv` prefers community mirrors for downloads as that's the official recommendation with `minisign` and `shasum` verification done before any usage can begin.
+You can also specify a version number `zig +0.15.1`. With `zv` you also have the option of pinning per-project zig versions using a `.zigversion` which takes the same format as `+` would for inline zig commands. You can have a project with these contents:
+
+```sh
+# file .zigversion
+0.15.1
+```
+which will always use version `0.15.1` when you run any `zig` command inside it. How cool is that? 
+
+It also doubles up as a project template starter, providing multiple variants of a zig project from a barebones template with a very trimmed down `build.zig` & `main.zig` file or the standard zig project template. Find out more with `zv init --help`.
+
+`zv` prefers community mirrors for downloads as that's the official recommendation with `minisign` and `shasum` verification done before any toolchain is installed.
 
 ## Installation
 
@@ -20,7 +34,9 @@ cargo install --git https://github.com/weezy20/zv
 
 ## Usage
 
-All `zv` stuff lives in `ZV_DIR` which you can set as a custom path. If not set, default zv directory is $HOME/.zv on unix like systems and $USERPROFILE/.zv on windows. `zv` is aware of unix shells on windows & powershell on unix so the correct env variables are used to determine default location.
+All `zv` stuff lives in `ZV_DIR`, like zig versions, temporary downloads, cache files & `zv` itself, which you can set as a custom path.
+
+If not set, default zv directory is `$HOME/.zv` on unix like systems and `$USERPROFILE/.zv` on windows. `zv` is aware of emulated shells and WSL so that it always picks the correct default location for `ZV_DIR`.
 
 ```sh
 # Run zv setup as a one-time step to directories & environment zv needs
@@ -31,7 +47,7 @@ All `zv` stuff lives in `ZV_DIR` which you can set as a custom path. If not set,
 zv setup --dry-run | zv setup -d
 
 # Then once you're happy run:
-zv setup
+zv setup # This applies those changes & self-installs zv from your current working directory to <ZV_DIR>/bin
 
 # To get help about a particular subcommand:
 zv <subcommand> -h (short help) | --help (long help)
@@ -39,8 +55,8 @@ zv <subcommand> -h (short help) | --help (long help)
 zv setup --help
 ```
 
-Once `zv setup` is finished you can remove the the cargo binary if you used cargo: `cargo uninstall zv`
-`zv` will automatically install itself in `ZV_DIR/bin` after making sure that has been included in your `PATH`.
+Once `zv setup` is finished you can remove the the cargo installed binary if you used cargo: `cargo uninstall zv`.
+`zv` will automatically install itself in `ZV_DIR/bin` after making sure that has been included in your `PATH` so there's no need for a second binary.
 
 Upgrading can be done the same way. You install `zv` from cargo or build it yourself and run `zv setup` to find & replace your existing installation. This is only temporary until `zv upgrade` is implemented after which this won't be required.
 
@@ -64,7 +80,7 @@ zv use stable                               # Use latest stable release (refers 
 zv use latest                               # Use latest stable release (queries network to fetch the latest stable)
 
 # Per project zig config
-zig +<version> [..zig args]            # Run zig using a specific <version> (fetches and downloads version if not present locally)    
+zig +<version> [...zig args]            # Run zig using a specific <version> (fetches and downloads version if not present locally)    
 zig +master [...zig args]              # Run zig using master build. (If already cached - no download but a network request is made to verify version)
 zig [...zig args]                      # Uses current configured zig or prefers version from `.zigversion` file in the repository adjacent to `build.zig`.                           
 
