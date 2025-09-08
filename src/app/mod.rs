@@ -1,6 +1,5 @@
 mod config;
 mod constants;
-mod crypto;
 mod network;
 mod utils;
 
@@ -60,8 +59,8 @@ impl App {
         }
 
         // Check for existing ZV zig/zls shims in bin directory
-        zig = utils::detect_shim(&bin_path, utils::Shim::Zig);
-        zls = utils::detect_shim(&bin_path, utils::Shim::Zls);
+        zig = utils::detect_shim(&bin_path, Shim::Zig);
+        zls = utils::detect_shim(&bin_path, Shim::Zls);
 
         let versions_path = zv_base_path.join("versions");
         if !versions_path.try_exists().unwrap_or(false) {

@@ -1,37 +1,11 @@
-use crate::tools::canonicalize;
-use crate::{ZigVersion, ZvError};
+use crate::{
+    ZigVersion, ZvError,
+    tools::canonicalize,
+    types::{ArchiveExt, Shim},
+};
 use color_eyre::eyre::eyre;
 use same_file::Handle;
 use std::path::{Path, PathBuf};
-
-/// Enum representing the type of shim to detect
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Shim {
-    Zig,
-    Zls,
-}
-
-impl Shim {
-    /// Returns the executable name for this shim
-    fn executable_name(&self) -> &'static str {
-        match self {
-            Shim::Zig => {
-                if cfg!(target_os = "windows") {
-                    "zig.exe"
-                } else {
-                    "zig"
-                }
-            }
-            Shim::Zls => {
-                if cfg!(target_os = "windows") {
-                    "zls.exe"
-                } else {
-                    "zls"
-                }
-            }
-        }
-    }
-}
 
 /// Checks if a file is a valid zv shim by comparing it with the current executable
 fn is_zv_shim(shim_path: &Path, current_exe_handle: &Handle) -> bool {
@@ -170,30 +144,4 @@ pub fn zig_tarball(zig_version: &ZigVersion, extension: Option<ArchiveExt>) -> O
         }
     }
     None
-}
-
-pub enum ArchiveExt {
-    TarXz,
-    Zip,
-}
-
-impl std::str::FromStr for ArchiveExt {
-    type Err = ZvError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "tar.xz" => Ok(ArchiveExt::TarXz),
-            "zip" => Ok(ArchiveExt::Zip),
-            _ => Err(eyre!("Unsupported archive extension: {s}").into()),
-        }
-    }
-}
-
-impl std::fmt::Display for ArchiveExt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ArchiveExt::TarXz => write!(f, "tar.xz"),
-            ArchiveExt::Zip => write!(f, "zip"),
-        }
-    }
 }
