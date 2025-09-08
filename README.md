@@ -1,6 +1,6 @@
 # zv (zig version) manager
 
-`zv` is a blazing fast, cross-platform, simple-to-use, compiler toolchain manager for zig, written in Rust. `zv` aims to be a fast & dependable manager zig/zls both system-wide & project specific with either inline syntax `zig +<version>` or using a `.zigversion` file in your project root. A `version` could be a semver, `master`, `latest` for latest stable. These values are fetched from the cached ziglang download index available at `https://ziglang.org/download/index.json`
+`zv` is a blazing fast, cross-platform, simple-to-use, compiler toolchain manager for zig, written in Rust. `zv` aims to be a fast & dependable manager zig/zls both system-wide & project specific with either inline syntax `zig +<version>` or using a `.zigversion` file in your project root. A `version` could be a semver, `master`, `latest` for latest stable. These values are fetched from the cached ziglang download index available at <a href="https://ziglang.org/download/index.json">zig official index</a>
 
 With `zv` binaries you can now build with the master branch without changing your default system zig version: 
 ```sh
