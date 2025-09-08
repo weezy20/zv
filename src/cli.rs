@@ -204,7 +204,7 @@ fn print_welcome_message(app: App) {
     let architecture = HOST.architecture;
     let platform = HOST.vendor;
     let os = HOST.operating_system;
-
+    let zv_version = env!("CARGO_PKG_VERSION");
     // Get shell information
     let shell = if cfg!(windows) {
         "PowerShell"
@@ -223,10 +223,12 @@ fn print_welcome_message(app: App) {
 ╚══███╔╝██║   ██║    Platform: {platform}
   ███╔╝ ██║   ██║    OS: {os}
  ███╔╝  ██║   ██║    ZV directory: {zv_dir}
-███████╗╚████╔╝█     Shell: {shell}
-╚══════╝  ╚══╝       {profile}
+███████╗╚████╔╝█     ZV Version: {zv_version}
+╚══════╝  ╚══╝       Shell: {shell}
+                     {profile}
     "#,
                 zv_dir = app.path().display(),
+                zv_version = env!("CARGO_PKG_VERSION"), // or your version source
                 shell = app.shell.as_ref().map_or(Shell::detect(), |s| s.clone()),
                 profile = match std::env::var("PROFILE").ok() {
                     Some(profile) if !profile.is_empty() => format!("Profile: {profile}"),
