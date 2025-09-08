@@ -5,12 +5,14 @@ mod utils;
 
 use color_eyre::eyre::{Context as _, eyre};
 
+use crate::tools::canonicalize;
 use crate::types::*;
+use crate::{Shell, path_utils};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 /// Zv App State
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct App {
     /// <ZV_DIR> - Home for zv
     zv_base_path: PathBuf,
@@ -24,7 +26,6 @@ pub struct App {
     versions_path: PathBuf,
     /// <ZV_DIR>/config.toml - Config path
     config_path: PathBuf,
-    #[cfg(unix)]
     /// <ZV_DIR>/env for *nix. For powershell/cmd prompt we rely on direct PATH variable manipulation.
     env_path: PathBuf,
     /// <ZV_DIR>/config.toml - Configuration implementation
@@ -32,7 +33,7 @@ pub struct App {
     /// Network client
     network: Option<network::ZvNetwork>,
     /// <ZV_DIR>/bin in $PATH? If not prompt user to run `setup` or add `source <ZV_DIR>/env to their shell profile`
-    source_set: bool,
+    pub(crate) source_set: bool,
     /// Current detected shell
     pub(crate) shell: Option<crate::Shell>,
 }
@@ -72,20 +73,25 @@ impl App {
 
         let config = None;
 
-        #[cfg(unix)]
-        let env_path = zv_base_path.join("env");
+        let env_path = if let Some(ref shell_type) = shell {
+            zv_base_path.join(shell_type.env_file_name())
+        } else {
+            // In non-shell mode, it doesn't really matter what the file is
+            zv_base_path.join("env")
+        };
 
         let app = App {
             network: None,
             zig,
             zls,
-            source_set: shell
-                .as_ref()
-                .map_or(false, |s| s.check_path_in_system(&bin_path)),
+            source_set: if let Some(ref shell_type) = shell {
+                path_utils::check_dir_in_path_for_shell(shell_type, &bin_path)
+            } else {
+                path_utils::check_dir_in_path(&bin_path)
+            },
             zv_base_path,
             bin_path,
             config_path,
-            #[cfg(unix)]
             env_path,
             config,
             versions_path,
@@ -112,6 +118,16 @@ impl App {
     /// Get the app's base path
     pub fn path(&self) -> &PathBuf {
         &self.zv_base_path
+    }
+
+    /// Get the app's bin path
+    pub fn bin_path(&self) -> &PathBuf {
+        &self.bin_path
+    }
+
+    /// Get the environment file path
+    pub fn env_path(&self) -> &PathBuf {
+        &self.env_path
     }
 
     /// Path to zv zig binary

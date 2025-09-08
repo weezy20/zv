@@ -1,9 +1,14 @@
-use crate::{App, Shell, UserConfig, ZigVersion, ZvError, suggest, tools};
+use crate::{
+    App, Shell, UserConfig, ZigVersion, ZvError, suggest,
+    tools::{self, error},
+};
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::{Context as _, eyre};
 use yansi::Paint;
+mod clean;
 mod init;
 mod list;
+mod setup;
 mod sync;
 mod r#use;
 mod zig;
@@ -29,7 +34,7 @@ pub async fn zv_main() -> super::Result<()> {
     })?;
 
     match zv_cli.command {
-        Some(cmd) => cmd.execute(app).await?,
+        Some(cmd) => cmd.execute(app, using_env).await?,
         None => {
             print_welcome_message(app);
         }
@@ -96,14 +101,37 @@ pub enum Commands {
     Clean { version: Option<ZigVersion> },
 
     /// Setup shell environment for zv (required to make zig binaries available in $PATH)
-    Setup,
+    Setup {
+        /// Show what would be changed without making any modifications
+        #[arg(
+            long,
+            alias = "dry",
+            short = 'd',
+            help = "Preview changes without applying them"
+        )]
+        dry_run: bool,
+        /// Optional: Specify a specific zig version to set up. By default it set's up the latest active version.
+        #[arg(
+            long,
+            alias = "version",
+            short = 'v',
+            value_parser = clap::value_parser!(ZigVersion),
+            help = "Specify a specific zig version to set up. By default it set's up the latest active version."
+        )]
+        default_version: Option<ZigVersion>,
+        #[arg(
+            long = "no-zig",
+            help = "Skip installing default zig compiler toolchain"
+        )]
+        no_zig: bool,
+    },
 
     /// Synchronize index, mirrors list and metadata for zv.
     Sync,
 }
 
 impl Commands {
-    pub(crate) async fn execute(self, mut app: App) -> super::Result<()> {
+    pub(crate) async fn execute(self, mut app: App, using_env: bool) -> super::Result<()> {
         match self {
             Commands::Init { project_name, zig } => {
                 use crate::{Template, TemplateType};
@@ -133,13 +161,37 @@ impl Commands {
             Commands::Use { version } => match version {
                 Some(version) => r#use::use_version(version, &mut app).await,
                 None => {
-                    eprintln!("{}", Paint::red("Error: Version must be specified"));
-                    std::process::exit(1);
+                    error("Version must be specified. e.g., `zv use latest` or `zv use 0.15.1`");
+                    std::process::exit(2);
                 }
             },
             Commands::List => todo!(),
-            Commands::Clean { version: _version } => todo!(),
-            Commands::Setup => todo!(),
+            Commands::Clean { version: _version } => clean::clean_bin(&app).await,
+            Commands::Setup {
+                dry_run,
+                default_version,
+                no_zig,
+            } => {
+                // Validate that no_zig and default_version are not both specified
+                if no_zig && default_version.is_some() {
+                    error(
+                        "The '--no-zig' and '--version' options cannot be used together as they're contradictory.",
+                    );
+                    std::process::exit(2);
+                }
+
+                setup::setup_shell(
+                    &mut app,
+                    using_env,
+                    dry_run,
+                    (!no_zig).then(|| {
+                        default_version.unwrap_or_else(|| {
+                            ZigVersion::placeholder_for_variant("latest").expect("valid zigversion")
+                        })
+                    }),
+                )
+                .await
+            }
             Commands::Sync => todo!(),
         }
     }
@@ -152,7 +204,7 @@ fn print_welcome_message(app: App) {
     let architecture = HOST.architecture;
     let platform = HOST.vendor;
     let os = HOST.operating_system;
-
+    let zv_version = env!("CARGO_PKG_VERSION");
     // Get shell information
     let shell = if cfg!(windows) {
         "PowerShell"
@@ -161,31 +213,47 @@ fn print_welcome_message(app: App) {
         "Bash"
     };
 
-    // ASCII art for ZV
-    println!(
-        "{}",
-        Paint::yellow(&format!(
-            r#"
+    // Only show ASCII art if we're attached to a TTY
+    if tools::is_tty() {
+        println!(
+            "{}",
+            Paint::yellow(&format!(
+                r#"
 ███████╗██╗   ██╗    Architecture: {architecture}
 ╚══███╔╝██║   ██║    Platform: {platform}
   ███╔╝ ██║   ██║    OS: {os}
  ███╔╝  ██║   ██║    ZV directory: {zv_dir}
-███████╗╚██████╔╝    Shell: {shell}
-╚══════╝ ╚═════╝     {profile}
+███████╗╚████╔╝█     ZV Version: {zv_version}
+╚══════╝  ╚══╝       Shell: {shell}
+                     {profile}
     "#,
-            zv_dir = app.path().display(),
-            shell = app.shell.as_ref().map_or(Shell::detect(), |s| *s),
-            profile = if let Some(profile) = std::env::var("PROFILE").ok()
-                && !profile.is_empty()
-            {
-                format!("Profile: {profile}")
-            } else {
-                String::new()
-            }
-        ))
-    );
+                zv_dir = app.path().display(),
+                zv_version = env!("CARGO_PKG_VERSION"), // or your version source
+                shell = app.shell.as_ref().map_or(Shell::detect(), |s| s.clone()),
+                profile = match std::env::var("PROFILE").ok() {
+                    Some(profile) if !profile.is_empty() => format!("Profile: {profile}"),
+                    _ => String::new(),
+                }
+            ))
+        );
 
-    println!();
+        println!();
+    } else {
+        // When not in TTY, show minimal info
+        println!("zv - Zig Version Manager");
+        println!("Architecture: {architecture}");
+        println!("Platform: {platform}");
+        println!("OS: {os}");
+        println!("ZV directory: {}", app.path().display());
+        println!(
+            "Shell: {}",
+            app.shell.as_ref().map_or(Shell::detect(), |s| s.clone())
+        );
+        if let Some(profile) = std::env::var("PROFILE").ok().filter(|p| !p.is_empty()) {
+            println!("Profile: {profile}");
+        }
+        println!();
+    }
 
     // Current active Zig version
     let active_zig = app.get_active_version();
@@ -195,7 +263,7 @@ fn print_welcome_message(app: App) {
         Paint::yellow(&active_zig.map_or_else(|| "none".to_string(), |v| v.to_string())),
         opt = if active_zig.is_none() {
             &format!(
-                " (use {} to set one | or run {})",
+                " (use {} to set one | or run {} to get started)",
                 Paint::blue("zv use <version>"),
                 Paint::blue("zv setup")
             )

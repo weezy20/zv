@@ -1,0 +1,4 @@
+To setup zv for Nushell:
+1. For current session: source "{env_file_path}"  
+2. For permanent setup, add to ~/.config/nushell/config.nu:
+   source "{env_file_path}"

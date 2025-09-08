@@ -1,3 +1,4 @@
+use crate::tools::canonicalize;
 use same_file::Handle;
 use std::path::{Path, PathBuf};
 
@@ -45,13 +46,13 @@ fn is_zv_shim(shim_path: &Path, current_exe_handle: &Handle) -> bool {
         if let Ok(target) = std::fs::read_link(shim_path) {
             // Handle both absolute and relative symlink targets
             let resolved_target = if target.is_absolute() {
-                target.canonicalize()
+                canonicalize(&target)
             } else {
                 // For relative symlinks, resolve relative to the symlink's parent directory
                 if let Some(parent) = shim_path.parent() {
-                    parent.join(&target).canonicalize()
+                    canonicalize(parent.join(&target))
                 } else {
-                    target.canonicalize()
+                    canonicalize(&target)
                 }
             };
 
@@ -114,7 +115,7 @@ pub fn detect_shim(bin_path: &Path, shim: Shim) -> Option<PathBuf> {
 
     // Check if this is actually a zv shim
     if is_zv_shim(&shim_file, &current_exe_handle) {
-        shim_file.canonicalize().ok()
+        canonicalize(&shim_file).ok()
     } else {
         tracing::debug!(
             "File {} exists but is not a zv shim at {:?}",

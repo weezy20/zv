@@ -1,0 +1,4 @@
+To setup zv for Command Prompt:
+1. For current session: call "{env_file_path}"
+2. For permanent setup, run as Administrator:
+   setx PATH "%PATH%;your_bin_path" /M

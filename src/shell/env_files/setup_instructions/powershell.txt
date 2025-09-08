@@ -1,0 +1,7 @@
+To setup zv for PowerShell:
+1. For current session: . "{env_file_path}"
+2. For permanent setup, add to your PowerShell profile:
+   - Run: notepad $PROFILE
+   - Add: . "{env_file_path}"
+   - Or run as Administrator for system-wide:
+     [Environment]::SetEnvironmentVariable("ZV_DIR", "your_path", "Machine")

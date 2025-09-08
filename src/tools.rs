@@ -3,8 +3,23 @@ use color_eyre::{
     Context as _, Result,
     eyre::{WrapErr, bail, eyre},
 };
-use std::{borrow::Cow, path::PathBuf};
+use std::{
+    borrow::Cow,
+    fs, io,
+    path::{Path, PathBuf},
+};
 use yansi::Paint;
+
+/// Cross-platform canonicalize function that avoids UNC paths on Windows
+pub fn canonicalize<P: AsRef<Path>>(path: P) -> io::Result<PathBuf> {
+    dunce::canonicalize(path)
+}
+
+/// Check if we're running in a TTY environment
+#[inline]
+pub(crate) fn is_tty() -> bool {
+    yansi::is_enabled()
+}
 
 /// Macro to print standardized solution suggestions with bullet points
 ///
@@ -55,19 +70,7 @@ pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
     let (zv_dir, using_env) = if let Some(zv_dir) = zv_dir_env {
         (PathBuf::from(zv_dir), true /* using-env true */)
     } else {
-        (
-            ({
-                dirs::home_dir()
-                    .map(|home| home.join(".zv"))
-                    .ok_or_else(|| {
-                        eyre!(
-                            "Unable to locate home directory.\
-                            Please set `ZV_DIR` to use zv. If you think this is a bug please open an issue at <https://github.com/weezy20/zv/issues>"
-                        )
-                    })
-            })?,
-            false, /* Using fallback path */
-        )
+        (get_default_zv_dir()?, false /* Using fallback path */)
     };
 
     // Init ZV_DIR - create it if it doesn't exist
@@ -92,7 +95,7 @@ pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
                         )
                     })?;
             } else {
-                // Using fallback path $HOME/.zv (or $CWD/.zv in rare fallback)
+                // create_dir should be enough for default directory
                 std::fs::create_dir(&zv_dir)
                     .map_err(ZvError::Io)
                     .wrap_err_with(|| {
@@ -110,9 +113,24 @@ pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
     };
 
     // Canonicalize the path before returning
-    let zv_dir = std::fs::canonicalize(&zv_dir).map_err(ZvError::Io)?;
+    let zv_dir = canonicalize(&zv_dir).map_err(ZvError::Io)?;
 
     Ok((zv_dir, using_env))
+}
+
+/// Get the default ZV directory, handling emulated shells on Windows
+fn get_default_zv_dir() -> Result<PathBuf> {
+    // Use shell detection to determine appropriate home directory
+    let shell = crate::shell::Shell::detect();
+
+    if let Some(home_dir) = shell.get_home_dir() {
+        Ok(home_dir.join(".zv"))
+    } else {
+        Err(eyre!(
+            "Unable to locate home directory.\
+            Please set `ZV_DIR` to use zv. If you think this is a bug please open an issue at <https://github.com/weezy20/zv/issues>"
+        ))
+    }
 }
 
 /// Print a warning message in yellow if stderr is a TTY
@@ -169,6 +187,41 @@ pub fn zig_tarball(version: ZigVersion) -> Option<String> {
     };
 
     Some(format!("zig-{os}-{arch}-{semver_version}.{ext}"))
+}
+
+/// Calculate CRC32 hash of a file
+pub fn calculate_file_hash(path: &Path) -> Result<u32> {
+    use crc32fast::Hasher;
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)
+        .wrap_err_with(|| format!("Failed to open file for hashing: {}", path.display()))?;
+
+    let mut hasher = Hasher::new();
+    let mut buffer = [0; 8192]; // 8KB buffer
+
+    loop {
+        let bytes_read = file
+            .read(&mut buffer)
+            .wrap_err_with(|| format!("Failed to read file for hashing: {}", path.display()))?;
+
+        if bytes_read == 0 {
+            break;
+        }
+
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    Ok(hasher.finalize())
+}
+
+/// Compare file hashes to determine if files are identical
+pub fn files_have_same_hash(path1: &Path, path2: &Path) -> Result<bool> {
+    if !path1.exists() || !path2.exists() {
+        return Ok(false);
+    }
+
+    Ok(calculate_file_hash(path1)? == calculate_file_hash(path2)?)
 }
 
 #[cfg(test)]

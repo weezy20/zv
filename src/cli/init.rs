@@ -38,7 +38,7 @@ pub(crate) fn init_project(template: Template, app: &App) -> Result<()> {
                 Paint::new(&name).bold().bright_blue()
             );
 
-            println!("\n{}", Paint::new("Next steps:").bold().underline());
+            println!("\n{}", Paint::new("→ Next steps:").bold().underline());
 
             println!(
                 "  {} {}",
@@ -56,7 +56,7 @@ pub(crate) fn init_project(template: Template, app: &App) -> Result<()> {
                     .bold()
             );
 
-            println!("\n{}", Paint::new("Next steps:").bold().underline());
+            println!("\n{}", Paint::new("→ Next steps:").bold().underline());
 
             println!("  {}", Paint::new("zig build run").italic().bright_white());
         }

@@ -30,7 +30,7 @@ semver = "1.0.26"
 color-eyre = "0.6.5"
 dirs = "6.0.0"
 tracing = "0.1.41"
-chrono = "0.4.41"
+chrono = { version = "0.4.41", features = ["serde"] }
 yansi = { version = "1.0.1", features = ["detect-tty", "detect-env"] }
 target-lexicon = "0.13.2"
 serde_json = "1.0.143"
@@ -42,23 +42,29 @@ ahash = "0.8.12"
 walkdir = "2.5.0"
 # which = "8.0.0"
 same-file = "1.0.6"
+sysinfo = "0.37.0"
+dunce = "1.0.5"
+crc32fast = "1.5.0"
+rda = { package = "remove_dir_all", version = "1.0.0", features = ["parallel"] }
+cfg-if = "1.0.3"
 
 [target."cfg(windows)".dependencies]
-windows-registry = "0.5.0"
-windows-result = "0.3.0"
+windows-registry = "0.6.0"
+windows-result = "0.4.0"
 
 [target."cfg(windows)".dependencies.windows-sys]
-version = "0.60"
+version = "0.61"
 features = [
     "Win32_Foundation",
     "Win32_System_LibraryLoader",
     "Win32_Storage_FileSystem",
     "Win32_System_Registry",
+    "Win32_UI_WindowsAndMessaging",
 ]
 
 [features]
 default = ["log"]
-log = ["dep:tracing-subscriber"]
+log = ["dep:tracing-subscriber", "rda/log"]
 dotenv = ["dep:dotenv"]
 full = ["dotenv"]
 
@@ -72,3 +78,4 @@ lto = true
 
 [dev-dependencies]
 serde_test = "1.0.177"
+tempfile = "3.8.1"
