@@ -1,5 +1,6 @@
-use crate::ZigVersion;
 use crate::tools::canonicalize;
+use crate::{ZigVersion, ZvError};
+use color_eyre::eyre::eyre;
 use same_file::Handle;
 use std::path::{Path, PathBuf};
 
@@ -127,17 +128,11 @@ pub fn detect_shim(bin_path: &Path, shim: Shim) -> Option<PathBuf> {
     }
 }
 
-/// Get the zig tarball name based on HOST arch, os. After zig 0.14.1 the naming changed to zig-{arch}-{os}-{version}.{ext}
-pub fn zig_tarball(zig_version: &ZigVersion) -> Option<String> {
+/// Construct the zig tarball name based on HOST arch, os. zig 0.14.1 onwards the naming changed to {arch}-{os}-{version}
+pub fn zig_tarball(zig_version: &ZigVersion, extension: Option<ArchiveExt>) -> Option<String> {
     use target_lexicon::HOST;
     // Return None for Unknown variant
-    let semver_version = match zig_version {
-        ZigVersion::Semver(v) => v,
-        ZigVersion::Master(v) => v,
-        ZigVersion::Stable(v) => v,
-        ZigVersion::Latest(v) => v,
-        ZigVersion::Unknown => return None,
-    };
+    let semver_version = zig_version.version();
 
     let arch = match HOST.architecture {
         target_lexicon::Architecture::X86_64 => "x86_64",
@@ -160,16 +155,45 @@ pub fn zig_tarball(zig_version: &ZigVersion) -> Option<String> {
         target_lexicon::OperatingSystem::Netbsd => "netbsd",
         _ => return None,
     };
-    let ext = if cfg!(target_os = "windows") {
-        "zip"
+    let ext = if let Some(ext) = extension {
+        ext
+    } else if HOST.operating_system == target_lexicon::OperatingSystem::Windows {
+        ArchiveExt::Zip
     } else {
-        "tar.xz"
+        ArchiveExt::TarXz
     };
-    if semver_version == &semver::Version::new(0, 0, 0) {
-        None
-    } else if semver_version.le(&semver::Version::new(0, 14, 1)) {
-        Some(format!("zig-{os}-{arch}-{semver_version}.{ext}"))
-    } else {
-        Some(format!("zig-{arch}-{os}-{semver_version}.{ext}"))
+    if let Some(v) = semver_version {
+        if v.le(&semver::Version::new(0, 14, 0)) {
+            return Some(format!("zig-{os}-{arch}-{v}.{ext}"));
+        } else {
+            return Some(format!("zig-{arch}-{os}-{v}.{ext}"));
+        }
+    }
+    None
+}
+
+pub enum ArchiveExt {
+    TarXz,
+    Zip,
+}
+
+impl std::str::FromStr for ArchiveExt {
+    type Err = ZvError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "tar.xz" => Ok(ArchiveExt::TarXz),
+            "zip" => Ok(ArchiveExt::Zip),
+            _ => Err(eyre!("Unsupported archive extension: {s}").into()),
+        }
+    }
+}
+
+impl std::fmt::Display for ArchiveExt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArchiveExt::TarXz => write!(f, "tar.xz"),
+            ArchiveExt::Zip => write!(f, "zip"),
+        }
     }
 }
