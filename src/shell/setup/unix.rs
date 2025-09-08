@@ -1,4 +1,4 @@
-use crate::shell::Shell;
+use crate::shell::{Shell, ShellType};
 use std::path::{Path, PathBuf};
 use yansi::Paint;
 
@@ -11,9 +11,8 @@ pub fn select_rc_file(shell: &Shell) -> PathBuf {
             return PathBuf::from(".profile");
         }
     };
-
     match shell.shell_type {
-        crate::shell::ShellType::Bash => {
+        ShellType::Bash => {
             // Bash preference order: .bashrc (interactive), .bash_profile (login), .profile (fallback)
             let bashrc = home_dir.join(".bashrc");
             if bashrc.exists() {
@@ -27,7 +26,7 @@ pub fn select_rc_file(shell: &Shell) -> PathBuf {
 
             home_dir.join(".profile")
         }
-        crate::shell::ShellType::Zsh => {
+        ShellType::Zsh => {
             // Zsh preference order: .zshenv (always sourced), .zshrc (interactive), .zprofile (login)
             let zshenv = home_dir.join(".zshenv");
             if zshenv.exists() {
@@ -47,12 +46,12 @@ pub fn select_rc_file(shell: &Shell) -> PathBuf {
             // Default to .zshenv for new installations
             home_dir.join(".zshenv")
         }
-        crate::shell::ShellType::Fish => {
+        ShellType::Fish => {
             // Fish uses config.fish in the config directory
             let config_dir = home_dir.join(".config/fish");
             config_dir.join("config.fish")
         }
-        crate::shell::ShellType::Tcsh => {
+        ShellType::Tcsh => {
             // Tcsh preference order: .tcshrc, .cshrc, .profile
             let tcshrc = home_dir.join(".tcshrc");
             if tcshrc.exists() {
@@ -66,12 +65,12 @@ pub fn select_rc_file(shell: &Shell) -> PathBuf {
 
             home_dir.join(".profile")
         }
-        crate::shell::ShellType::Nu => {
+        ShellType::Nu => {
             // Nushell uses config.nu in the config directory
             let config_dir = home_dir.join(".config/nushell");
             config_dir.join("config.nu")
         }
-        crate::shell::ShellType::PowerShell => {
+        ShellType::PowerShell => {
             // PowerShell on Unix should use .profile
             if shell.is_powershell_in_unix() {
                 home_dir.join(".profile")
@@ -80,11 +79,11 @@ pub fn select_rc_file(shell: &Shell) -> PathBuf {
                 home_dir.join(".profile")
             }
         }
-        crate::shell::ShellType::Posix | crate::shell::ShellType::Unknown => {
+        ShellType::Posix | ShellType::Unknown => {
             // Use .profile for POSIX-compliant shells and unknown shells
             home_dir.join(".profile")
         }
-        crate::shell::ShellType::Cmd => {
+        ShellType::Cmd => {
             // CMD shouldn't be handled by Unix setup, but provide a fallback
             home_dir.join(".profile")
         }
@@ -195,13 +194,13 @@ pub async fn add_zv_dir_export_to_rc_file(
 
     // Generate shell-specific export command
     let export_line = match shell.shell_type {
-        crate::shell::ShellType::Fish => {
+        ShellType::Fish => {
             format!("set -gx ZV_DIR {}", escaped_zv_dir)
         }
-        crate::shell::ShellType::Tcsh => {
+        ShellType::Tcsh => {
             format!("setenv ZV_DIR {}", escaped_zv_dir)
         }
-        crate::shell::ShellType::Nu => {
+        ShellType::Nu => {
             format!("$env.ZV_DIR = {}", escaped_zv_dir)
         }
         _ => {
