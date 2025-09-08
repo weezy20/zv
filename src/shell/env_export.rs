@@ -8,7 +8,7 @@ impl Shell {
     /// Returns the env file path and content without writing to disk
     pub fn export_without_dump<'a>(&self, app: &'a App, using_env_var: bool) -> (&'a Path, String) {
         let (zv_dir_str, zv_bin_path_str) = get_path_strings(self, app, using_env_var);
-        let env_content = generate_env_content(self, &zv_dir_str, &zv_bin_path_str);
+        let env_content = self.generate_env_content(&zv_dir_str, &zv_bin_path_str);
 
         (app.env_path().as_path(), env_content)
     }
@@ -27,7 +27,8 @@ impl Shell {
     /// Check if shell uses direct system variable edits (no file writing needed)
     #[inline]
     fn windows_shell(&self) -> bool {
-        matches!(self, Shell::Cmd | Shell::PowerShell)
+        use super::ShellType;
+        matches!(self.shell_type, ShellType::Cmd | ShellType::PowerShell)
     }
 }
 

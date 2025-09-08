@@ -227,7 +227,7 @@ fn print_welcome_message(app: App) {
 ╚══════╝  ╚══╝       {profile}
     "#,
                 zv_dir = app.path().display(),
-                shell = app.shell.as_ref().map_or(Shell::detect(), |s| *s),
+                shell = app.shell.as_ref().map_or(Shell::detect(), |s| s.clone()),
                 profile = match std::env::var("PROFILE").ok() {
                     Some(profile) if !profile.is_empty() => format!("Profile: {profile}"),
                     _ => String::new(),
@@ -245,7 +245,7 @@ fn print_welcome_message(app: App) {
         println!("ZV directory: {}", app.path().display());
         println!(
             "Shell: {}",
-            app.shell.as_ref().map_or(Shell::detect(), |s| *s)
+            app.shell.as_ref().map_or(Shell::detect(), |s| s.clone())
         );
         if let Some(profile) = std::env::var("PROFILE").ok().filter(|p| !p.is_empty()) {
             println!("Profile: {profile}");
@@ -261,7 +261,7 @@ fn print_welcome_message(app: App) {
         Paint::yellow(&active_zig.map_or_else(|| "none".to_string(), |v| v.to_string())),
         opt = if active_zig.is_none() {
             &format!(
-                " (use {} to set one | or run {})",
+                " (use {} to set one | or run {} to get started)",
                 Paint::blue("zv use <version>"),
                 Paint::blue("zv setup")
             )

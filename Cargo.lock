@@ -2599,6 +2599,7 @@ dependencies = [
  "serde_test",
  "sysinfo",
  "target-lexicon",
+ "tempfile",
  "thiserror",
  "tokio",
  "toml",

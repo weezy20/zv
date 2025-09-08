@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 /// Zv App State
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct App {
     /// <ZV_DIR> - Home for zv
     zv_base_path: PathBuf,

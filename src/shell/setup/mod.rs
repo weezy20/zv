@@ -1,0 +1,666 @@
+use crate::{
+    Result,
+    app::App,
+    shell::Shell,
+    tools::{calculate_file_hash, files_have_same_hash},
+};
+use color_eyre::eyre::Context;
+use std::io::Read;
+use std::path::PathBuf;
+use yansi::Paint;
+
+pub mod actions;
+pub mod context;
+pub mod instructions;
+pub mod requirements;
+pub mod unix;
+pub mod windows;
+
+pub use actions::*;
+pub use context::*;
+pub use instructions::*;
+pub use requirements::*;
+pub use unix::*;
+pub use windows::*;
+
+/// Pre-setup checks phase - analyze current system state and determine required actions
+pub async fn pre_setup_checks(context: &SetupContext) -> crate::Result<SetupRequirements> {
+    let bin_path_in_path = check_bin_path_in_path(context);
+    let zv_dir_action = determine_zv_dir_action(context).await?;
+    let path_action = determine_path_action(context, bin_path_in_path);
+
+    let needs_post_setup = !bin_path_in_path
+        || matches!(zv_dir_action, ZvDirAction::MakePermanent { .. })
+        || !matches!(path_action, PathAction::AlreadyConfigured);
+
+    Ok(SetupRequirements::new(
+        bin_path_in_path,
+        zv_dir_action,
+        path_action,
+        needs_post_setup,
+    ))
+}
+
+/// Check if zv bin directory is already in PATH
+pub fn check_bin_path_in_path(context: &SetupContext) -> bool {
+    use crate::shell::path_utils::check_dir_in_path_for_shell;
+    check_dir_in_path_for_shell(&context.shell, context.app.bin_path())
+}
+
+/// Determine what action is needed for ZV_DIR environment variable
+pub async fn determine_zv_dir_action(context: &SetupContext) -> crate::Result<ZvDirAction> {
+    if !context.using_env_var {
+        // Using default path, no action needed for ZV_DIR
+        return Ok(ZvDirAction::NotSet);
+    }
+
+    let zv_dir = context.app.path();
+
+    // Check if ZV_DIR is already set permanently
+    let is_permanent = if cfg!(windows) {
+        check_zv_dir_permanent_windows(zv_dir).await?
+    } else {
+        unix::check_zv_dir_permanent_unix(&context.shell, zv_dir).await?
+    };
+
+    if is_permanent {
+        Ok(ZvDirAction::AlreadyPermanent)
+    } else {
+        // ZV_DIR is set temporarily, ask user to make permanent (unless dry run)
+        if context.dry_run {
+            Ok(ZvDirAction::MakePermanent {
+                current_path: zv_dir.clone(),
+            })
+        } else {
+            let should_make_permanent = ask_user_zv_dir_confirmation(zv_dir)?;
+            if should_make_permanent {
+                Ok(ZvDirAction::MakePermanent {
+                    current_path: zv_dir.clone(),
+                })
+            } else {
+                Ok(ZvDirAction::NotSet)
+            }
+        }
+    }
+}
+
+/// Determine what action is needed for PATH configuration
+pub fn determine_path_action(context: &SetupContext, bin_path_in_path: bool) -> PathAction {
+    if bin_path_in_path {
+        return PathAction::AlreadyConfigured;
+    }
+
+    let bin_path = context.app.bin_path().clone();
+
+    if context.shell.is_windows_shell() && !context.shell.is_powershell_in_unix() {
+        // Windows native shells use registry
+        PathAction::AddToRegistry { bin_path }
+    } else {
+        // Unix shells (including Unix shells on Windows) use env files
+        let env_file_path = context.app.env_path().clone();
+        let rc_file = unix::select_rc_file(&context.shell);
+
+        PathAction::GenerateEnvFile {
+            env_file_path,
+            rc_file,
+            bin_path,
+        }
+    }
+}
+
+/// Placeholder implementations for non-Windows platforms
+#[cfg(not(windows))]
+async fn check_zv_dir_permanent_windows(_zv_dir: &std::path::Path) -> crate::Result<bool> {
+    unreachable!("Windows ZV_DIR check should not be called on non-Windows platforms")
+}
+
+/// Ask user for confirmation to make ZV_DIR permanent
+fn ask_user_zv_dir_confirmation(zv_dir: &std::path::Path) -> crate::Result<bool> {
+    use std::io::{self, Write};
+    use yansi::Paint;
+
+    let home_dir = dirs::home_dir().ok_or_else(|| {
+        crate::ZvError::shell_context_creation_failed("Could not determine home directory")
+    })?;
+    let default_zv_dir = home_dir.join(".zv");
+
+    // Show info about custom ZV_DIR
+    println!("{}\n", Paint::yellow("⚠ Custom ZV_DIR detected").bold());
+    println!(
+        "Your environment has ZV_DIR set to path: {}",
+        Paint::cyan(&zv_dir.display().to_string())
+    );
+    println!(
+        "Default path would be: {}",
+        Paint::dim(&default_zv_dir.display().to_string())
+    );
+    println!();
+
+    // Determine the target for permanent setting
+    let target_description = if cfg!(windows) {
+        "system environment variables"
+    } else {
+        ".profile"
+    };
+
+    // Offer to set ZV_DIR permanently
+    print!(
+        "Do you want zv to make ZV_DIR={} permanent by adding it to {}? [y/N]: ",
+        Paint::cyan(&zv_dir.display().to_string()),
+        Paint::green(&target_description)
+    );
+    io::stdout().flush().map_err(|e| {
+        crate::ZvError::shell_setup_failed(
+            "user-confirmation",
+            &format!("Failed to flush stdout: {}", e),
+        )
+    })?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).map_err(|e| {
+        crate::ZvError::shell_setup_failed(
+            "user-confirmation",
+            &format!("Failed to read user input: {}", e),
+        )
+    })?;
+
+    let response = input.trim().to_lowercase();
+    let should_set_permanent = matches!(response.as_str(), "y" | "yes");
+
+    if !should_set_permanent {
+        // User chose not to set permanently, show warnings
+        println!();
+        println!("{}", Paint::yellow("⚠ Important considerations:"));
+        println!(
+            "• Temporary ZV_DIR settings will break zv in new sessions unless the next session also has it set"
+        );
+        println!("• Ensure ZV_DIR is permanently set in your shell profile or system environment");
+        println!();
+    } else {
+        println!();
+        println!(
+            "{}",
+            Paint::green("zv will set ZV_DIR permanently during setup...")
+        );
+        println!();
+    }
+
+    Ok(should_set_permanent)
+}
+
+/// Execute ZV_DIR setup based on the determined action
+pub async fn execute_zv_dir_setup(
+    context: &SetupContext,
+    action: &ZvDirAction,
+) -> crate::Result<()> {
+    match action {
+        ZvDirAction::NotSet => {
+            // No action needed
+            if !context.dry_run {
+                println!("ZV_DIR: Using default path (no permanent setting needed)");
+            }
+            Ok(())
+        }
+        ZvDirAction::AlreadyPermanent => {
+            // Already set permanently
+            if !context.dry_run {
+                println!("ZV_DIR: Already set permanently");
+            }
+            Ok(())
+        }
+        ZvDirAction::MakePermanent { current_path } => {
+            if context.dry_run {
+                println!("Would set ZV_DIR={} permanently", current_path.display());
+                return Ok(());
+            }
+
+            println!("Setting ZV_DIR={} permanently...", current_path.display());
+
+            if context.shell.is_windows_shell() && !context.shell.is_powershell_in_unix() {
+                execute_zv_dir_setup_windows(current_path).await
+            } else {
+                unix::execute_zv_dir_setup_unix(context, current_path).await
+            }
+        }
+    }
+}
+
+/// Placeholder implementations for cross-platform compatibility
+#[cfg(not(windows))]
+async fn execute_path_setup_windows(
+    _context: &SetupContext,
+    _bin_path: &std::path::Path,
+) -> crate::Result<()> {
+    unreachable!("Windows PATH setup should not be called on non-Windows platforms")
+}
+
+#[cfg(windows)]
+async fn execute_path_setup_unix(
+    _context: &SetupContext,
+    _env_file_path: &std::path::Path,
+    _rc_file: &std::path::Path,
+    _bin_path: &std::path::Path,
+) -> crate::Result<()> {
+    unreachable!("Unix PATH setup should not be called on Windows platforms")
+}
+
+#[cfg(not(windows))]
+async fn execute_zv_dir_setup_windows(_zv_dir: &std::path::Path) -> crate::Result<()> {
+    unreachable!("Windows ZV_DIR setup should not be called on non-Windows platforms")
+}
+
+#[cfg(windows)]
+async fn execute_zv_dir_setup_unix(
+    _context: &SetupContext,
+    _zv_dir: &std::path::Path,
+) -> crate::Result<()> {
+    unreachable!("Unix ZV_DIR setup should not be called on Windows platforms")
+}
+
+#[cfg(not(windows))]
+fn broadcast_environment_change() -> crate::Result<()> {
+    unreachable!("Windows environment broadcast should not be called on non-Windows platforms")
+}
+
+/// Execute PATH setup based on the determined action
+pub async fn execute_path_setup(context: &SetupContext, action: &PathAction) -> crate::Result<()> {
+    match action {
+        PathAction::AlreadyConfigured => {
+            // No action needed
+            if !context.dry_run {
+                println!("PATH: Already configured with zv bin directory");
+            }
+            Ok(())
+        }
+        PathAction::AddToRegistry { bin_path } => {
+            if context.dry_run {
+                println!(
+                    "Would add {} to PATH via Windows registry",
+                    bin_path.display()
+                );
+                return Ok(());
+            }
+
+            println!(
+                "Adding {} to PATH via Windows registry...",
+                bin_path.display()
+            );
+            execute_path_setup_windows(context, bin_path).await
+        }
+        PathAction::GenerateEnvFile {
+            env_file_path,
+            rc_file,
+            bin_path,
+        } => {
+            if context.dry_run {
+                println!(
+                    "Would generate env file at {} and modify {}",
+                    Paint::blue(&env_file_path.display()),
+                    Paint::blue(&rc_file.display())
+                );
+                return Ok(());
+            }
+
+            println!("Generating environment file and updating shell configuration...");
+            unix::execute_path_setup_unix(context, env_file_path, rc_file, bin_path).await
+        }
+    }
+}
+
+/// Execute setup phase - coordinate ZV_DIR and PATH actions
+pub async fn execute_setup(
+    context: &SetupContext,
+    requirements: &SetupRequirements,
+) -> crate::Result<()> {
+    use yansi::Paint;
+
+    if context.dry_run {
+        println!("{}", Paint::cyan("🟦 Executing Setup (Dry Run)"));
+    } else {
+        println!("{}", Paint::green("🟩 Executing Setup"));
+    }
+
+    // Execute ZV_DIR setup
+    execute_zv_dir_setup(context, &requirements.zv_dir_action)
+        .await
+        .with_context(|| "ZV_DIR setup failed")?;
+
+    // Execute PATH setup
+    execute_path_setup(context, &requirements.path_action)
+        .await
+        .with_context(|| "PATH setup failed")?;
+
+    // Execute post-setup actions if needed
+    if requirements.needs_post_setup {
+        post_setup_actions(context)
+            .await
+            .with_context(|| "Post-setup actions failed")?;
+    }
+
+    Ok(())
+}
+
+/// Post-setup actions phase - handle binary management and shim regeneration
+pub async fn post_setup_actions(context: &SetupContext) -> crate::Result<()> {
+    use yansi::Paint;
+
+    if context.dry_run {
+        println!("{}", Paint::cyan("→ Post-Setup Actions (Dry Run)"));
+    } else {
+        println!("{}", Paint::green("→ Post-Setup Actions"));
+    }
+
+    // Copy zv binary to bin directory if needed
+    copy_zv_binary_if_needed(&context.app, context.dry_run)
+        .await
+        .with_context(|| "Failed to copy zv binary")?;
+
+    // Regenerate shims if needed
+    regenerate_shims_if_needed(&context.app, context.dry_run)
+        .await
+        .with_context(|| "Failed to regenerate shims")?;
+
+    if context.dry_run {
+        println!("{}", Paint::cyan("← Post-Setup Actions Complete"));
+    } else {
+        println!("{}", Paint::green("← Post-Setup Actions Complete"));
+    }
+
+    Ok(())
+}
+
+/// Copy the current zv binary to the bin directory if needed
+pub async fn copy_zv_binary_if_needed(app: &App, dry_run: bool) -> crate::Result<()> {
+    use yansi::Paint;
+
+    let current_exe = std::env::current_exe().map_err(|e| {
+        crate::ZvError::shell_post_setup_action_failed(&format!(
+            "Failed to get current executable path: {}",
+            e
+        ))
+    })?;
+
+    let target_exe = if cfg!(windows) {
+        app.bin_path().join("zv.exe")
+    } else {
+        app.bin_path().join("zv")
+    };
+
+    // Check if target exists and compare hashes
+    if target_exe.exists() {
+        match files_have_same_hash(&current_exe, &target_exe) {
+            Ok(true) => {
+                if !dry_run {
+                    println!("✓ zv binary is up to date in bin directory");
+                }
+                return Ok(());
+            }
+            Ok(false) => {
+                if dry_run {
+                    println!("Would update zv binary in bin directory (checksum mismatch)");
+                } else {
+                    println!("Updating zv binary in bin directory (checksum mismatch)...");
+                }
+            }
+            Err(e) => {
+                if !dry_run {
+                    println!(
+                        "⚠ Warning: checksum comparison failed: {}, will copy anyway",
+                        e
+                    );
+                }
+            }
+        }
+    } else {
+        if dry_run {
+            println!("Would copy zv binary to bin directory");
+        } else {
+            println!("Copying zv binary to bin directory...");
+        }
+    }
+
+    if !dry_run {
+        // Create bin directory if it doesn't exist
+        tokio::fs::create_dir_all(app.bin_path())
+            .await
+            .map_err(|e| {
+                crate::ZvError::shell_post_setup_action_failed(&format!(
+                    "Failed to create bin directory: {}",
+                    e
+                ))
+            })?;
+
+        // Copy the current executable to the target location
+        tokio::fs::copy(&current_exe, &target_exe)
+            .await
+            .map_err(|e| {
+                crate::ZvError::shell_post_setup_action_failed(&format!(
+                    "Failed to copy zv binary to bin directory: {}",
+                    e
+                ))
+            })?;
+
+        println!(
+            "✓ Copied {} to {}",
+            Paint::green(&current_exe.display().to_string()),
+            Paint::green(&target_exe.display().to_string())
+        );
+    }
+
+    Ok(())
+}
+
+/// Regenerate hardlinks/shims for zig and zls if they exist and config is available
+pub async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crate::Result<()> {
+    use yansi::Paint;
+
+    let zig_shim = if cfg!(windows) {
+        app.bin_path().join("zig.exe")
+    } else {
+        app.bin_path().join("zig")
+    };
+
+    let zls_shim = if cfg!(windows) {
+        app.bin_path().join("zls.exe")
+    } else {
+        app.bin_path().join("zls")
+    };
+
+    let has_zig_shim = zig_shim.exists();
+    let has_zls_shim = zls_shim.exists();
+
+    if !has_zig_shim && !has_zls_shim {
+        if !dry_run {
+            println!("No zig/zls shims found - nothing to regenerate");
+        }
+        return Ok(());
+    }
+
+    // Check if config.toml exists
+    let config_path = app.path().join("config.toml");
+    if !config_path.exists() {
+        if has_zig_shim || has_zls_shim {
+            if dry_run {
+                println!("Would skip shim regeneration - config.toml not found");
+            } else {
+                println!("⚠ config.toml not found - cannot regenerate shims");
+                println!("  Run 'zv use <version>' to set up configuration");
+            }
+        }
+        return Ok(());
+    }
+
+    if dry_run {
+        if has_zig_shim {
+            println!("Would regenerate zig shim based on config.toml");
+        }
+        if has_zls_shim {
+            println!("Would regenerate zls shim based on config.toml");
+        }
+    } else {
+        // TODO: Implement actual shim regeneration based on config.toml reading
+        // For now, just notify the user
+        if has_zig_shim || has_zls_shim {
+            println!("⚠ Shim regeneration based on config.toml is not yet implemented");
+            println!("  This feature will read config.toml and regenerate hardlinks");
+            println!("  Run 'zv use <version>' to ensure shims are properly configured");
+        }
+    }
+
+    Ok(())
+}
+
+/// Main setup coordination function that orchestrates all three phases
+pub async fn setup_shell(app: &App, using_env_var: bool, dry_run: bool) -> crate::Result<()> {
+    use color_eyre::eyre::Context;
+    use yansi::Paint;
+
+    // Phase 1: Create SetupContext and validate
+    let shell = app.shell.clone().unwrap_or_default();
+    let context = SetupContext::new(shell.clone(), app.clone(), using_env_var, dry_run);
+
+    if dry_run {
+        println!("{}", Paint::cyan("→ zv Setup (Dry Run)"));
+        println!("Shell: {}", Paint::cyan(&shell.to_string()));
+        println!("ZV_DIR: {}", Paint::cyan(&app.path().display().to_string()));
+        println!(
+            "Bin Path: {}",
+            Paint::cyan(&app.bin_path().display().to_string())
+        );
+        println!();
+    } else {
+        println!("{}", Paint::green("→ zv Setup"));
+        println!("Shell: {}", Paint::green(&shell.to_string()));
+        println!(
+            "ZV_DIR: {}",
+            Paint::green(&app.path().display().to_string())
+        );
+        println!(
+            "Bin Path: {}",
+            Paint::green(&app.bin_path().display().to_string())
+        );
+        println!();
+    }
+
+    // Phase 2: Pre-setup checks - analyze current system state
+    let requirements = pre_setup_checks(&context)
+        .await
+        .with_context(|| "Pre-setup checks failed")?;
+
+    if dry_run {
+        println!("{}", Paint::cyan("→ Pre-Setup Analysis"));
+    } else {
+        println!("{}", Paint::green("→ Pre-Setup Analysis"));
+    }
+
+    // Display analysis results
+    if requirements.zv_bin_in_path {
+        println!("✓ zv bin directory is already in PATH");
+    } else {
+        println!("• zv bin directory needs to be added to PATH");
+    }
+
+    match &requirements.zv_dir_action {
+        ZvDirAction::NotSet => {
+            println!("✓ ZV_DIR: Using default path (no permanent setting needed)");
+        }
+        ZvDirAction::AlreadyPermanent => {
+            println!("✓ ZV_DIR: Already set permanently");
+        }
+        ZvDirAction::MakePermanent { current_path } => {
+            if dry_run {
+                println!("• ZV_DIR: Would set {} permanently", current_path.display());
+            } else {
+                println!("• ZV_DIR: Will set {} permanently", current_path.display());
+            }
+        }
+    }
+
+    match &requirements.path_action {
+        PathAction::AlreadyConfigured => {
+            println!("✓ PATH: Already configured");
+        }
+        PathAction::AddToRegistry { bin_path } => {
+            if dry_run {
+                println!(
+                    "• PATH: Would add {} via Windows registry",
+                    bin_path.display()
+                );
+            } else {
+                println!(
+                    "• PATH: Will add {} via Windows registry",
+                    bin_path.display()
+                );
+            }
+        }
+        PathAction::GenerateEnvFile {
+            env_file_path,
+            rc_file,
+            bin_path,
+        } => {
+            if dry_run {
+                println!(
+                    "• PATH: Would generate env file at {}",
+                    env_file_path.display()
+                );
+                println!("• PATH: Would modify shell config at {}", rc_file.display());
+            } else {
+                println!(
+                    "• PATH: Will generate env file at {}",
+                    env_file_path.display()
+                );
+                println!("• PATH: Will modify shell config at {}", rc_file.display());
+            }
+        }
+    }
+
+    if requirements.needs_post_setup {
+        if dry_run {
+            println!("• Post-setup: Would copy binary and regenerate shims");
+        } else {
+            println!("• Post-setup: Will copy binary and regenerate shims");
+        }
+    } else {
+        println!("✓ Post-setup: No actions needed");
+    }
+
+    println!();
+
+    // Check if any setup is actually needed
+    let setup_needed = !requirements.zv_bin_in_path
+        || requirements.zv_dir_action.modifies_system()
+        || requirements.path_action.modifies_system()
+        || requirements.needs_post_setup;
+
+    if !setup_needed {
+        println!(
+            "{}",
+            Paint::green("✓ Shell environment is already configured - no setup needed")
+        );
+        return Ok(());
+    }
+
+    // Phase 3: Execute setup based on requirements
+    execute_setup(&context, &requirements)
+        .await
+        .with_context(|| "Setup execution failed")?;
+
+    // Success message
+    if dry_run {
+        println!();
+        println!("{}", Paint::cyan("→ Dry Run Complete"));
+        println!("Run without --dry-run to perform actual setup");
+    } else {
+        println!();
+        println!("{}", Paint::green("→ Setup Complete"));
+        println!("Shell environment has been configured for zv");
+
+        // Generate and display shell-specific post-setup instructions
+        let modified_files = context.get_modified_files();
+        let instructions =
+            PostSetupInstructions::generate_for_shell(&context.shell, modified_files);
+        instructions.display();
+    }
+
+    Ok(())
+}

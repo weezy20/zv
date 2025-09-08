@@ -59,6 +59,7 @@ features = [
     "Win32_System_LibraryLoader",
     "Win32_Storage_FileSystem",
     "Win32_System_Registry",
+    "Win32_UI_WindowsAndMessaging",
 ]
 
 [features]
@@ -77,3 +78,4 @@ lto = true
 
 [dev-dependencies]
 serde_test = "1.0.177"
+tempfile = "3.8.1"

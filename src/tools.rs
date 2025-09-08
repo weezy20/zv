@@ -70,19 +70,7 @@ pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
     let (zv_dir, using_env) = if let Some(zv_dir) = zv_dir_env {
         (PathBuf::from(zv_dir), true /* using-env true */)
     } else {
-        (
-            ({
-                dirs::home_dir()
-                    .map(|home| home.join(".zv"))
-                    .ok_or_else(|| {
-                        eyre!(
-                            "Unable to locate home directory.\
-                            Please set `ZV_DIR` to use zv. If you think this is a bug please open an issue at <https://github.com/weezy20/zv/issues>"
-                        )
-                    })
-            })?,
-            false, /* Using fallback path */
-        )
+        (get_default_zv_dir()?, false /* Using fallback path */)
     };
 
     // Init ZV_DIR - create it if it doesn't exist
@@ -107,7 +95,7 @@ pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
                         )
                     })?;
             } else {
-                // Using fallback path $HOME/.zv (or $CWD/.zv in rare fallback)
+                // create_dir should be enough for default directory
                 std::fs::create_dir(&zv_dir)
                     .map_err(ZvError::Io)
                     .wrap_err_with(|| {
@@ -128,6 +116,21 @@ pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
     let zv_dir = canonicalize(&zv_dir).map_err(ZvError::Io)?;
 
     Ok((zv_dir, using_env))
+}
+
+/// Get the default ZV directory, handling emulated shells on Windows
+fn get_default_zv_dir() -> Result<PathBuf> {
+    // Use shell detection to determine appropriate home directory
+    let shell = crate::shell::Shell::detect();
+
+    if let Some(home_dir) = shell.get_home_dir() {
+        Ok(home_dir.join(".zv"))
+    } else {
+        Err(eyre!(
+            "Unable to locate home directory.\
+            Please set `ZV_DIR` to use zv. If you think this is a bug please open an issue at <https://github.com/weezy20/zv/issues>"
+        ))
+    }
 }
 
 /// Print a warning message in yellow if stderr is a TTY

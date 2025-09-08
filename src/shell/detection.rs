@@ -1,4 +1,4 @@
-use super::Shell;
+use super::ShellType;
 use crate::tools::is_tty;
 use sysinfo::{Pid, Process, System};
 
@@ -20,37 +20,37 @@ pub fn get_parent_process_name() -> Option<String> {
 }
 
 /// Detect shell from parent process name
-pub fn detect_shell_from_parent() -> Option<Shell> {
+pub fn detect_shell_from_parent() -> Option<ShellType> {
     let parent_name = get_parent_process_name()?;
     detect_shell_from_string(&parent_name.to_lowercase())
 }
 
 /// Detect shell from any string containing shell information
-fn detect_shell_from_string(shell_str: &str) -> Option<Shell> {
+fn detect_shell_from_string(shell_str: &str) -> Option<ShellType> {
     if shell_str.contains("bash") {
-        Some(Shell::Bash)
+        Some(ShellType::Bash)
     } else if shell_str.contains("zsh") {
-        Some(Shell::Zsh)
+        Some(ShellType::Zsh)
     } else if shell_str.contains("fish") {
-        Some(Shell::Fish)
+        Some(ShellType::Fish)
     } else if shell_str.contains("powershell") || shell_str.contains("pwsh") {
-        Some(Shell::PowerShell)
+        Some(ShellType::PowerShell)
     } else if shell_str.contains("cmd") {
-        Some(Shell::Cmd)
+        Some(ShellType::Cmd)
     } else if shell_str.contains("tcsh") || shell_str.contains("csh") {
-        Some(Shell::Tcsh)
+        Some(ShellType::Tcsh)
     } else if shell_str.contains("nu") {
-        Some(Shell::Nu)
+        Some(ShellType::Nu)
     } else if shell_str.contains("sh") && !shell_str.contains("bash") && !shell_str.contains("zsh")
     {
-        Some(Shell::Posix)
+        Some(ShellType::Posix)
     } else {
         None
     }
 }
 
 /// Main shell detection logic
-pub fn detect_shell() -> Shell {
+pub fn detect_shell() -> ShellType {
     if cfg!(windows) {
         detect_windows_shell()
     } else {
@@ -59,7 +59,7 @@ pub fn detect_shell() -> Shell {
 }
 
 /// Windows-specific shell detection
-fn detect_windows_shell() -> Shell {
+fn detect_windows_shell() -> ShellType {
     // First, try to detect from parent process if we're in a TTY
     if is_tty() {
         if let Some(shell) = detect_shell_from_parent() {
@@ -75,12 +75,12 @@ fn detect_windows_shell() -> Shell {
                 return detected;
             }
         }
-        return Shell::Bash; // Default for WSL
+        return ShellType::Bash; // Default for WSL
     }
 
     // Check for PowerShell environment indicators
     if std::env::var("PSModulePath").is_ok() {
-        return Shell::PowerShell;
+        return ShellType::PowerShell;
     }
 
     // Additional checks for specific environments
@@ -96,11 +96,11 @@ fn detect_windows_shell() -> Shell {
     }
 
     // Default to PowerShell on modern Windows
-    Shell::PowerShell
+    ShellType::PowerShell
 }
 
 /// Unix-like systems shell detection
-fn detect_unix_shell() -> Shell {
+fn detect_unix_shell() -> ShellType {
     // First, try to detect from parent process if we're in a TTY
     if is_tty() {
         if let Some(shell) = detect_shell_from_parent() {
@@ -127,5 +127,5 @@ fn detect_unix_shell() -> Shell {
         }
     }
 
-    Shell::Unknown
+    ShellType::Unknown
 }

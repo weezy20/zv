@@ -1,45 +1,107 @@
-use super::{Shell, path_utils::*};
-
-/// Generate shell-specific environment content with proper path escaping
-/// This function is now a wrapper around the Shell::generate_env_content method
-pub fn generate_env_content(shell: &Shell, zv_dir: &str, zv_bin_path: &str) -> String {
-    shell.generate_env_content(zv_dir, zv_bin_path)
-}
+use super::{OsFlavor, Shell, ShellContext, ShellType, path_utils::*};
 
 /// Generate PowerShell environment setup script
 /// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_powershell_content(zv_dir: &str, zv_bin_path: &str) -> String {
-    Shell::PowerShell.generate_env_content(zv_dir, zv_bin_path)
+    let shell = Shell {
+        shell_type: ShellType::PowerShell,
+        context: ShellContext {
+            target_os: if cfg!(target_os = "windows") {
+                OsFlavor::Windows
+            } else {
+                OsFlavor::Unix
+            },
+            is_wsl: false,
+            is_emulated: cfg!(unix), // PowerShell on Unix is emulated
+        },
+    };
+    shell.generate_env_content(zv_dir, zv_bin_path)
 }
 
 /// Generate Windows Command Prompt batch script
 /// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_cmd_content(zv_dir: &str, zv_bin_path: &str) -> String {
-    Shell::Cmd.generate_env_content(zv_dir, zv_bin_path)
+    let shell = Shell {
+        shell_type: ShellType::Cmd,
+        context: ShellContext {
+            target_os: OsFlavor::Windows,
+            is_wsl: false,
+            is_emulated: false,
+        },
+    };
+    shell.generate_env_content(zv_dir, zv_bin_path)
 }
 
 /// Generate Fish shell setup script
 /// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_fish_content(zv_dir: &str, zv_bin_path: &str) -> String {
-    Shell::Fish.generate_env_content(zv_dir, zv_bin_path)
+    let shell = Shell {
+        shell_type: ShellType::Fish,
+        context: ShellContext {
+            target_os: if cfg!(target_os = "windows") {
+                OsFlavor::Windows
+            } else {
+                OsFlavor::Unix
+            },
+            is_wsl: false,
+            is_emulated: cfg!(target_os = "windows"), // Fish on Windows is emulated
+        },
+    };
+    shell.generate_env_content(zv_dir, zv_bin_path)
 }
 
 /// Generate Nushell setup script
 /// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_nu_content(zv_dir: &str, zv_bin_path: &str) -> String {
-    Shell::Nu.generate_env_content(zv_dir, zv_bin_path)
+    let shell = Shell {
+        shell_type: ShellType::Nu,
+        context: ShellContext {
+            target_os: if cfg!(target_os = "windows") {
+                OsFlavor::Windows
+            } else {
+                OsFlavor::Unix
+            },
+            is_wsl: false,
+            is_emulated: cfg!(target_os = "windows"), // Nu on Windows is emulated
+        },
+    };
+    shell.generate_env_content(zv_dir, zv_bin_path)
 }
 
 /// Generate tcsh/csh setup script
 /// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_tcsh_content(zv_dir: &str, zv_bin_path: &str) -> String {
-    Shell::Tcsh.generate_env_content(zv_dir, zv_bin_path)
+    let shell = Shell {
+        shell_type: ShellType::Tcsh,
+        context: ShellContext {
+            target_os: if cfg!(target_os = "windows") {
+                OsFlavor::Windows
+            } else {
+                OsFlavor::Unix
+            },
+            is_wsl: false,
+            is_emulated: cfg!(target_os = "windows"), // Tcsh on Windows is emulated
+        },
+    };
+    shell.generate_env_content(zv_dir, zv_bin_path)
 }
 
 /// Generate POSIX-compliant shell setup script (bash, zsh, sh)
 /// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_posix_content(zv_dir: &str, zv_bin_path: &str) -> String {
-    Shell::Bash.generate_env_content(zv_dir, zv_bin_path)
+    let shell = Shell {
+        shell_type: ShellType::Bash,
+        context: ShellContext {
+            target_os: if cfg!(target_os = "windows") {
+                OsFlavor::Windows
+            } else {
+                OsFlavor::Unix
+            },
+            is_wsl: false,
+            is_emulated: cfg!(target_os = "windows"), // Bash on Windows is emulated
+        },
+    };
+    shell.generate_env_content(zv_dir, zv_bin_path)
 }
 
 /// Generate shell-specific uninstall/cleanup script
@@ -50,32 +112,100 @@ pub fn generate_cleanup_content(shell: &Shell, zv_dir: &str, zv_bin_path: &str) 
 
 /// Generate PowerShell cleanup script
 fn generate_powershell_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
-    Shell::PowerShell.generate_cleanup_content(zv_dir, zv_bin_path)
+    let shell = Shell {
+        shell_type: ShellType::PowerShell,
+        context: ShellContext {
+            target_os: if cfg!(target_os = "windows") {
+                OsFlavor::Windows
+            } else {
+                OsFlavor::Unix
+            },
+            is_wsl: false,
+            is_emulated: cfg!(unix), // PowerShell on Unix is emulated
+        },
+    };
+    shell.generate_cleanup_content(zv_dir, zv_bin_path)
 }
 
 /// Generate CMD cleanup script
 fn generate_cmd_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
-    Shell::Cmd.generate_cleanup_content(zv_dir, zv_bin_path)
+    let shell = Shell {
+        shell_type: ShellType::Cmd,
+        context: ShellContext {
+            target_os: OsFlavor::Windows,
+            is_wsl: false,
+            is_emulated: false,
+        },
+    };
+    shell.generate_cleanup_content(zv_dir, zv_bin_path)
 }
 
 /// Generate Fish cleanup script
 fn generate_fish_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
-    Shell::Fish.generate_cleanup_content(zv_dir, zv_bin_path)
+    let shell = Shell {
+        shell_type: ShellType::Fish,
+        context: ShellContext {
+            target_os: if cfg!(target_os = "windows") {
+                OsFlavor::Windows
+            } else {
+                OsFlavor::Unix
+            },
+            is_wsl: false,
+            is_emulated: cfg!(target_os = "windows"), // Fish on Windows is emulated
+        },
+    };
+    shell.generate_cleanup_content(zv_dir, zv_bin_path)
 }
 
 /// Generate Nushell cleanup script
 fn generate_nu_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
-    Shell::Nu.generate_cleanup_content(zv_dir, zv_bin_path)
+    let shell = Shell {
+        shell_type: ShellType::Nu,
+        context: ShellContext {
+            target_os: if cfg!(target_os = "windows") {
+                OsFlavor::Windows
+            } else {
+                OsFlavor::Unix
+            },
+            is_wsl: false,
+            is_emulated: cfg!(target_os = "windows"), // Nu on Windows is emulated
+        },
+    };
+    shell.generate_cleanup_content(zv_dir, zv_bin_path)
 }
 
 /// Generate tcsh cleanup script
 fn generate_tcsh_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
-    Shell::Tcsh.generate_cleanup_content(zv_dir, zv_bin_path)
+    let shell = Shell {
+        shell_type: ShellType::Tcsh,
+        context: ShellContext {
+            target_os: if cfg!(target_os = "windows") {
+                OsFlavor::Windows
+            } else {
+                OsFlavor::Unix
+            },
+            is_wsl: false,
+            is_emulated: cfg!(target_os = "windows"), // Tcsh on Windows is emulated
+        },
+    };
+    shell.generate_cleanup_content(zv_dir, zv_bin_path)
 }
 
 /// Generate POSIX cleanup script
 fn generate_posix_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
-    Shell::Bash.generate_cleanup_content(zv_dir, zv_bin_path)
+    let shell = Shell {
+        shell_type: ShellType::Bash,
+        context: ShellContext {
+            target_os: if cfg!(target_os = "windows") {
+                OsFlavor::Windows
+            } else {
+                OsFlavor::Unix
+            },
+            is_wsl: false,
+            is_emulated: cfg!(target_os = "windows"), // Bash on Windows is emulated
+        },
+    };
+    shell.generate_cleanup_content(zv_dir, zv_bin_path)
 }
 
 /// Generate shell-specific instructions for manual setup
@@ -116,15 +246,30 @@ mod tests {
 
     #[test]
     fn test_generate_cleanup_content() {
-        let cleanup =
-            generate_cleanup_content(&Shell::Fish, "/home/user/.zv", "/home/user/.zv/bin");
+        let shell = Shell {
+            shell_type: ShellType::Fish,
+            context: ShellContext {
+                target_os: OsFlavor::Unix,
+                is_wsl: false,
+                is_emulated: false,
+            },
+        };
+        let cleanup = generate_cleanup_content(&shell, "/home/user/.zv", "/home/user/.zv/bin");
         assert!(cleanup.contains("set -e ZV_DIR"));
         assert!(cleanup.contains("contains -i"));
     }
 
     #[test]
     fn test_generate_setup_instructions() {
-        let instructions = generate_setup_instructions(&Shell::Bash, "/home/user/.zv/env");
+        let shell = Shell {
+            shell_type: ShellType::Bash,
+            context: ShellContext {
+                target_os: OsFlavor::Unix,
+                is_wsl: false,
+                is_emulated: false,
+            },
+        };
+        let instructions = generate_setup_instructions(&shell, "/home/user/.zv/env");
         assert!(instructions.contains("source"));
         assert!(instructions.contains("~/.bashrc"));
         assert!(instructions.contains("/home/user/.zv/env"));
