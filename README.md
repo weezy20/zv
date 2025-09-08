@@ -20,10 +20,10 @@ cargo install --git https://github.com/weezy20/zv
 
 ## Usage
 
+All `zv` stuff lives in `ZV_DIR` which you can set as a custom path. If not set, default zv directory is $HOME/.zv on unix like systems and $USERPROFILE/.zv on windows. `zv` is aware of unix shells on windows & powershell on unix so the correct env variables are used to determine default location.
+
 ```sh
 # Run zv setup as a one-time step to directories & environment zv needs
-# Default zv directory is $HOME/.zv on unix like systems and $USERPROFILE/.zv on windows
-# Zv is aware of unix shells on windows & powershell on unix so the correct env variables are used to determine default location.
 # If you have ZV_DIR set, it'll prompt you if you wish to make it permanent.
 
 
@@ -39,11 +39,10 @@ zv <subcommand> -h (short help) | --help (long help)
 zv setup --help
 ```
 
-Once `zv setup` is installed you can remove the the cargo binary if you used cargo: `cargo uninstall zv`
+Once `zv setup` is finished you can remove the the cargo binary if you used cargo: `cargo uninstall zv`
 `zv` will automatically install itself in `ZV_DIR/bin` after making sure that has been included in your `PATH`.
 
-Upgrading can be done the same way. You install `zv` from cargo or build it yourself and run `zv setup` to find & replace your existing 
-installation. This is only temporary until `zv upgrade` is implemented after which this won't be required.
+Upgrading can be done the same way. You install `zv` from cargo or build it yourself and run `zv setup` to find & replace your existing installation. This is only temporary until `zv upgrade` is implemented after which this won't be required.
 
 ## Use `zv` for project creation:
 
