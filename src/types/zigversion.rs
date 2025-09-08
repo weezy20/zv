@@ -48,30 +48,66 @@ impl ZigVersion {
         Version::parse(&normalized).map_err(ZvError::ZigVersionError)
     }
 
-    /// Extracts the version from any ZigVersion variant, if available
+    /// Extracts the version from any ZigVersion variant, if available and not a placeholder
     pub fn version(&self) -> Option<&Version> {
         match self {
             ZigVersion::Semver(v)
             | ZigVersion::Master(v)
             | ZigVersion::Stable(v)
-            | ZigVersion::Latest(v) => Some(v),
-            ZigVersion::Unknown => None,
+            | ZigVersion::Latest(v)
+                if *v != Version::new(0, 0, 0) =>
+            {
+                Some(v)
+            }
+            _ => None,
         }
     }
 
     /// Returns true if embedded version is a placeholder (0.0.0)
     /// Returns false in all other cases
     pub fn is_placeholder_version(&self) -> bool {
-        self.version()
-            .map_or(false, |v| *v == Version::from_str("0.0.0").unwrap())
+        match self {
+            ZigVersion::Semver(v)
+            | ZigVersion::Master(v)
+            | ZigVersion::Stable(v)
+            | ZigVersion::Latest(v) => *v == Version::new(0, 0, 0),
+            ZigVersion::Unknown => false,
+        }
     }
 
-    /// Returns true if the versions match, ignoring variant differences and paths for System variants.
-    /// This provides version-only comparison logic that was used in the old PartialEq implementation.
+    /// Compare inner semvers for different zig version variants
     pub fn version_matches(&self, other: &Self) -> bool {
         match (self.version(), other.version()) {
             (Some(v1), Some(v2)) => v1 == v2,
-            (None, None) => matches!((self, other), (ZigVersion::Unknown, ZigVersion::Unknown)),
+            (None, None) => {
+                // Both are None - could be Unknown or placeholder versions
+                match (self, other) {
+                    (ZigVersion::Unknown, ZigVersion::Unknown) => true,
+                    // If both are placeholder versions (not Unknown), they match if they're the same variant
+                    _ if self.is_placeholder_version() && other.is_placeholder_version() => {
+                        // Extract raw versions for comparison
+                        let self_raw = match self {
+                            ZigVersion::Semver(v)
+                            | ZigVersion::Master(v)
+                            | ZigVersion::Stable(v)
+                            | ZigVersion::Latest(v) => Some(v),
+                            ZigVersion::Unknown => None,
+                        };
+                        let other_raw = match other {
+                            ZigVersion::Semver(v)
+                            | ZigVersion::Master(v)
+                            | ZigVersion::Stable(v)
+                            | ZigVersion::Latest(v) => Some(v),
+                            ZigVersion::Unknown => None,
+                        };
+                        match (self_raw, other_raw) {
+                            (Some(v1), Some(v2)) => v1 == v2,
+                            _ => false,
+                        }
+                    }
+                    _ => false,
+                }
+            }
             _ => false,
         }
     }
@@ -142,6 +178,32 @@ impl PartialEq for ZigVersion {
             // All other variants: compare versions only
             (l, r) => match (l.version(), r.version()) {
                 (Some(lv), Some(rv)) => *lv == *rv,
+                (None, None) => {
+                    // Both return None from version() - could be placeholder versions
+                    if l.is_placeholder_version() && r.is_placeholder_version() {
+                        // Compare raw versions for placeholder cases
+                        let l_raw = match l {
+                            ZigVersion::Semver(v)
+                            | ZigVersion::Master(v)
+                            | ZigVersion::Stable(v)
+                            | ZigVersion::Latest(v) => Some(v),
+                            ZigVersion::Unknown => None,
+                        };
+                        let r_raw = match r {
+                            ZigVersion::Semver(v)
+                            | ZigVersion::Master(v)
+                            | ZigVersion::Stable(v)
+                            | ZigVersion::Latest(v) => Some(v),
+                            ZigVersion::Unknown => None,
+                        };
+                        match (l_raw, r_raw) {
+                            (Some(lv), Some(rv)) => *lv == *rv,
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    }
+                }
                 _ => false,
             },
         }

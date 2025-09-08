@@ -1,3 +1,4 @@
+use crate::ZigVersion;
 use crate::tools::canonicalize;
 use same_file::Handle;
 use std::path::{Path, PathBuf};
@@ -123,5 +124,52 @@ pub fn detect_shim(bin_path: &Path, shim: Shim) -> Option<PathBuf> {
             shim_file
         );
         None
+    }
+}
+
+/// Get the zig tarball name based on HOST arch, os. After zig 0.14.1 the naming changed to zig-{arch}-{os}-{version}.{ext}
+pub fn zig_tarball(zig_version: &ZigVersion) -> Option<String> {
+    use target_lexicon::HOST;
+    // Return None for Unknown variant
+    let semver_version = match zig_version {
+        ZigVersion::Semver(v) => v,
+        ZigVersion::Master(v) => v,
+        ZigVersion::Stable(v) => v,
+        ZigVersion::Latest(v) => v,
+        ZigVersion::Unknown => return None,
+    };
+
+    let arch = match HOST.architecture {
+        target_lexicon::Architecture::X86_64 => "x86_64",
+        target_lexicon::Architecture::Aarch64(_) => "aarch64",
+        target_lexicon::Architecture::X86_32(_) => "x86",
+        target_lexicon::Architecture::Arm(_) => "arm",
+        target_lexicon::Architecture::Riscv64(_) => "riscv64",
+        target_lexicon::Architecture::Powerpc64 => "powerpc64",
+        target_lexicon::Architecture::Powerpc64le => "powerpc64le",
+        target_lexicon::Architecture::S390x => "s390x",
+        target_lexicon::Architecture::LoongArch64 => "loongarch64",
+        _ => return None,
+    };
+
+    let os = match HOST.operating_system {
+        target_lexicon::OperatingSystem::Linux => "linux",
+        target_lexicon::OperatingSystem::Darwin(_) => "macos",
+        target_lexicon::OperatingSystem::Windows => "windows",
+        target_lexicon::OperatingSystem::Freebsd => "freebsd",
+        target_lexicon::OperatingSystem::Netbsd => "netbsd",
+        _ => return None,
+    };
+    let ext = if cfg!(target_os = "windows") {
+        "zip"
+    } else {
+        "tar.xz"
+    };
+    if semver_version == &semver::Version::new(0, 0, 0) {
+        None
+    } else if semver_version.le(&semver::Version::new(0, 14, 1)) {
+        Some(format!("zig-{os}-{arch}-{semver_version}.{ext}"))
+    } else {
+        Some(format!("zig-{arch}-{os}-{semver_version}.{ext}"))
     }
 }

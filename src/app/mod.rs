@@ -1,5 +1,6 @@
 mod config;
 mod constants;
+mod crypto;
 mod network;
 mod utils;
 
