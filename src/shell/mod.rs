@@ -214,11 +214,51 @@ impl Shell {
                 rc_file(".bash_profile"),
                 rc_file(".profile"),
             ],
-            ShellType::Zsh => vec![rc_file(".zshenv"), rc_file(".zshrc"), rc_file(".zprofile")],
-            ShellType::Fish => vec![rc_file(".config/fish/config.fish")],
+            ShellType::Zsh => {
+                // For zsh, check ZDOTDIR environment variable for .zshenv location
+                let zshenv = match std::env::var("ZDOTDIR") {
+                    Ok(zdotdir) if !zdotdir.is_empty() => PathBuf::from(zdotdir).join(".zshenv"),
+                    _ => rc_file(".zshenv"),
+                };
+                vec![zshenv, rc_file(".zshrc"), rc_file(".zprofile")]
+            }
+            ShellType::Fish => {
+                // For fish, check XDG_CONFIG_HOME first, then fall back to ~/.config
+                // Use conf.d directory as recommended by fish shell documentation
+                let mut fish_files = Vec::new();
+
+                // Try XDG_CONFIG_HOME/fish/conf.d/zv.fish
+                if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
+                    if !xdg_config.is_empty() {
+                        fish_files.push(PathBuf::from(xdg_config).join("fish/conf.d/zv.fish"));
+                    }
+                }
+
+                // Always include ~/.config/fish/conf.d/zv.fish as fallback
+                fish_files.push(rc_file(".config/fish/conf.d/zv.fish"));
+
+                fish_files
+            }
             ShellType::Tcsh => vec![rc_file(".tcshrc"), rc_file(".cshrc"), rc_file(".profile")],
-            ShellType::Nu => vec![rc_file(".config/nushell/config.nu")],
-            ShellType::Posix | ShellType::Unknown => vec![rc_file(".profile")],
+            ShellType::Nu => {
+                // For nushell, check XDG_CONFIG_HOME first, then fall back to ~/.config
+                let mut nu_files = Vec::new();
+
+                // Try XDG_CONFIG_HOME/nushell/config.nu
+                if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
+                    if !xdg_config.is_empty() {
+                        nu_files.push(PathBuf::from(xdg_config).join("nushell/config.nu"));
+                    }
+                }
+
+                // Always include ~/.config/nushell/config.nu as fallback
+                nu_files.push(rc_file(".config/nushell/config.nu"));
+
+                nu_files
+            }
+            ShellType::Posix | ShellType::Unknown => {
+                vec![rc_file(".bash_profile"), rc_file(".profile")]
+            }
             ShellType::PowerShell => {
                 // PowerShell on Unix should use Unix-style RC files
                 if self.is_powershell_in_unix() {
