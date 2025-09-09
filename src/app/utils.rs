@@ -102,7 +102,8 @@ pub fn detect_shim(bin_path: &Path, shim: Shim) -> Option<PathBuf> {
     }
 }
 
-/// Construct the zig tarball name based on HOST arch, os. zig 0.14.1 onwards the naming changed to {arch}-{os}-{version}
+/// Construct the zig tarball name based on HOST arch, os. zig 0.14.1 onwards, the naming convention changed
+/// to {arch}-{os}-{version}
 pub fn zig_tarball(zig_version: &ZigVersion, extension: Option<ArchiveExt>) -> Option<String> {
     use target_lexicon::HOST;
     // Return None for Unknown variant
