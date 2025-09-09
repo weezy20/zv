@@ -53,7 +53,7 @@ pub fn detect_shim(bin_path: &Path, shim: Shim) -> Option<PathBuf> {
     let shim_file = bin_path.join(shim.executable_name());
 
     // Basic existence and file type check
-    if !shim_file.exists() || !shim_file.is_file() {
+    if !shim_file.is_file() {
         return None;
     }
 
