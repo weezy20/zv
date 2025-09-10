@@ -30,7 +30,7 @@ dirs = "6.0.0"
 tracing = "0.1.41"
 chrono = { version = "0.4.41", features = ["serde"] }
 yansi = { version = "1.0.1", features = ["detect-tty", "detect-env"] }
-target-lexicon = "0.13.2"
+target-lexicon = "0.13.3"
 serde_json = "1.0.143"
 reqwest = { version = "0.12.23", features = ["stream"] }
 toml = "0.9.5"
@@ -48,6 +48,8 @@ cfg-if = "1.0.3"
 tracing-indicatif = { version = "0.3.13" }
 indicatif = "0.18.0"
 futures = "0.3.31"
+rand = "0.9.2"
+url = "2.5.7"
 
 [target."cfg(windows)".dependencies]
 windows-registry = "0.6.0"

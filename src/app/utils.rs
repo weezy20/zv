@@ -146,3 +146,8 @@ pub fn zig_tarball(zig_version: &ZigVersion, extension: Option<ArchiveExt>) -> O
     }
     None
 }
+
+/// User-Agent string for network requests
+pub const fn zv_agent() -> &'static str {
+    concat!("zv-cli/", env!("CARGO_PKG_VERSION"))
+}

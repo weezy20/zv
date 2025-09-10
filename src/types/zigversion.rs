@@ -289,8 +289,6 @@ impl<'de> Deserialize<'de> for ZigVersion {
     }
 }
 
-impl ZigVersion {}
-
 impl fmt::Display for ZigVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -300,5 +298,17 @@ impl fmt::Display for ZigVersion {
             ZigVersion::Latest(v) => write!(f, "latest <{}>", v),
             ZigVersion::Unknown => write!(f, "unknown"),
         }
+    }
+}
+
+impl From<semver::Version> for ZigVersion {
+    fn from(version: semver::Version) -> Self {
+        ZigVersion::Semver(version)
+    }
+}
+
+impl From<&semver::Version> for ZigVersion {
+    fn from(version: &semver::Version) -> Self {
+        ZigVersion::Semver(version.clone())
     }
 }

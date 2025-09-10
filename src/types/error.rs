@@ -360,14 +360,29 @@ impl ZvError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum NetErr {
+    #[error("Invalid Mirror: {0}")]
+    InvalidMirror(#[source] Report),
+
+    #[error("No valid mirrors found")]
+    EmptyMirrors,
+
     #[error("Network IO error: {0}")]
     FileIo(#[source] std::io::Error),
 
     #[error("Reqwest error: {0}")]
-    Network(#[source] reqwest::Error),
+    Reqwest(#[source] reqwest::Error),
+
+    #[error("Download timeout: {0}")]
+    Timeout(String),
+
+    #[error("Download stalled: no progress for {duration:?}")]
+    Stalled { duration: std::time::Duration },
+
+    #[error("Too many retries: {attempts} attempts failed")]
+    TooManyRetries { attempts: usize },
 
     #[error("HTTP request failed with status: {0}")]
-    HttpStatus(reqwest::StatusCode),
+    HTTP(reqwest::StatusCode),
 
     #[error("JSON parse error: {0}")]
     JsonParse(#[source] serde_json::Error),
