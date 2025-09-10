@@ -26,19 +26,19 @@ pub enum CacheStrategy {
 }
 
 const TARGET: &str = "zv::network";
-/// 24 hours default TTL for index
+/// 21 days default TTL for index
 pub static INDEX_TTL_DAYS: LazyLock<i64> = LazyLock::new(|| {
     std::env::var("ZV_INDEX_TTL_DAYS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(24)
+        .unwrap_or(21)
 });
-/// 48 hours default TTL for mirrors list
-pub static MIRRORS_TTL_HOURS: LazyLock<i64> = LazyLock::new(|| {
-    std::env::var("ZV_MIRRORS_TTL_HOURS")
+/// 21 days default TTL for mirrors list
+pub static MIRRORS_TTL_DAYS: LazyLock<i64> = LazyLock::new(|| {
+    std::env::var("ZV_MIRRORS_TTL_DAYS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(48)
+        .unwrap_or(21)
 });
 
 #[derive(Debug, Clone)]

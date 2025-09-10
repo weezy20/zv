@@ -110,8 +110,8 @@ I hope you enjoy using it! ♥
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | **`ZV_LOG`**              | Sets the log level (same as `RUST_LOG`). If set, logging follows the specified level.                                      | Inherits `RUST_LOG` behavior                                                    |
 | **`ZV_DIR`**              | Defines the home directory for `zv`.                                                                                       | —                                                                               |
-| **`ZV_INDEX_TTL_DAYS`**   | Number of days between automatic [index](https://ziglang.org/download/index.json) syncs.                                   | **7 days** – since `master` & `latest` are always fetched directly from network |
-| **`ZV_MIRRORS_TTL_DAYS`** | Number of days before refreshing the mirrors list. Broken mirrors degrade automatically. Use `zv resync` to force refresh. | **21 days** – mirrors & index can be resynced immediately with `zv resync`      |
+| **`ZV_INDEX_TTL_DAYS`**   | Number of days between automatic [index](https://ziglang.org/download/index.json) syncs.                                   | **21 days** – since `master` & `latest` are always fetched directly from network, we use those network requests to resync index anyways |
+| **`ZV_MIRRORS_TTL_DAYS`** | Number of days before refreshing the mirrors list. Broken mirrors degrade automatically. Use `zv sync` to force refresh. | **21 days** – mirrors & index can be resynced immediately with `zv sync`      |
 
 ---
 
