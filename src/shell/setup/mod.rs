@@ -1,12 +1,5 @@
-use crate::{
-    Result,
-    app::App,
-    shell::Shell,
-    tools::{calculate_file_hash, files_have_same_hash},
-};
+use crate::{app::App, tools::files_have_same_hash};
 use color_eyre::eyre::Context;
-use std::io::Read;
-use std::path::PathBuf;
 use yansi::Paint;
 
 pub mod actions;
@@ -20,8 +13,6 @@ pub use actions::*;
 pub use context::*;
 pub use instructions::*;
 pub use requirements::*;
-pub use unix::*;
-pub use windows::*;
 
 /// Pre-setup checks phase - analyze current system state and determine required actions
 pub async fn pre_setup_checks(context: &SetupContext) -> crate::Result<SetupRequirements> {
@@ -58,7 +49,10 @@ pub async fn determine_zv_dir_action(context: &SetupContext) -> crate::Result<Zv
 
     // Check if ZV_DIR is already set permanently
     let is_permanent = if cfg!(windows) {
-        check_zv_dir_permanent_windows(zv_dir).await?
+        #[cfg(windows)]
+        { windows::check_zv_dir_permanent_windows(zv_dir).await? }
+        #[cfg(not(windows))]
+        { false } // This branch should never be reached due to cfg!(windows) check above
     } else {
         unix::check_zv_dir_permanent_unix(&context.shell, zv_dir).await?
     };
@@ -108,11 +102,7 @@ pub fn determine_path_action(context: &SetupContext, bin_path_in_path: bool) -> 
     }
 }
 
-/// Placeholder implementations for non-Windows platforms
-#[cfg(not(windows))]
-async fn check_zv_dir_permanent_windows(_zv_dir: &std::path::Path) -> crate::Result<bool> {
-    unreachable!("Windows ZV_DIR check should not be called on non-Windows platforms")
-}
+
 
 /// Ask user for confirmation to make ZV_DIR permanent
 fn ask_user_zv_dir_confirmation(zv_dir: &std::path::Path) -> crate::Result<bool> {
@@ -217,7 +207,10 @@ pub async fn execute_zv_dir_setup(
             println!("Setting ZV_DIR={} permanently...", current_path.display());
 
             if context.shell.is_windows_shell() && !context.shell.is_powershell_in_unix() {
-                execute_zv_dir_setup_windows(current_path).await
+                #[cfg(windows)]
+                { windows::execute_zv_dir_setup_windows(current_path).await }
+                #[cfg(not(windows))]
+                { Ok(()) } // This should never be reached
             } else {
                 unix::execute_zv_dir_setup_unix(context, current_path).await
             }
@@ -225,42 +218,15 @@ pub async fn execute_zv_dir_setup(
     }
 }
 
-/// Placeholder implementations for cross-platform compatibility
-#[cfg(not(windows))]
-async fn execute_path_setup_windows(
-    _context: &SetupContext,
-    _bin_path: &std::path::Path,
-) -> crate::Result<()> {
-    unreachable!("Windows PATH setup should not be called on non-Windows platforms")
-}
 
-#[cfg(windows)]
-async fn execute_path_setup_unix(
-    _context: &SetupContext,
-    _env_file_path: &std::path::Path,
-    _rc_file: &std::path::Path,
-    _bin_path: &std::path::Path,
-) -> crate::Result<()> {
-    unreachable!("Unix PATH setup should not be called on Windows platforms")
-}
 
-#[cfg(not(windows))]
-async fn execute_zv_dir_setup_windows(_zv_dir: &std::path::Path) -> crate::Result<()> {
-    unreachable!("Windows ZV_DIR setup should not be called on non-Windows platforms")
-}
 
-#[cfg(windows)]
-async fn execute_zv_dir_setup_unix(
-    _context: &SetupContext,
-    _zv_dir: &std::path::Path,
-) -> crate::Result<()> {
-    unreachable!("Unix ZV_DIR setup should not be called on Windows platforms")
-}
 
-#[cfg(not(windows))]
-fn broadcast_environment_change() -> crate::Result<()> {
-    unreachable!("Windows environment broadcast should not be called on non-Windows platforms")
-}
+
+
+
+
+
 
 /// Execute PATH setup based on the determined action
 pub async fn execute_path_setup(context: &SetupContext, action: &PathAction) -> crate::Result<()> {
@@ -285,7 +251,10 @@ pub async fn execute_path_setup(context: &SetupContext, action: &PathAction) -> 
                 "Adding {} to PATH via Windows registry...",
                 bin_path.display()
             );
-            execute_path_setup_windows(context, bin_path).await
+            #[cfg(windows)]
+            { windows::execute_path_setup_windows(context, bin_path).await }
+            #[cfg(not(windows))]
+            { Ok(()) } // This should never be reached
         }
         PathAction::GenerateEnvFile {
             env_file_path,
@@ -452,8 +421,6 @@ pub async fn copy_zv_binary_if_needed(app: &App, dry_run: bool) -> crate::Result
 
 /// Regenerate hardlinks/shims for zig and zls if they exist and config is available
 pub async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crate::Result<()> {
-    use yansi::Paint;
-
     let zig_shim = if cfg!(windows) {
         app.bin_path().join("zig.exe")
     } else {
@@ -596,7 +563,7 @@ pub async fn setup_shell(app: &App, using_env_var: bool, dry_run: bool) -> crate
         PathAction::GenerateEnvFile {
             env_file_path,
             rc_file,
-            bin_path,
+            bin_path: _,
         } => {
             if dry_run {
                 println!(
