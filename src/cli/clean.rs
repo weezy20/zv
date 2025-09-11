@@ -1,5 +1,4 @@
 use crate::App;
-use color_eyre::eyre::Context as _;
 use walkdir::WalkDir;
 use yansi::Paint;
 

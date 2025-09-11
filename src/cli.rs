@@ -4,7 +4,6 @@ use crate::{
 };
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::{Context as _, eyre};
-use rand::Rng;
 use yansi::Paint;
 mod clean;
 mod init;
@@ -203,47 +202,59 @@ fn print_welcome_message(app: App) {
 
     // Parse the target triplet (format: arch-platform-os)
     let architecture = HOST.architecture;
-    let platform = HOST.vendor;
+    let source_set = app.source_set;
     let os = HOST.operating_system;
+    let zv_version = env!("CARGO_PKG_VERSION");
 
     // Only show ASCII art if we're attached to a TTY
     if tools::is_tty() {
-        // pick a random number 0, 1, or 2
-        let mut rng = rand::rng();
-        let color_choice = rng.random_range(0..4_u8);
-
-        let formatted = format!(
-            r#"
+        println!(
+            "{}",
+            Paint::yellow(&format!(
+                r#"
 ███████╗██╗   ██╗    Architecture: {architecture}
-╚══███╔╝██║   ██║    Platform: {platform}
-  ███╔╝ ██║   ██║    OS: {os}
+╚══███╔╝██║   ██║    OS: {os}
+  ███╔╝ ██║   ██║    ZV status: {zv_status}
  ███╔╝  ██║   ██║    ZV directory: {zv_dir}
 ███████╗╚████╔╝█     ZV Version: {zv_version}
 ╚══════╝  ╚══╝       Shell: {shell}
                      {profile}
-"#,
-            zv_dir = app.path().display(),
-            zv_version = env!("CARGO_PKG_VERSION"),
-            shell = app.shell.as_ref().map_or(Shell::detect(), |s| s.clone()),
-            profile = match std::env::var("PROFILE").ok() {
-                Some(profile) if !profile.is_empty() => format!("Profile: {profile}"),
-                _ => String::new(),
-            }
+    "#,
+                zv_dir = app.path().display(),
+                zv_version = env!("CARGO_PKG_VERSION"), // or your version source
+                shell = app.shell.as_ref().map_or(Shell::detect(), |s| s.clone()),
+                profile = match std::env::var("PROFILE").ok() {
+                    Some(profile) if !profile.is_empty() => format!("Profile: {profile}"),
+                    _ => String::new(),
+                },
+                zv_status = if source_set {
+                    Paint::green("✔ Ready to Use").to_string()
+                } else {
+                    format!(
+                        "{}{}",
+                        Paint::red("Not in PATH.").to_string(),
+                        "Run ".to_string()
+                            + &Paint::blue("zv setup").to_string()
+                            + " to set ZV in PATH & install a default Zig version"
+                    )
+                }
+            ))
         );
 
-        match color_choice {
-            0 => println!("{}", Paint::yellow(&formatted)),
-            1 => println!("{}", Paint::cyan(&formatted)),
-            2 => println!("{}", Paint::red(&formatted)),
-            3 => println!("{}", Paint::blue(&formatted)),
-            _ => println!("{}", Paint::green(&formatted)),
-        }
+        println!();
     } else {
         // When not in TTY, show minimal info
         println!("zv - Zig Version Manager");
         println!("Architecture: {architecture}");
-        println!("Platform: {platform}");
         println!("OS: {os}");
+        println!(
+            "ZV Setup: {}",
+            if source_set {
+                "Ready to Use"
+            } else {
+                "Not in PATH"
+            }
+        );
         println!("ZV directory: {}", app.path().display());
         println!(
             "Shell: {}",
@@ -252,6 +263,7 @@ fn print_welcome_message(app: App) {
         if let Some(profile) = std::env::var("PROFILE").ok().filter(|p| !p.is_empty()) {
             println!("Profile: {profile}");
         }
+        println!("ZV Version: {}", zv_version);
         println!();
     }
 
@@ -271,7 +283,6 @@ fn print_welcome_message(app: App) {
             ""
         }
     );
-
     println!();
 
     // Help section
