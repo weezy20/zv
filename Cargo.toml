@@ -72,12 +72,31 @@ full = ["dotenv"]
 
 
 [profile.dev]
+opt-level = 0
 panic = "unwind"
+lto = "off"
+strip = "none"
+codegen-units = 256
+incremental = true
+debug = true
+
+[profile.dev.package."*"]
+opt-level = 3
+debug = false
+codegen-units = 256
+
 
 [profile.release]
+opt-level = 3
 panic = "abort"
 lto = true
+strip = true
+
+[profile.release-max]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
 
 [dev-dependencies]
 serde_test = "1.0.177"
-tempfile = "3.8.1"
+tempfile = "3.22.0"
