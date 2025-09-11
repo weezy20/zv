@@ -1,9 +1,9 @@
 use crate::{
-    App, Shell, UserConfig, ZigVersion, ZvError, suggest,
+    App, Shell, UserConfig, ZigVersion, suggest,
     tools::{self, error},
 };
 use clap::{Parser, Subcommand};
-use color_eyre::eyre::{Context as _, eyre};
+use color_eyre::eyre::eyre;
 use yansi::Paint;
 mod clean;
 mod init;
@@ -197,8 +197,24 @@ impl Commands {
     }
 }
 
+fn get_zv_lines() -> Vec<&'static str> {
+    vec![
+        "███████╗██╗   ██╗ ",
+        "╚══███╔╝██║   ██║ ",
+        "  ███╔╝ ██║   ██║ ",
+        " ███╔╝  ██║   ██║ ",
+        "███████╗╚████╔╝█  ",
+        "╚══════╝  ╚══╝    ",
+    ]
+}
+
+fn zv_line_with_color(line: &str, color: yansi::Color) -> String {
+    Paint::new(line).fg(color).to_string()
+}
+
 fn print_welcome_message(app: App) {
     use target_lexicon::HOST;
+    let (color1, color2) = get_random_color_scheme();
 
     // Parse the target triplet (format: arch-platform-os)
     let architecture = HOST.architecture;
@@ -208,26 +224,13 @@ fn print_welcome_message(app: App) {
 
     // Only show ASCII art if we're attached to a TTY
     if tools::is_tty() {
-        println!(
-            "{}",
-            Paint::yellow(&format!(
-                r#"
-███████╗██╗   ██╗    Architecture: {architecture}
-╚══███╔╝██║   ██║    OS: {os}
-  ███╔╝ ██║   ██║    ZV status: {zv_status}
- ███╔╝  ██║   ██║    ZV directory: {zv_dir}
-███████╗╚████╔╝█     ZV Version: {zv_version}
-╚══════╝  ╚══╝       Shell: {shell}
-                     {profile}
-    "#,
-                zv_dir = app.path().display(),
-                zv_version = env!("CARGO_PKG_VERSION"), // or your version source
-                shell = app.shell.as_ref().map_or(Shell::detect(), |s| s.clone()),
-                profile = match std::env::var("PROFILE").ok() {
-                    Some(profile) if !profile.is_empty() => format!("Profile: {profile}"),
-                    _ => String::new(),
-                },
-                zv_status = if source_set {
+        let zv_lines = get_zv_lines();
+        let info_lines = vec![
+            format!("Architecture: {architecture}"),
+            format!("OS: {os}"),
+            format!(
+                "ZV status: {}",
+                if source_set {
                     Paint::green("✔ Ready to Use").to_string()
                 } else {
                     format!(
@@ -238,8 +241,42 @@ fn print_welcome_message(app: App) {
                             + " to set ZV in PATH & install a default Zig version"
                     )
                 }
-            ))
-        );
+            ),
+            format!("ZV directory: {}", app.path().display()),
+            format!("ZV Version: {zv_version}"),
+            format!(
+                "Shell: {}",
+                app.shell.as_ref().map_or(Shell::detect(), |s| s.clone())
+            ),
+        ];
+
+        // Add profile line if available
+        let mut all_info_lines = info_lines;
+        if let Some(profile) = std::env::var("PROFILE").ok().filter(|p| !p.is_empty()) {
+            all_info_lines.push(format!("Profile: {profile}"));
+        }
+
+        println!();
+        for (i, zv_line) in zv_lines.iter().enumerate() {
+            let colored_line = if i < zv_lines.len() / 2 {
+                zv_line_with_color(zv_line, color1)
+            } else {
+                zv_line_with_color(zv_line, color2)
+            };
+
+            let info_part = if i < all_info_lines.len() {
+                format!("    {}", all_info_lines[i])
+            } else {
+                String::new()
+            };
+
+            println!("{}{}", colored_line, info_part);
+        }
+
+        // Print any remaining info lines if there are more info lines than ASCII art lines
+        for remaining_info in all_info_lines.iter().skip(zv_lines.len()) {
+            println!("                     {}", remaining_info);
+        }
 
         println!();
     } else {
@@ -319,4 +356,30 @@ fn print_welcome_message(app: App) {
         "help",
         "Print this message or the help of the given subcommand(s)",
     );
+}
+
+// Define some stylish two-tone color pairs
+fn get_random_color_scheme() -> (yansi::Color, yansi::Color) {
+    use rand::Rng;
+    let schemes = [
+        (
+            yansi::Color::Rgb(255, 100, 0), // Bright Orange
+            yansi::Color::Rgb(0, 191, 255), // Deep Sky Blue
+        ), // Orange → Blue (complementary)
+        (
+            yansi::Color::Rgb(255, 215, 0), // Gold
+            yansi::Color::Rgb(75, 0, 130),  // Indigo
+        ), // Gold → Indigo (complementary)
+        (
+            yansi::Color::Rgb(220, 20, 60), // Crimson
+            yansi::Color::Rgb(0, 255, 255), // Cyan
+        ), // Crimson → Cyan (high contrast)
+        (
+            yansi::Color::Rgb(247, 147, 26),
+            yansi::Color::Rgb(255, 255, 255),
+        ), // Zig Orange → White
+    ];
+
+    let mut rng = rand::rng();
+    schemes[rng.random_range(0..schemes.len())]
 }
