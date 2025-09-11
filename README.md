@@ -53,6 +53,9 @@ zv setup # This applies those changes & self-installs zv from your current worki
 zv <subcommand> -h (short help) | --help (long help)
 # E.g:
 zv setup --help
+
+# To check out zv stats:
+zv
 ```
 
 Once `zv setup` is finished you can remove the the cargo installed binary if you used cargo: `cargo uninstall zv`.
