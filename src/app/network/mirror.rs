@@ -7,7 +7,6 @@ use chrono::{DateTime, Utc};
 use color_eyre::eyre::{Result, WrapErr};
 use rand::prelude::IndexedRandom;
 use reqwest::Client;
-use reqwest::Url;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -15,18 +14,30 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use url::Url;
 
 // ============================================================================
 // LAYOUT AND MIRROR TYPES
 // ============================================================================
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub enum Layout {
     /// Flat layout: {url}/{tarball}
     Flat,
     /// Versioned layout: {url}/{semver}/{tarball}
     #[default]
     Versioned,
+}
+
+impl std::ops::Not for Layout {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        match self {
+            Layout::Flat => Layout::Versioned,
+            Layout::Versioned => Layout::Flat,
+        }
+    }
 }
 
 impl From<&str> for Layout {
@@ -53,52 +64,32 @@ pub struct Mirror {
 // ============================================================================
 
 impl Mirror {
-    /// Determine layout based on URL patterns
-    fn determine_layout(base_url: &Url) -> Layout {
-        match base_url.as_str() {
-            u if u.contains("zig.florent.dev") => Layout::Flat,
-            u if u.contains("zig.squirl.dev") => Layout::Flat,
-            _ => Layout::Versioned,
-        }
-    }
-
-    /// Build download URL with proper query parameters
-    fn build_url_with_version(&self, version: Option<&Version>, tarball: &str) -> String {
-        let base = match version {
-            Some(v) => format!("{}/{}", self.base_url, v),
-            None => self.base_url.to_string(),
-        };
-        format!("{}/{tarball}?source={}", base, zv_agent())
-    }
-
     /// Get the primary download URL based on layout
     pub fn get_download_url(&self, version: &Version, tarball: &str) -> String {
         match self.layout {
-            Layout::Flat => self.build_url_with_version(None, tarball),
-            Layout::Versioned => self.build_url_with_version(Some(version), tarball),
+            Layout::Flat => format!(
+                "{}/{tarball}?source={}",
+                self.base_url.to_string(),
+                zv_agent()
+            ),
+            Layout::Versioned => format!(
+                "{}/{}/{}?source={}",
+                self.base_url.to_string(),
+                version,
+                tarball,
+                zv_agent()
+            ),
         }
     }
 
-    /// Get the alternate download URL (inverted layout logic for fallback)
+    /// Get the download URL with layout inverted
     pub fn get_alternate_url(&self, version: &Version, tarball: &str) -> String {
-        match self.layout {
-            Layout::Versioned => self.build_url_with_version(None, tarball),
-            Layout::Flat => self.build_url_with_version(Some(version), tarball),
-        }
-    }
-
-    /// Get download URL with explicit layout control
-    pub fn get_url_with_layout(
-        &self,
-        version: &Version,
-        tarball: &str,
-        use_alternate: bool,
-    ) -> String {
-        if use_alternate {
-            self.get_alternate_url(version, tarball)
-        } else {
-            self.get_download_url(version, tarball)
-        }
+        let alternate = Mirror {
+            base_url: self.base_url.clone(),
+            layout: !self.layout,
+            rank: self.rank,
+        };
+        alternate.get_download_url(version, tarball)
     }
 }
 
@@ -119,9 +110,14 @@ impl TryFrom<&str> for Mirror {
             "http" | "https" => {}
             _ => return Err(url::ParseError::RelativeUrlWithoutBase),
         }
+        let layout = match base_url.as_str() {
+            u if u.contains("zig.florent.dev") => Layout::Flat,
+            u if u.contains("zig.squirl.dev") => Layout::Flat,
+            _ => Layout::Versioned,
+        };
 
         Ok(Mirror {
-            layout: Self::determine_layout(&base_url),
+            layout,
             base_url,
             rank: 1,
         })
@@ -155,42 +151,35 @@ impl MirrorsIndex {
         self.last_synced + chrono::Duration::days(*MIRRORS_TTL_DAYS) < Utc::now()
     }
 
-    /// Load mirrors index from disk
-    pub async fn load_from_disk(path: impl AsRef<Path>) -> Result<Self, ZvError> {
+    /// Load mirrors index from disk (PreferCache strategy)
+    pub async fn load_from_disk(path: impl AsRef<Path>) -> Result<Self, CfgErr> {
         let content = tokio::fs::read_to_string(path.as_ref())
             .await
-            .map_err(ZvError::Io)?;
+            .map_err(|io_err| CfgErr::NotFound(io_err.into()))?;
 
-        toml::from_str::<Self>(&content)
-            .map_err(|e| ZvError::ZvConfigError(CfgErr::ParseFail(e.into())))
+        toml::from_str::<Self>(&content).map_err(|e| CfgErr::ParseFail(e.into()))
     }
 
-    /// Load mirrors index from disk, failing if expired
-    pub async fn load_from_disk_expire_checked(path: impl AsRef<Path>) -> Result<Self, ZvError> {
+    /// Load mirrors index from disk, failing if expired (RespectTtl strategy)
+    pub async fn load_from_disk_expire_checked(path: impl AsRef<Path>) -> Result<Self, CfgErr> {
         let index = Self::load_from_disk(path.as_ref()).await?;
 
         if index.is_expired() {
-            return Err(ZvError::ZvConfigError(CfgErr::CacheExpired(
+            return Err(CfgErr::CacheExpired(
                 path.as_ref().to_string_lossy().to_string(),
-            )));
+            ));
         }
 
         Ok(index)
     }
 
     /// Save mirrors index to disk
-    pub async fn save(&self, path: impl AsRef<Path>) -> Result<(), ZvError> {
-        // Ensure parent directory exists
-        if let Some(parent) = path.as_ref().parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(ZvError::Io)?;
-        }
+    pub async fn save(&self, path: impl AsRef<Path>) -> Result<(), CfgErr> {
+        let content = toml::to_string_pretty(self).map_err(|e| CfgErr::SerializeFail(e.into()))?;
 
-        let content = toml::to_string_pretty(self)
-            .map_err(|e| ZvError::ZvConfigError(CfgErr::SerializeFail(e)))?;
-
-        tokio::fs::write(path, content).await.map_err(ZvError::Io)?;
+        tokio::fs::write(path, content)
+            .await
+            .map_err(|io_err| CfgErr::WriteFail(io_err.into(), "mirrors index"))?;
 
         Ok(())
     }
@@ -221,7 +210,7 @@ impl MirrorManager {
     pub fn new(cache_path: impl AsRef<Path>, client: Arc<Client>) -> Self {
         Self {
             client,
-            mirrors: Vec::new(),
+            mirrors: Vec::with_capacity(7), // 7 mirrors listed as of September 2025
             mirrors_index: None,
             cache_path: cache_path.as_ref().to_path_buf(),
         }
@@ -298,7 +287,8 @@ impl MirrorManager {
     /// Refresh mirrors from network and cache them
     async fn refresh_from_network(&mut self) -> Result<(), NetErr> {
         let fresh_mirrors = self.fetch_network_mirrors().await?;
-        let index = MirrorsIndex::new(fresh_mirrors.clone());
+        self.mirrors = fresh_mirrors;
+        let index = MirrorsIndex::new(self.mirrors.clone());
 
         // Save to cache (log errors but don't fail)
         if let Err(e) = index.save(&self.cache_path).await {
@@ -306,7 +296,6 @@ impl MirrorManager {
         }
 
         self.mirrors_index = Some(index);
-        self.mirrors = fresh_mirrors;
         Ok(())
     }
 
@@ -314,16 +303,15 @@ impl MirrorManager {
     async fn fetch_network_mirrors(&self) -> Result<Vec<Mirror>, NetErr> {
         tracing::debug!(target: TARGET, "Fetching mirrors from {}", ZIG_COMMUNITY_MIRRORS);
 
-        let response = self
+        let mirrors: Vec<Mirror> = self
             .client
             .get(ZIG_COMMUNITY_MIRRORS)
             .send()
             .await
-            .map_err(NetErr::Reqwest)?;
-
-        let body = response.text().await.map_err(NetErr::Reqwest)?;
-
-        let mirrors: Vec<Mirror> = body
+            .map_err(NetErr::Reqwest)?
+            .text()
+            .await
+            .map_err(NetErr::Reqwest)?
             .lines()
             .filter(|line| !line.trim().is_empty()) // Skip empty lines
             .filter_map(|line| {
@@ -341,7 +329,7 @@ impl MirrorManager {
             return Err(NetErr::EmptyMirrors);
         }
 
-        tracing::info!(target: TARGET, "Successfully loaded {} mirrors", mirrors.len());
+        tracing::info!(target: TARGET, "Successfully fetched {} mirrors", mirrors.len());
         Ok(mirrors)
     }
 }

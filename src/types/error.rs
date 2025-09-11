@@ -416,8 +416,8 @@ pub enum CfgErr {
     SerializeFail(#[source] toml::ser::Error),
 
     /// Write failed
-    #[error("Config flush failed")]
-    WriteFail(#[source] Report),
+    #[error("Config flush failed for file: {1}")]
+    WriteFail(#[source] Report, &'static str),
 
     /// Cache expired
     #[error("Cache expired for {0}")]
