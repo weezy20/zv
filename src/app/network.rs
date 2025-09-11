@@ -48,7 +48,7 @@ pub struct ZvNetwork {
     /// ZV_DIR
     base_path: PathBuf,
     /// Network Client
-    client: Arc<reqwest::Client>,
+    client: Arc<reqwest::Client>, 
 }
 
 impl ZvNetwork {
