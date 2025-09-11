@@ -1,11 +1,8 @@
-#![allow(unused, warnings)]
-
 use color_eyre::{
     Result,
     config::{HookBuilder, Theme},
     eyre::Context,
 };
-use std::borrow::Cow;
 pub use tracing_indicatif::span_ext::IndicatifSpanExt;
 use tracing_subscriber::prelude::*;
 
@@ -65,9 +62,9 @@ async fn main() -> Result<()> {
 /// - If ZV_LOG is not set: Simple "info: message" format for user-friendly output  
 /// - If ZV_LOG is set: Full structured tracing with timestamps and module paths
 fn init_tracing() -> Result<()> {
-    let ZV_LOG_SET = std::env::var("ZV_LOG").is_ok();
+    let zv_log = std::env::var("ZV_LOG").is_ok();
 
-    if ZV_LOG_SET {
+    if zv_log {
         // Full structured logging mode
         let indicatif_layer = tracing_indicatif::IndicatifLayer::new();
         tracing_subscriber::registry()

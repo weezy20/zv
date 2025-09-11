@@ -6,7 +6,6 @@ use std::{
 
 use crate::ZvError;
 use color_eyre::eyre::eyre;
-use reqwest::Url;
 
 #[derive(Debug, Clone)]
 pub enum FileStatus {

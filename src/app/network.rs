@@ -4,7 +4,7 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use futures::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Url;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -47,20 +47,44 @@ pub struct ZvNetwork {
     mirror_manager: MirrorManager,
     /// ZV_DIR
     base_path: PathBuf,
+    /// Network Client
+    client: Arc<reqwest::Client>,
 }
 
 impl ZvNetwork {
     pub async fn new(zv_base_path: impl AsRef<Path>) -> Result<Self, ZvError> {
+        let client = Arc::new(
+            reqwest::Client::builder()
+                .user_agent(zv_agent())
+                .build()
+                .map_err(NetErr::Reqwest)
+                .wrap_err("Failed to build HTTP client")?,
+        );
+
         let mirrors_path = zv_base_path.as_ref().join("mirrors.toml");
-        let mirror_manager = MirrorManager::load(mirrors_path, CacheStrategy::RespectTtl)
-            .await
-            .map_err(|net_err| {
-                tracing::error!(target: TARGET, "MirrorManager initialization failed: {net_err}");
-                ZvError::NetworkError(net_err)
-            })?;
+        let mirror_manager = MirrorManager::init_and_load(
+            mirrors_path,
+            CacheStrategy::RespectTtl,
+            Arc::clone(&client),
+        )
+        .await
+        .map_err(|net_err| {
+            tracing::error!(target: TARGET, "MirrorManager initialization failed: {net_err}");
+            ZvError::NetworkError(net_err)
+        })?;
         Ok(Self {
+            client,
             base_path: zv_base_path.as_ref().to_path_buf(),
             mirror_manager,
         })
+    }
+    fn versions_path(&self) -> PathBuf {
+        self.base_path.join("versions")
+    }
+    fn index_path(&self) -> PathBuf {
+        self.base_path.join("index.toml")
+    }
+    fn mirrors_path(&self) -> PathBuf {
+        self.base_path.join("mirrors.toml")
     }
 }

@@ -16,12 +16,12 @@ pub fn zig_main() -> crate::Result<()> {
     let mut args: Vec<String> = std::env::args().collect();
     args.remove(0); // drop program name
 
-    // Check for +version override
-    let version_override = args
-        .iter()
-        .position(|arg| arg.starts_with('+'))
-        .map(|pos| args.remove(pos))
-        .map(|arg| arg.strip_prefix('+').unwrap().to_string());
+    // Check for +version override (only if it's the first argument)
+    let version_override = if args.first().map_or(false, |arg| arg.starts_with('+')) {
+        Some(args.remove(0).strip_prefix('+').unwrap().to_string())
+    } else {
+        None
+    };
 
     let zig_path = if let Some(version_str) = version_override {
         // Parse the version override
@@ -48,7 +48,7 @@ pub fn zig_main() -> crate::Result<()> {
         .wait()
         .map_err(|e| eyre!("Failed to wait for zig: {}", e))?;
 
-    std::process::exit(status.code().unwrap_or(1));
+    std::process::exit(status.code().unwrap_or(3));
 }
 
 /// Find the Zig executable for a specific version
@@ -60,7 +60,7 @@ fn find_zig_for_version(version: &ZigVersion) -> crate::Result<PathBuf> {
         zv_base_path: zv_base_path.clone(),
         shell: None,
     })
-    .map_err(|e| eyre!("Failed to initialize app: {}", e))?;
+    .map_err(|e| eyre!("Failed to initialize zv: {}", e))?;
 
     match version {
         ZigVersion::Semver(v) => {

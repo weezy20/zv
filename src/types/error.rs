@@ -418,4 +418,8 @@ pub enum CfgErr {
     /// Write failed
     #[error("Config flush failed")]
     WriteFail(#[source] Report),
+
+    /// Cache expired
+    #[error("Cache expired for {0}")]
+    CacheExpired(String),
 }

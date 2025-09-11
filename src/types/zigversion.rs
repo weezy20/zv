@@ -1,12 +1,10 @@
 use crate::ZvError;
 use color_eyre::eyre::eyre;
-const TARGET: &'static str = "zv::zig_version";
 use semver::Version;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::{
     fmt,
     hash::{Hash, Hasher},
-    path::PathBuf,
     str::FromStr,
 };
 

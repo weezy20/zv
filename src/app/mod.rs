@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 mod config;
 mod constants;
 mod network;

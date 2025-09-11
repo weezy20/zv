@@ -1,11 +1,11 @@
-use crate::{ZigVersion, ZvError};
+use crate::ZvError;
 use color_eyre::{
-    Context as _, Result,
+    Result,
     eyre::{WrapErr, bail, eyre},
 };
 use std::{
     borrow::Cow,
-    fs, io,
+    io,
     path::{Path, PathBuf},
 };
 use yansi::Paint;
