@@ -4,6 +4,7 @@ use crate::{
 };
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::{Context as _, eyre};
+use rand::Rng;
 use yansi::Paint;
 mod clean;
 mod init;
@@ -204,20 +205,15 @@ fn print_welcome_message(app: App) {
     let architecture = HOST.architecture;
     let platform = HOST.vendor;
     let os = HOST.operating_system;
-    // Get shell information
-    let shell = if cfg!(windows) {
-        "PowerShell"
-    } else {
-        // You might want to detect the actual shell on Unix systems
-        "Bash"
-    };
 
     // Only show ASCII art if we're attached to a TTY
     if tools::is_tty() {
-        println!(
-            "{}",
-            Paint::yellow(&format!(
-                r#"
+        // pick a random number 0, 1, or 2
+        let mut rng = rand::rng();
+        let color_choice = rng.random_range(0..4_u8);
+
+        let formatted = format!(
+            r#"
 ███████╗██╗   ██╗    Architecture: {architecture}
 ╚══███╔╝██║   ██║    Platform: {platform}
   ███╔╝ ██║   ██║    OS: {os}
@@ -225,18 +221,23 @@ fn print_welcome_message(app: App) {
 ███████╗╚████╔╝█     ZV Version: {zv_version}
 ╚══════╝  ╚══╝       Shell: {shell}
                      {profile}
-    "#,
-                zv_dir = app.path().display(),
-                zv_version = env!("CARGO_PKG_VERSION"),
-                shell = app.shell.as_ref().map_or(Shell::detect(), |s| s.clone()),
-                profile = match std::env::var("PROFILE").ok() {
-                    Some(profile) if !profile.is_empty() => format!("Profile: {profile}"),
-                    _ => String::new(),
-                }
-            ))
+"#,
+            zv_dir = app.path().display(),
+            zv_version = env!("CARGO_PKG_VERSION"),
+            shell = app.shell.as_ref().map_or(Shell::detect(), |s| s.clone()),
+            profile = match std::env::var("PROFILE").ok() {
+                Some(profile) if !profile.is_empty() => format!("Profile: {profile}"),
+                _ => String::new(),
+            }
         );
 
-        println!();
+        match color_choice {
+            0 => println!("{}", Paint::yellow(&formatted)),
+            1 => println!("{}", Paint::cyan(&formatted)),
+            2 => println!("{}", Paint::red(&formatted)),
+            3 => println!("{}", Paint::blue(&formatted)),
+            _ => println!("{}", Paint::green(&formatted)),
+        }
     } else {
         // When not in TTY, show minimal info
         println!("zv - Zig Version Manager");
