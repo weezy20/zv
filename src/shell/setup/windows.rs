@@ -239,8 +239,6 @@ impl WindowsPathManager {
     }
 }
 
-
-
 #[cfg(not(windows))]
 pub fn check_path_in_windows_path(_target_path: &Path) -> crate::Result<bool> {
     unreachable!("Windows PATH check should not be called on non-Windows platforms")

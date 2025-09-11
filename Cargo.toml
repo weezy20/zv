@@ -71,19 +71,19 @@ dotenv = ["dep:dotenv"]
 full = ["dotenv"]
 
 
-[profile.dev]
-opt-level = 0
-panic = "unwind"
-lto = "off"
-strip = "none"
-codegen-units = 256
-incremental = true
-debug = true
+# [profile.dev]
+# opt-level = 0
+# panic = "unwind"
+# lto = "off"
+# strip = "none"
+# codegen-units = 256
+# incremental = true
+# debug = true
 
-[profile.dev.package."*"]
-opt-level = 3
-debug = false
-codegen-units = 256
+# [profile.dev.package."*"]
+# opt-level = 3
+# debug = false
+# codegen-units = 256
 
 
 [profile.release]

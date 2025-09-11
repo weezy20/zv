@@ -50,9 +50,13 @@ pub async fn determine_zv_dir_action(context: &SetupContext) -> crate::Result<Zv
     // Check if ZV_DIR is already set permanently
     let is_permanent = if cfg!(windows) {
         #[cfg(windows)]
-        { windows::check_zv_dir_permanent_windows(zv_dir).await? }
+        {
+            windows::check_zv_dir_permanent_windows(zv_dir).await?
+        }
         #[cfg(not(windows))]
-        { false } // This branch should never be reached due to cfg!(windows) check above
+        {
+            false
+        } // This branch should never be reached due to cfg!(windows) check above
     } else {
         unix::check_zv_dir_permanent_unix(&context.shell, zv_dir).await?
     };
@@ -101,8 +105,6 @@ pub fn determine_path_action(context: &SetupContext, bin_path_in_path: bool) -> 
         }
     }
 }
-
-
 
 /// Ask user for confirmation to make ZV_DIR permanent
 fn ask_user_zv_dir_confirmation(zv_dir: &std::path::Path) -> crate::Result<bool> {
@@ -208,25 +210,19 @@ pub async fn execute_zv_dir_setup(
 
             if context.shell.is_windows_shell() && !context.shell.is_powershell_in_unix() {
                 #[cfg(windows)]
-                { windows::execute_zv_dir_setup_windows(current_path).await }
+                {
+                    windows::execute_zv_dir_setup_windows(current_path).await
+                }
                 #[cfg(not(windows))]
-                { Ok(()) } // This should never be reached
+                {
+                    Ok(())
+                } // This should never be reached
             } else {
                 unix::execute_zv_dir_setup_unix(context, current_path).await
             }
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
 
 /// Execute PATH setup based on the determined action
 pub async fn execute_path_setup(context: &SetupContext, action: &PathAction) -> crate::Result<()> {
@@ -252,9 +248,13 @@ pub async fn execute_path_setup(context: &SetupContext, action: &PathAction) -> 
                 bin_path.display()
             );
             #[cfg(windows)]
-            { windows::execute_path_setup_windows(context, bin_path).await }
+            {
+                windows::execute_path_setup_windows(context, bin_path).await
+            }
             #[cfg(not(windows))]
-            { Ok(()) } // This should never be reached
+            {
+                Ok(())
+            } // This should never be reached
         }
         PathAction::GenerateEnvFile {
             env_file_path,
