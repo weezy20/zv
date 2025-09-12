@@ -43,23 +43,28 @@
 //! }
 //! ```
 
-use super::TARGET;
-use super::{CacheStrategy, MIRRORS_TTL_DAYS};
-use crate::app::utils::zv_agent;
-use crate::{CfgErr, ZvError};
-use crate::{NetErr, app::constants::ZIG_COMMUNITY_MIRRORS};
-use chrono::{DateTime, Utc};
-use color_eyre::eyre::{Result, WrapErr};
-use rand::prelude::IndexedRandom;
-use reqwest::Client;
-use semver::Version;
-use serde::{Deserialize, Serialize};
 use std::{
     convert::TryFrom,
     path::{Path, PathBuf},
     sync::Arc,
 };
+
+use chrono::{DateTime, Utc};
+use color_eyre::eyre::{Result, WrapErr};
+use rand::{
+    Rng,
+    distr::{Distribution, weighted::WeightedIndex},
+    prelude::IndexedRandom,
+};
+use reqwest::Client;
+use semver::Version;
+use serde::{Deserialize, Serialize};
 use url::Url;
+use super::{CacheStrategy, MIRRORS_TTL_DAYS, TARGET};
+use crate::{
+    CfgErr, NetErr, ZvError,
+    app::{constants::ZIG_COMMUNITY_MIRRORS, utils::zv_agent},
+};
 
 // ============================================================================
 // LAYOUT AND MIRROR TYPES
@@ -246,11 +251,10 @@ pub struct MirrorManager {
     cache_path: PathBuf,
 }
 
-// ============================================================================
-// MIRROR MANAGER - CONSTRUCTION AND INITIALIZATION
-// ============================================================================
-
 impl MirrorManager {
+    // ============================================================================
+    // MIRROR MANAGER - CONSTRUCTION AND INITIALIZATION
+    // ============================================================================
     /// Create a new mirror manager (doesn't load mirrors yet)
     pub fn new(cache_path: impl AsRef<Path>, client: Arc<Client>) -> Self {
         Self {
@@ -271,33 +275,30 @@ impl MirrorManager {
         manager.load_mirrors(cache_strategy).await?;
         Ok(manager)
     }
-}
 
-// ============================================================================
-// MIRROR MANAGER - LOADING AND CACHING
-// ============================================================================
-
-impl MirrorManager {
-    /// Load mirrors according to the specified cache strategy
+    // ============================================================================
+    // MIRROR MANAGER - LOADING AND CACHING
+    // ============================================================================
+    /// Load mirrors (self.mirrors) according to the specified cache strategy
     pub async fn load_mirrors(&mut self, cache_strategy: CacheStrategy) -> Result<(), NetErr> {
         match cache_strategy {
             CacheStrategy::AlwaysRefresh => {
                 self.refresh_from_network().await?;
             }
             CacheStrategy::PreferCache => {
-                if self.try_load_from_cache().await.is_err() {
+                if self.try_load_index_from_cache().await.is_err() {
                     tracing::warn!(target: TARGET, "Failed to load cached mirrors, fetching from network");
                     self.refresh_from_network().await?;
                 }
             }
-            CacheStrategy::RespectTtl => match self.try_load_from_cache().await {
+            CacheStrategy::RespectTtl => match self.try_load_index_from_cache().await {
                 Ok(()) => {
                     if self.is_cache_expired() {
                         tracing::debug!(target: TARGET, "Mirrors cache expired, refreshing");
                         self.refresh_from_network().await?;
                     } else {
                         tracing::debug!(target: TARGET, "Using cached mirrors");
-                        self.apply_cached_mirrors();
+                        self.apply_cached_mirrors_index();
                     }
                 }
                 Err(_) => {
@@ -309,8 +310,8 @@ impl MirrorManager {
         Ok(())
     }
 
-    /// Try to load mirrors from cache
-    async fn try_load_from_cache(&mut self) -> Result<(), NetErr> {
+    /// Try to load mirrors index from cache
+    async fn try_load_index_from_cache(&mut self) -> Result<(), NetErr> {
         let index = MirrorsIndex::load_from_disk(&self.cache_path)
             .await
             .map_err(|err| {
@@ -323,7 +324,7 @@ impl MirrorManager {
     }
 
     /// Apply cached mirrors to active mirrors list
-    fn apply_cached_mirrors(&mut self) {
+    fn apply_cached_mirrors_index(&mut self) {
         if let Some(ref index) = self.mirrors_index {
             self.mirrors = index.mirrors.clone();
         }
@@ -377,52 +378,10 @@ impl MirrorManager {
         tracing::info!(target: TARGET, "Successfully fetched {} mirrors", mirrors.len());
         Ok(mirrors)
     }
-}
-
-// ============================================================================
-// MIRROR MANAGER - PUBLIC API
-// ============================================================================
-
-impl MirrorManager {
-    /// Get all available mirrors (loads if needed)
-    pub async fn mirrors(&mut self) -> Result<&[Mirror], NetErr> {
-        if self.mirrors.is_empty() {
-            self.ensure_mirrors_loaded().await?;
-        }
-        Ok(&self.mirrors)
-    }
-
-    /// Get a random mirror for load balancing
-    pub async fn get_random_mirror(&mut self) -> Result<&Mirror, NetErr> {
-        let mirrors = self.mirrors().await?;
-        mirrors.choose(&mut rand::rng()).ok_or(NetErr::EmptyMirrors)
-    }
-
-    /// Get mirrors ordered by rank
-    pub async fn get_ranked_mirrors(&mut self) -> Result<Vec<&Mirror>, NetErr> {
-        let mirrors = self.mirrors().await?;
-        let mut ranked: Vec<&Mirror> = mirrors.iter().collect();
-        ranked.sort_by_key(|m| m.rank);
-        Ok(ranked)
-    }
-
-    /// Check if mirrors are loaded
-    pub fn has_mirrors(&self) -> bool {
-        !self.mirrors.is_empty()
-    }
-
-    /// Get the cache path
-    pub fn cache_path(&self) -> &Path {
-        &self.cache_path
-    }
-}
-
-// ============================================================================
-// MIRROR MANAGER - INTERNAL HELPERS
-// ============================================================================
-
-impl MirrorManager {
-    /// Ensure mirrors are loaded (internal helper)
+    // ============================================================================
+    // MIRROR MANAGER - INTERNAL HELPERS
+    // ============================================================================
+    /// Ensure mirrors are loaded (no-op if mirrors-index is already loaded)
     async fn ensure_mirrors_loaded(&mut self) -> Result<(), NetErr> {
         if self.mirrors_index.is_none() {
             match MirrorsIndex::load_from_disk(&self.cache_path).await {
@@ -438,7 +397,7 @@ impl MirrorManager {
 
         // Apply mirrors from index if we don't have them loaded
         if self.mirrors.is_empty() {
-            self.apply_cached_mirrors();
+            self.apply_cached_mirrors_index();
         }
 
         Ok(())
@@ -450,5 +409,66 @@ impl MirrorManager {
             Some(index) => index.is_expired(),
             None => true, // No cache loaded means it's "expired"
         }
+    }
+    // ============================================================================
+    // MIRROR MANAGER - PUBLIC API
+    // ============================================================================
+    /// Get all available mirrors from MirrorManager.mirrors (loading if needed)
+    pub async fn mirrors(&mut self) -> Result<&[Mirror], NetErr> {
+        if self.mirrors.is_empty() {
+            self.ensure_mirrors_loaded().await?;
+        }
+        Ok(&self.mirrors)
+    }
+    /// Get a random mirror for load balancing, preferring lower rank
+    pub async fn get_random_mirror(&mut self) -> Result<&Mirror, NetErr> {
+        let mirrors = self.get_ranked_mirrors().await?;
+
+        if mirrors.is_empty() {
+            return Err(NetErr::EmptyMirrors);
+        }
+
+        // If only one mirror, return it
+        if mirrors.len() == 1 {
+            return Ok(&mirrors[0]);
+        }
+
+        // Calculate weights inversely proportional to rank
+        // Lower rank = higher weight
+        let weights: Vec<f64> = mirrors
+            .iter()
+            .map(|m| 1.0 / m.rank as f64) // Rank 1 = weight 1.0, rank 2 = 0.5, rank 5 = 0.2
+            .collect();
+        let mut rng = rand::rng();
+        if let Ok(dist) = WeightedIndex::new(&weights) {
+            // Use optimized WeightedIndex
+            let index = dist.sample(&mut rng);
+            Ok(&mirrors[index])
+        } else {
+            // Fallback to manual weighted selection
+            let total_weight: f64 = weights.iter().sum();
+            let mut random_weight = rng.random::<f64>() * total_weight;
+
+            for (i, &weight) in weights.iter().enumerate() {
+                random_weight -= weight;
+                if random_weight <= 0.0 {
+                    return Ok(&mirrors[i]);
+                }
+            }
+
+            // Final fallback to first mirror (should never happen)
+            Ok(&mirrors[0])
+        }
+    }
+    /// Get mirrors ordered by rank
+    pub async fn get_ranked_mirrors(&mut self) -> Result<Vec<&Mirror>, NetErr> {
+        let mirrors = self.mirrors().await?;
+        let mut ranked: Vec<&Mirror> = mirrors.iter().collect();
+        ranked.sort_by_key(|m| m.rank);
+        Ok(ranked)
+    }
+    /// Get the cache path
+    pub fn cache_path(&self) -> &Path {
+        &self.cache_path
     }
 }
