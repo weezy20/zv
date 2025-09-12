@@ -19,8 +19,6 @@ pub enum ZigVersion {
     Stable(Version),
     /// Latest stable (always refresh)
     Latest(Version),
-    /// Unknown - Detected but failed to execute `zig version`
-    Unknown,
 }
 
 impl ZigVersion {
@@ -69,44 +67,6 @@ impl ZigVersion {
             | ZigVersion::Master(v)
             | ZigVersion::Stable(v)
             | ZigVersion::Latest(v) => *v == Version::new(0, 0, 0),
-            ZigVersion::Unknown => false,
-        }
-    }
-
-    /// Compare inner semvers for different zig version variants
-    pub fn version_matches(&self, other: &Self) -> bool {
-        match (self.version(), other.version()) {
-            (Some(v1), Some(v2)) => v1 == v2,
-            (None, None) => {
-                // Both are None - could be Unknown or placeholder versions
-                match (self, other) {
-                    (ZigVersion::Unknown, ZigVersion::Unknown) => true,
-                    // If both are placeholder versions (not Unknown), they match if they're the same variant
-                    _ if self.is_placeholder_version() && other.is_placeholder_version() => {
-                        // Extract raw versions for comparison
-                        let self_raw = match self {
-                            ZigVersion::Semver(v)
-                            | ZigVersion::Master(v)
-                            | ZigVersion::Stable(v)
-                            | ZigVersion::Latest(v) => Some(v),
-                            ZigVersion::Unknown => None,
-                        };
-                        let other_raw = match other {
-                            ZigVersion::Semver(v)
-                            | ZigVersion::Master(v)
-                            | ZigVersion::Stable(v)
-                            | ZigVersion::Latest(v) => Some(v),
-                            ZigVersion::Unknown => None,
-                        };
-                        match (self_raw, other_raw) {
-                            (Some(v1), Some(v2)) => v1 == v2,
-                            _ => false,
-                        }
-                    }
-                    _ => false,
-                }
-            }
-            _ => false,
         }
     }
 }
@@ -116,20 +76,17 @@ impl FromStr for ZigVersion {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "unknown" => Err(ZvError::General(eyre!(
-                "`unknown` is not a valid user input"
-            ))),
             "master" => Self::placeholder_for_variant("master"),
             "stable" => Self::placeholder_for_variant("stable"),
             "latest" => Self::placeholder_for_variant("latest"),
             _ => {
-                // Handle prefixed variants (system@version, stable@version)
+                // Handle prefixed variants (stable@version)
                 if let Some((prefix, version_str)) = s.split_once('@') {
                     let version = Self::parse_normalized_version(version_str)?;
                     return match prefix {
                         "stable" => Ok(ZigVersion::Semver(version)),
                         _ => Err(ZvError::General(eyre!(
-                            "Invalid version prefix: {}",
+                            "Invalid version prefix: {}. Supported: stable@<version>",
                             prefix
                         ))),
                     };
@@ -159,52 +116,28 @@ impl Hash for ZigVersion {
                 state.write_u8(0);
                 v.hash(state);
             }
-            ZigVersion::Unknown => {
-                state.write_u8(1);
-            }
         }
     }
 }
 
 impl PartialEq for ZigVersion {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            // Unknown only equals Unknown
-            (Self::Unknown, Self::Unknown) => true,
-            (Self::Unknown, _) | (_, Self::Unknown) => false,
+        // Extract raw versions from both
+        let self_version = match self {
+            ZigVersion::Semver(v)
+            | ZigVersion::Master(v)
+            | ZigVersion::Stable(v)
+            | ZigVersion::Latest(v) => v,
+        };
 
-            // All other variants: compare versions only
-            (l, r) => match (l.version(), r.version()) {
-                (Some(lv), Some(rv)) => *lv == *rv,
-                (None, None) => {
-                    // Both return None from version() - could be placeholder versions
-                    if l.is_placeholder_version() && r.is_placeholder_version() {
-                        // Compare raw versions for placeholder cases
-                        let l_raw = match l {
-                            ZigVersion::Semver(v)
-                            | ZigVersion::Master(v)
-                            | ZigVersion::Stable(v)
-                            | ZigVersion::Latest(v) => Some(v),
-                            ZigVersion::Unknown => None,
-                        };
-                        let r_raw = match r {
-                            ZigVersion::Semver(v)
-                            | ZigVersion::Master(v)
-                            | ZigVersion::Stable(v)
-                            | ZigVersion::Latest(v) => Some(v),
-                            ZigVersion::Unknown => None,
-                        };
-                        match (l_raw, r_raw) {
-                            (Some(lv), Some(rv)) => *lv == *rv,
-                            _ => false,
-                        }
-                    } else {
-                        false
-                    }
-                }
-                _ => false,
-            },
-        }
+        let other_version = match other {
+            ZigVersion::Semver(v)
+            | ZigVersion::Master(v)
+            | ZigVersion::Stable(v)
+            | ZigVersion::Latest(v) => v,
+        };
+
+        *self_version == *other_version
     }
 }
 
@@ -238,7 +171,6 @@ impl Serialize for ZigVersion {
                 map.insert("version", version.to_string());
                 map.serialize(serializer)
             }
-            ZigVersion::Unknown => serializer.serialize_str("unknown"),
         }
     }
 }
@@ -258,13 +190,7 @@ impl<'de> Deserialize<'de> for ZigVersion {
         let helper = ZigVersionHelper::deserialize(deserializer)?;
 
         match helper {
-            ZigVersionHelper::String(s) => {
-                if s == "unknown" {
-                    Ok(ZigVersion::Unknown)
-                } else {
-                    ZigVersion::from_str(&s).map_err(de::Error::custom)
-                }
-            }
+            ZigVersionHelper::String(s) => ZigVersion::from_str(&s).map_err(de::Error::custom),
             ZigVersionHelper::Map(map) => {
                 // Handle master variant
                 if let Some(master_str) = map.get("master") {
@@ -294,7 +220,6 @@ impl fmt::Display for ZigVersion {
             ZigVersion::Master(v) => write!(f, "master <{}>", v),
             ZigVersion::Stable(v) => write!(f, "stable <{}>", v),
             ZigVersion::Latest(v) => write!(f, "latest <{}>", v),
-            ZigVersion::Unknown => write!(f, "unknown"),
         }
     }
 }
