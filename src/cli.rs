@@ -365,15 +365,15 @@ fn get_random_color_scheme() -> (yansi::Color, yansi::Color) {
         (
             yansi::Color::Rgb(255, 100, 0), // Bright Orange
             yansi::Color::Rgb(0, 191, 255), // Deep Sky Blue
-        ), // Orange → Blue (complementary)
+        ), // Orange → Blue
         (
             yansi::Color::Rgb(255, 215, 0), // Gold
             yansi::Color::Rgb(75, 0, 130),  // Indigo
-        ), // Gold → Indigo (complementary)
+        ), // Gold → Indigo
         (
             yansi::Color::Rgb(220, 20, 60), // Crimson
             yansi::Color::Rgb(0, 255, 255), // Cyan
-        ), // Crimson → Cyan (high contrast)
+        ), // Crimson → Cyan
         (
             yansi::Color::Rgb(247, 147, 26),
             yansi::Color::Rgb(255, 255, 255),

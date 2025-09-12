@@ -114,6 +114,7 @@ I hope you enjoy using it! ♥
 | **`ZV_DIR`**              | Defines the home directory for `zv`.                                                                                       | —                                                                               |
 | **`ZV_INDEX_TTL_DAYS`**   | Number of days between automatic [index](https://ziglang.org/download/index.json) syncs.                                   | **21 days** — Using `master` or `latest` in inline mode use a shorter cache duration of just 1 day unlike `use` which will always fetch `master` & `latest` from network, so practically, you never have to worry about setting this variable yourself. |
 | **`ZV_MIRRORS_TTL_DAYS`** | Number of days before refreshing the mirrors list. Broken mirrors degrade automatically. Use `zv sync` to force refresh. | **21 days** — mirrors and index can be resynced immediately with `zv sync`. `master` relies on latest builds & so does `latest` and some community mirrors may not have it available; `zv` will retry other mirrors in that case.      |
+| **`NO_COLOR`**            | If set, disables color output in all zv commands.                                                                          | No color output; useful for non-TTY environments or scripts.                    |
 
 ---
 
