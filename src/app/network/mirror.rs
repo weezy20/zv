@@ -49,22 +49,18 @@ use std::{
     sync::Arc,
 };
 
-use chrono::{DateTime, Utc};
-use color_eyre::eyre::{Result, WrapErr};
-use rand::{
-    Rng,
-    distr::{Distribution, weighted::WeightedIndex},
-    prelude::IndexedRandom,
-};
-use reqwest::Client;
-use semver::Version;
-use serde::{Deserialize, Serialize};
-use url::Url;
 use super::{CacheStrategy, MIRRORS_TTL_DAYS, TARGET};
 use crate::{
     CfgErr, NetErr, ZvError,
     app::{constants::ZIG_COMMUNITY_MIRRORS, utils::zv_agent},
 };
+use chrono::{DateTime, Utc};
+use color_eyre::eyre::{Result, WrapErr};
+use rand::{Rng, prelude::IndexedRandom};
+use reqwest::Client;
+use semver::Version;
+use serde::{Deserialize, Serialize};
+use url::Url;
 
 // ============================================================================
 // LAYOUT AND MIRROR TYPES
@@ -440,25 +436,29 @@ impl MirrorManager {
             .map(|m| 1.0 / m.rank as f64) // Rank 1 = weight 1.0, rank 2 = 0.5, rank 5 = 0.2
             .collect();
         let mut rng = rand::rng();
-        if let Ok(dist) = WeightedIndex::new(&weights) {
-            // Use optimized WeightedIndex
-            let index = dist.sample(&mut rng);
-            Ok(&mirrors[index])
-        } else {
-            // Fallback to manual weighted selection
-            let total_weight: f64 = weights.iter().sum();
-            let mut random_weight = rng.random::<f64>() * total_weight;
+        // Calculate weights inversely proportional to rank
+        // Lower rank = higher weight
+        let weights: Vec<f64> = mirrors
+            .iter()
+            .map(|m| {
+                let rank = m.rank.max(1) as f64; // Protect against zero/negative ranks
+                1.0 / rank // Rank 1 = weight 1.0, rank 2 = 0.5, rank 5 = 0.2
+            })
+            .collect();
 
-            for (i, &weight) in weights.iter().enumerate() {
-                random_weight -= weight;
-                if random_weight <= 0.0 {
-                    return Ok(&mirrors[i]);
-                }
+        // Simple weighted random selection - perfect for small lists
+        let mut rng = rand::rng();
+        let total_weight: f64 = weights.iter().sum();
+        let mut random_weight = rng.random::<f64>() * total_weight;
+
+        for (i, &weight) in weights.iter().enumerate() {
+            random_weight -= weight;
+            if random_weight <= 0.0 {
+                return Ok(&mirrors[i]);
             }
-
-            // Final fallback to first mirror (should never happen)
-            Ok(&mirrors[0])
         }
+        // Fallback to first mirror (should not happen with correct weights)
+        Ok(&mirrors[0])
     }
     /// Get mirrors ordered by rank
     pub async fn get_ranked_mirrors(&mut self) -> Result<Vec<&Mirror>, NetErr> {
