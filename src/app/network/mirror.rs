@@ -1,3 +1,48 @@
+//! Mirrors management and types for Zig versions
+//!
+//! This module provides functionality for managing HTTP mirrors that host Zig releases.
+//! It supports different mirror layouts (flat and versioned), caching strategies,
+//! and automatic failover between mirrors.
+//!
+//! # Key Components
+//!
+//! - [`Mirror`]: Represents a single HTTP mirror with its URL and layout
+//! - [`MirrorManager`]: Manages a collection of mirrors with caching and loading strategies
+//! - [`MirrorsIndex`]: Cached representation of mirrors with TTL support
+//! - [`Layout`]: Defines how files are organized on a mirror (flat vs versioned)
+//!
+//! # Cache Strategies
+//!
+//! The module supports three caching strategies via [`CacheStrategy`]:
+//! - `AlwaysRefresh`: Always fetch fresh mirrors from network
+//! - `PreferCache`: Use cache if available, fallback to network
+//! - `RespectTtl`: Use cache only if not expired, otherwise refresh
+//!
+//! # Example Usage
+//!
+//! ```rust,no_run
+//! use std::sync::Arc;
+//! use reqwest::Client;
+//! use crate::app::network::mirror::MirrorManager;
+//! use crate::app::network::CacheStrategy;
+//!
+//! async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//!     let client = Arc::new(Client::new());
+//!     let cache_path = "/tmp/mirrors.toml";
+//!     
+//!     let mut manager = MirrorManager::init_and_load(
+//!         cache_path,
+//!         CacheStrategy::RespectTtl,
+//!         client
+//!     ).await?;
+//!     
+//!     let random_mirror = manager.get_random_mirror().await?;
+//!     println!("Using mirror: {}", random_mirror.base_url);
+//!     
+//!     Ok(())
+//! }
+//! ```
+
 use super::TARGET;
 use super::{CacheStrategy, MIRRORS_TTL_DAYS};
 use crate::app::utils::zv_agent;
