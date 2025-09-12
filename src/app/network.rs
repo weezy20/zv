@@ -47,11 +47,15 @@ pub struct ZvNetwork {
     mirror_manager: MirrorManager,
     /// ZV_DIR
     base_path: PathBuf,
+    /// Download cache path (ZV_DIR/downloads)
+    download_cache: PathBuf,
     /// Network Client
     client: Arc<reqwest::Client>,
 }
 
+// === Initialize ZvNetwork ===
 impl ZvNetwork {
+    /// Initialize ZvNetwork with given base path (ZV_DIR)
     pub async fn new(zv_base_path: impl AsRef<Path>) -> Result<Self, ZvError> {
         let client = Arc::new(
             reqwest::Client::builder()
@@ -60,7 +64,15 @@ impl ZvNetwork {
                 .map_err(NetErr::Reqwest)
                 .wrap_err("Failed to build HTTP client")?,
         );
-
+        if !zv_base_path.as_ref().join("downloads").is_dir() {
+            tokio::fs::create_dir_all(zv_base_path.as_ref().join("downloads"))
+                .await
+                .map_err(|io_err| {
+                    tracing::error!(target: TARGET, "Failed to create \"downloads\" directory: {io_err}");
+                    ZvError::Io(io_err)
+                })?;
+        }
+        let download_cache = zv_base_path.as_ref().join("downloads");
         let mirrors_path = zv_base_path.as_ref().join("mirrors.toml");
         let mirror_manager = MirrorManager::init_and_load(
             mirrors_path,
@@ -74,6 +86,7 @@ impl ZvNetwork {
         })?;
         Ok(Self {
             client,
+            download_cache,
             base_path: zv_base_path.as_ref().to_path_buf(),
             mirror_manager,
         })
@@ -86,5 +99,12 @@ impl ZvNetwork {
     }
     fn mirrors_path(&self) -> PathBuf {
         self.base_path.join("mirrors.toml")
+    }
+}
+
+// === Usage ===
+impl ZvNetwork {
+    pub fn download_version() {
+        todo!("Implement version download logic")
     }
 }

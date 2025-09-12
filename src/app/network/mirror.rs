@@ -137,6 +137,19 @@ impl Mirror {
         };
         alternate.get_download_url(version, tarball)
     }
+    pub fn promote(&mut self) {
+        // Lower rank = better
+        if self.rank > 1 {
+            self.rank -= 1;
+        }
+    }
+
+    pub fn demote(&mut self) {
+        // Higher rank = worse
+        if self.rank < u8::MAX {
+            self.rank += 1;
+        }
+    }
 }
 
 impl TryFrom<&str> for Mirror {
