@@ -102,7 +102,7 @@ pub struct Mirror {
     pub base_url: Url,
     pub layout: Layout,
     #[serde(skip)]
-    pub rank: i8,
+    pub rank: u8,
 }
 
 // ============================================================================
@@ -418,6 +418,8 @@ impl MirrorManager {
     }
     /// Get a random mirror for load balancing, preferring lower rank
     pub async fn get_random_mirror(&mut self) -> Result<&Mirror, NetErr> {
+        use rand::Rng;
+
         let mirrors = self.get_ranked_mirrors().await?;
 
         if mirrors.is_empty() {
@@ -433,20 +435,10 @@ impl MirrorManager {
         // Lower rank = higher weight
         let weights: Vec<f64> = mirrors
             .iter()
-            .map(|m| 1.0 / m.rank as f64) // Rank 1 = weight 1.0, rank 2 = 0.5, rank 5 = 0.2
-            .collect();
-        let mut rng = rand::rng();
-        // Calculate weights inversely proportional to rank
-        // Lower rank = higher weight
-        let weights: Vec<f64> = mirrors
-            .iter()
-            .map(|m| {
-                let rank = m.rank.max(1) as f64; // Protect against zero/negative ranks
-                1.0 / rank // Rank 1 = weight 1.0, rank 2 = 0.5, rank 5 = 0.2
-            })
+            .map(|m| 1.0f64 / m.rank as f64) // Rank 1 = weight 1.0, rank 2 = 0.5, rank 5 = 0.2
             .collect();
 
-        // Simple weighted random selection - perfect for small lists
+        // Simple weighted random selection
         let mut rng = rand::rng();
         let total_weight: f64 = weights.iter().sum();
         let mut random_weight = rng.random::<f64>() * total_weight;
@@ -457,6 +449,7 @@ impl MirrorManager {
                 return Ok(&mirrors[i]);
             }
         }
+
         // Fallback to first mirror (should not happen with correct weights)
         Ok(&mirrors[0])
     }
