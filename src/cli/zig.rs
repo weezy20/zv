@@ -106,7 +106,6 @@ fn find_zig_for_version(version: &ZigVersion) -> crate::Result<PathBuf> {
                 "Stable/latest version resolution not yet implemented. Use specific version."
             ))
         }
-        ZigVersion::Unknown => Err(eyre!("Cannot use unknown version")),
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::{Result, app::App};
 use crate::{ZigVersion, tools};
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::eyre;
 use semver::Version as SemverVersion;
 use std::path::PathBuf;
 use yansi::Paint;
