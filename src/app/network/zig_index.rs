@@ -2,7 +2,10 @@
 
 use crate::{
     CfgErr, NetErr, ZigVersion, ZvError,
-    app::{constants::ZIG_DOWNLOAD_INDEX_JSON, network::INDEX_TTL_DAYS},
+    app::{
+        constants::ZIG_DOWNLOAD_INDEX_JSON,
+        network::{INDEX_TTL_DAYS, TARGET},
+    },
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -345,12 +348,10 @@ impl IndexManager {
         index.update_sync_time();
 
         self.index = Some(index);
-        self.save_to_disk().await.map_err(|e| {
-            ZvError::ZvConfigError(CfgErr::WriteFail(
-                e.into(),
-                self.index_path.to_string_lossy().to_string(),
-            ))
-        })?;
+        let _ = self.save_to_disk().await.map_err(|e| {
+            // Non-fatal error, log and continue
+            tracing::warn!(target: TARGET, "Failed to save refreshed index to disk: {}", e);
+        });
         Ok(self)
     }
 }
