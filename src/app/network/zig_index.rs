@@ -1,0 +1,356 @@
+//! Zig download index representation and management
+
+use crate::{
+    CfgErr, NetErr, ZigVersion, ZvError,
+    app::{constants::ZIG_DOWNLOAD_INDEX_JSON, network::INDEX_TTL_DAYS},
+};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+
+/// Represents a download artifact with tarball URL, SHA sum, and size
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadArtifact {
+    pub tarball: String,
+    pub shasum: String,
+    #[serde(deserialize_with = "deserialize_str_to_u64")]
+    pub size: u64,
+}
+
+/// Custom deserializer to convert string to u64 for size field
+fn deserialize_str_to_u64<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s: String = String::deserialize(deserializer)?;
+    s.parse::<u64>().map_err(serde::de::Error::custom)
+}
+
+/// Represents a Zig release version
+#[derive(Debug, Clone)]
+pub struct ZigRelease {
+    /// Semver version string (optional for regular releases, required for master)
+    pub version: String,
+    /// Publish date
+    pub date: String,
+    /// Platform-specific artifacts
+    pub targets: BTreeMap<String, DownloadArtifact>,
+}
+
+impl Serialize for ZigRelease {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeMap;
+
+        // Include version field only for master (dev versions)
+        let include_version = !self.version.is_empty()
+            && (self.version.contains("dev") || self.version.contains("+"));
+        let map_size = if include_version { 2 } else { 1 } + self.targets.len();
+        let mut map = serializer.serialize_map(Some(map_size))?;
+
+        if include_version {
+            map.serialize_entry("version", &self.version)?;
+        }
+        map.serialize_entry("date", &self.date)?;
+
+        // Serialize targets
+        for (key, artifact) in &self.targets {
+            map.serialize_entry(key, artifact)?;
+        }
+
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for ZigRelease {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{MapAccess, Visitor};
+
+        struct ZigReleaseVisitor;
+
+        impl<'de> Visitor<'de> for ZigReleaseVisitor {
+            type Value = ZigRelease;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a ZigRelease object")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<ZigRelease, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut version = None;
+                let mut date = None;
+                let mut targets = BTreeMap::new();
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "date" => {
+                            date = Some(map.next_value()?);
+                        }
+                        "version" => {
+                            // Capture version field if present (for master)
+                            version = Some(map.next_value()?);
+                        }
+                        // Skip documentation, bootstrap, source, and other non-platform fields
+                        "docs" | "stdDocs" | "langRef" | "notes" | "bootstrap" | "src" => {
+                            let _: serde_json::Value = map.next_value()?;
+                        }
+                        // Everything else should be a platform target
+                        _ => {
+                            // Try to deserialize as DownloadArtifact, skip if it fails
+                            match map.next_value::<DownloadArtifact>() {
+                                Ok(artifact) => {
+                                    targets.insert(key, artifact);
+                                }
+                                Err(_) => {
+                                    // Skip fields that don't deserialize as DownloadArtifact
+                                    // This handles cases where the value is a string or other type
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let date = date.ok_or_else(|| serde::de::Error::missing_field("date"))?;
+
+                Ok(ZigRelease {
+                    version: version.unwrap_or_default(), // Will be overridden by ZigIndex deserializer if empty
+                    date,
+                    targets,
+                })
+            }
+        }
+
+        deserializer.deserialize_map(ZigReleaseVisitor)
+    }
+}
+
+/// Main structure representing the Zig download index
+#[derive(Debug, Clone)]
+pub struct ZigIndex {
+    /// All releases including master - BTreeMap for sorted keys
+    pub releases: BTreeMap<String, ZigRelease>,
+
+    /// Timestamp of when this index was last synced (not part of original JSON)
+    pub last_synced: Option<DateTime<Utc>>,
+}
+
+impl Serialize for ZigIndex {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeMap;
+
+        // Calculate map size (releases + last_synced if present)
+        let map_size = self.releases.len() + if self.last_synced.is_some() { 1 } else { 0 };
+        let mut map = serializer.serialize_map(Some(map_size))?;
+
+        // Serialize all releases
+        for (key, release) in &self.releases {
+            map.serialize_entry(key, release)?;
+        }
+
+        // Serialize last_synced if present (for local zv cache)
+        if let Some(ref last_synced) = self.last_synced {
+            map.serialize_entry("last_synced", last_synced)?;
+        }
+
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for ZigIndex {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{MapAccess, Visitor};
+
+        struct ZigIndexVisitor;
+
+        impl<'de> Visitor<'de> for ZigIndexVisitor {
+            type Value = ZigIndex;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str(
+                    "a ZigIndex object (see https://ziglang.org/download/index.json for the expected format)"
+                )
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<ZigIndex, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut releases = BTreeMap::new();
+                let mut last_synced = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    if key == "last_synced" {
+                        last_synced = map.next_value()?;
+                    } else {
+                        // This is a release (including master)
+                        let mut release: ZigRelease = map.next_value()?;
+
+                        // Set version from key if not already set from JSON
+                        if release.version.is_empty() {
+                            release.version = key.clone();
+                        }
+
+                        releases.insert(key, release);
+                    }
+                }
+
+                Ok(ZigIndex {
+                    releases,
+                    last_synced,
+                })
+            }
+        }
+
+        deserializer.deserialize_map(ZigIndexVisitor)
+    }
+}
+
+impl ZigIndex {
+    /// Get the latest stable release version
+    pub fn get_latest_stable(&self) -> Option<ZigVersion> {
+        self.releases
+            .keys()
+            .filter(|k| *k != "master") // Filter out master
+            .filter(|k| !k.contains("dev")) // Filter out dev versions
+            .filter_map(|version_key| {
+                semver::Version::parse(version_key)
+                    .ok()
+                    .filter(|v| v.pre.is_empty()) // Ensure it's not a prerelease
+            })
+            .max() // Get the maximum version using semver comparison
+            .map(ZigVersion::Semver)
+    }
+
+    /// Get master version info
+    pub fn get_master_version(&self) -> Option<ZigVersion> {
+        self.releases
+            .get("master")
+            .and_then(|release| semver::Version::parse(&release.version).ok())
+            .map(ZigVersion::Master)
+    }
+
+    /// Get all available target platforms for a specific version
+    pub fn get_targets_for_version(&self, version: &str) -> Vec<&str> {
+        self.releases
+            .get(version)
+            .map(|release| release.targets.keys().map(|s| s.as_str()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Cache expired?
+    pub fn is_expired(&self) -> bool {
+        if let Some(last_synced) = self.last_synced {
+            let age = Utc::now() - last_synced;
+            age.num_days() >= *INDEX_TTL_DAYS
+        } else {
+            true // If never synced, consider it expired
+        }
+    }
+
+    /// Update the last_synced timestamp (call after successful HTTP fetch)
+    pub fn update_sync_time(&mut self) {
+        self.last_synced = Some(Utc::now());
+    }
+
+    /// Get master release
+    pub fn get_master(&self) -> Option<&ZigRelease> {
+        self.releases.get("master")
+    }
+}
+
+#[derive(Debug, Clone)]
+/// In memory index manager for zig download index
+pub struct IndexManager {
+    index_path: PathBuf,
+    index: Option<ZigIndex>,
+}
+
+impl IndexManager {
+    pub fn new(index_path: PathBuf) -> Self {
+        Self {
+            index_path,
+            index: None,
+        }
+    }
+    /// Load index from disk if exists
+    pub fn ensure_loaded(self) -> Result<Self, CfgErr> {
+        let index = if self.index_path.is_file() {
+            let data = std::fs::read_to_string(&self.index_path)
+                .map_err(|io_err| CfgErr::NotFound(io_err.into()))?;
+
+            let mut index: ZigIndex =
+                toml::from_str(&data).map_err(|e| CfgErr::ParseFail(e.into()))?;
+
+            Some(index)
+        } else {
+            None
+        };
+        Ok(Self {
+            index_path: self.index_path,
+            index,
+        })
+    }
+    /// Save current index to disk
+    pub async fn save_to_disk(&self) -> Result<(), CfgErr> {
+        if let Some(ref index) = self.index {
+            let toml_str =
+                toml::to_string_pretty(index).map_err(|e| CfgErr::ParseFail(e.into()))?;
+            tokio::fs::write(&self.index_path, toml_str)
+                .await
+                .map_err(|io_err| {
+                    CfgErr::WriteFail(io_err.into(), self.index_path.to_string_lossy().to_string())
+                })?;
+        }
+        Ok(())
+    }
+    /// Fetch the index from network and update internal state & save to disk
+    pub async fn refresh_from_network(
+        mut self,
+        client: Arc<reqwest::Client>,
+    ) -> Result<Self, ZvError> {
+        let response = client
+            .get(ZIG_DOWNLOAD_INDEX_JSON)
+            .send()
+            .await
+            .map_err(NetErr::Reqwest)
+            .map_err(ZvError::NetworkError)?;
+        if !response.status().is_success() {
+            return Err(ZvError::NetworkError(NetErr::HTTP(response.status())));
+        }
+
+        let text = response
+            .text()
+            .await
+            .map_err(NetErr::Reqwest)
+            .map_err(ZvError::NetworkError)?;
+
+        let mut index = serde_json::from_str::<ZigIndex>(&text)
+            .map_err(NetErr::JsonParse)
+            .map_err(ZvError::NetworkError)?;
+
+        // Update last_synced timestamp
+        index.update_sync_time();
+
+        self.index = Some(index);
+        self.save_to_disk().await.map_err(|e| {
+            ZvError::ZvConfigError(CfgErr::WriteFail(
+                e.into(),
+                self.index_path.to_string_lossy().to_string(),
+            ))
+        })?;
+        Ok(self)
+    }
+}
