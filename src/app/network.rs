@@ -12,7 +12,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::io::AsyncWriteExt;
-use tracing_indicatif::IndicatifLayer;
 use yansi::Paint;
 mod mirror;
 use mirror::*;
@@ -92,8 +91,7 @@ impl ZvNetwork {
 
         let base_client = reqwest::Client::builder()
             .user_agent(zv_agent())
-            .timeout(Duration::from_secs(30))
-            .connect_timeout(Duration::from_secs(10))
+            .connect_timeout(Duration::from_secs(*NETWORK_TIMEOUT_SECS))
             .build()
             .map_err(NetErr::Reqwest)
             .wrap_err("Failed to build HTTP client")?;
@@ -216,53 +214,36 @@ impl ZvNetwork {
         spinner.set_message("Fetching master version...");
         spinner.enable_steady_tick(Duration::from_millis(120));
 
-        // Wrap the entire operation with a timeout to ensure fast failure
-        let fetch_op = async {
-            match try_partial_fetch(self.client.clone()).await {
-                Ok(fetched_version) => {
-                    spinner.set_message("✓ Fetched master version via partial fetch");
-                    Ok(fetched_version)
-                }
-                Err(err) => {
-                    // Partial fetch failed - fall back to full index fetch
-                    spinner.set_message("Partial fetch failed, falling back to full index fetch");
+        let result = match try_partial_fetch(self.client.clone()).await {
+            Ok(fetched_version) => {
+                spinner.set_message("✓ Fetched master version via partial fetch");
+                Ok(fetched_version)
+            }
+            Err(err) => {
+                // Partial fetch failed - fall back to full index fetch
+                spinner.set_message("Partial fetch failed, falling back to full index fetch");
 
-                    match self
-                        .index_manager
-                        .ensure_loaded(CacheStrategy::AlwaysRefresh)
-                        .await
-                    {
-                        Ok(_) => {
-                            let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
+                match self
+                    .index_manager
+                    .ensure_loaded(CacheStrategy::AlwaysRefresh)
+                    .await
+                {
+                    Ok(_) => {
+                        let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
 
-                            if let Some(master_release) = index.get_master_version() {
-                                spinner.set_message("✓ Fetched master version from full index");
-                                Ok(master_release)
-                            } else {
-                                spinner.finish_with_message("✗ Failed to fetch master version");
-                                Err(eyre!("No master version found in index").into())
-                            }
-                        }
-                        Err(e) => {
+                        if let Some(master_release) = index.get_master_version() {
+                            spinner.set_message("✓ Fetched master version from full index");
+                            Ok(master_release)
+                        } else {
                             spinner.finish_with_message("✗ Failed to fetch master version");
-                            Err(e)
+                            Err(eyre!("No master version found in index").into())
                         }
                     }
+                    Err(e) => {
+                        spinner.finish_with_message("✗ Failed to fetch master version");
+                        Err(e)
+                    }
                 }
-            }
-        };
-        use tokio::time::timeout;
-        // Apply timeout to the entire operation
-        let result = match timeout(Duration::from_secs(*NETWORK_TIMEOUT_SECS), fetch_op).await {
-            Ok(operation_result) => operation_result,
-            Err(_) => {
-                // Timeout occurred
-                spinner.finish_with_message("✗ Operation timed out");
-                return Err(eyre!(
-                    "Master version fetch timed out after {} seconds",
-                    *NETWORK_TIMEOUT_SECS
-                )
-                .into());
             }
         };
 

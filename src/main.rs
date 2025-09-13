@@ -3,7 +3,6 @@ use color_eyre::{
     config::{HookBuilder, Theme},
     eyre::Context,
 };
-pub use tracing_indicatif::span_ext::IndicatifSpanExt;
 use tracing_subscriber::prelude::*;
 
 // We only expect to route to `zig` or `zls` once from `zv`
@@ -66,26 +65,21 @@ fn init_tracing() -> Result<()> {
 
     if zv_log {
         // Full structured logging mode
-        let indicatif_layer = tracing_indicatif::IndicatifLayer::new();
         tracing_subscriber::registry()
             .with(
                 tracing_subscriber::fmt::layer()
-                    .with_writer(indicatif_layer.get_stderr_writer())
                     .with_target(true) // Show module paths
                     .with_filter(
                         tracing_subscriber::EnvFilter::try_from_env("ZV_LOG")
                             .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("zv=info")),
                     ),
             )
-            .with(indicatif_layer)
             .init();
     } else {
         // Simple user-friendly logging mode
-        let indicatif_layer = tracing_indicatif::IndicatifLayer::new();
         tracing_subscriber::registry()
             .with(
                 tracing_subscriber::fmt::layer()
-                    .with_writer(indicatif_layer.get_stderr_writer())
                     .with_target(false) // Hide module paths
                     .with_level(true) // Show level
                     .with_thread_ids(false)
@@ -95,7 +89,6 @@ fn init_tracing() -> Result<()> {
                     .without_time() // No timestamps
                     .with_filter(tracing_subscriber::EnvFilter::new("zv=info")),
             )
-            .with(indicatif_layer)
             .init();
     }
 
