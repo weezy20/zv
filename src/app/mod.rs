@@ -111,6 +111,14 @@ impl App {
         Ok(version)
     }
 
+    /// Initialize network client if not already done
+    pub async fn ensure_network(&mut self) -> Result<(), ZvError> {
+        if self.network.is_none() {
+            self.network = Some(network::ZvNetwork::new(self.zv_base_path.as_path()).await?);
+        }
+        Ok(())
+    }
+
     /// Get the current active Zig version
     pub fn get_active_version(&self) -> Option<&ZigVersion> {
         // self.active_version.as_ref()
@@ -139,7 +147,7 @@ impl App {
 
     /// Spawn a zig process with recursion guard management
     /// Only bumps the recursion count if we're spawning our own shim
-    pub(crate) fn spawn_with_guard(
+    pub(crate) fn spawn_zig_with_guard(
         &self,
         zig_path: &Path,
         args: &[&str],
@@ -201,5 +209,23 @@ impl App {
 
         // Determine compatible ZLS version
         todo!()
+    }
+
+    /// Fetch latest master
+    pub async fn fetch_master_version(&mut self) -> Result<ZigVersion, ZvError> {
+        self.ensure_network().await?;
+        self.network.as_mut().unwrap().fetch_master_version().await
+    }
+    /// Fetch latest stable
+    pub async fn fetch_stable_version(&mut self) -> Result<ZigVersion, ZvError> {
+        self.ensure_network().await?;
+        // Placeholder implementation
+        Ok(ZigVersion::Semver(semver::Version::new(0, 9, 1)))
+    }
+    /// Fetch latest release
+    pub async fn fetch_latest_version(&mut self) -> Result<ZigVersion, ZvError> {
+        self.ensure_network().await?;
+        // Placeholder implementation
+        Ok(ZigVersion::Semver(semver::Version::new(0, 10, 0)))
     }
 }

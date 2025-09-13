@@ -320,6 +320,7 @@ impl IndexManager {
         Ok(())
     }
     /// Fetch the index from network and update internal state & save to disk
+    /// If write fails, it is non-fatal and logged and the in-memory index is still updated
     pub async fn refresh_from_network(
         mut self,
         client: Arc<reqwest::Client>,

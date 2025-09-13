@@ -1,3 +1,4 @@
+use crate::app::constants::ZIG_DOWNLOAD_INDEX_JSON;
 use crate::app::utils::zv_agent;
 use crate::{NetErr, ZigVersion, ZvError, tools};
 use color_eyre::eyre::{Result, WrapErr, eyre};
@@ -13,7 +14,8 @@ use tokio::io::AsyncWriteExt;
 use yansi::Paint;
 mod mirror;
 use mirror::*;
-
+mod zig_index;
+use zig_index::*;
 /// Cache strategy for index loading
 #[derive(Debug, Clone, Copy)]
 pub enum CacheStrategy {
@@ -45,25 +47,42 @@ pub static MIRRORS_TTL_DAYS: LazyLock<i64> = LazyLock::new(|| {
 pub struct ZvNetwork {
     /// Management layer for community-mirrors
     mirror_manager: MirrorManager,
+    /// Zig version index
+    index_manager: IndexManager,
     /// ZV_DIR
     base_path: PathBuf,
     /// Download cache path (ZV_DIR/downloads)
     download_cache: PathBuf,
     /// Network Client
     client: Arc<reqwest::Client>,
+    /// Client with retry logic
+    retry_client: Arc<reqwest_middleware::ClientWithMiddleware>,
 }
 
 // === Initialize ZvNetwork ===
 impl ZvNetwork {
     /// Initialize ZvNetwork with given base path (ZV_DIR)
     pub async fn new(zv_base_path: impl AsRef<Path>) -> Result<Self, ZvError> {
-        let client = Arc::new(
-            reqwest::Client::builder()
-                .user_agent(zv_agent())
-                .build()
-                .map_err(NetErr::Reqwest)
-                .wrap_err("Failed to build HTTP client")?,
+        use reqwest_middleware::ClientBuilder;
+        use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
+
+        let base_client = reqwest::Client::builder()
+            .user_agent(zv_agent())
+            .timeout(Duration::from_secs(30))
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+            .map_err(NetErr::Reqwest)
+            .wrap_err("Failed to build HTTP client")?;
+
+        let client = Arc::new(base_client.clone());
+
+        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
+        let retry_client = Arc::new(
+            ClientBuilder::new(base_client)
+                .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+                .build(),
         );
+
         if !zv_base_path.as_ref().join("downloads").is_dir() {
             tokio::fs::create_dir_all(zv_base_path.as_ref().join("downloads"))
                 .await
@@ -72,7 +91,6 @@ impl ZvNetwork {
                     ZvError::Io(io_err)
                 })?;
         }
-        let download_cache = zv_base_path.as_ref().join("downloads");
         let mirrors_path = zv_base_path.as_ref().join("mirrors.toml");
         let mirror_manager = MirrorManager::init_and_load(
             mirrors_path,
@@ -86,10 +104,20 @@ impl ZvNetwork {
         })?;
         Ok(Self {
             client,
-            download_cache,
+            retry_client,
+            download_cache: zv_base_path.as_ref().join("downloads"),
+            index_manager: IndexManager::new(zv_base_path.as_ref().join("index.toml")),
             base_path: zv_base_path.as_ref().to_path_buf(),
             mirror_manager,
         })
+    }
+    fn ensure_download_cache(&self) -> Result<(), ZvError> {
+        if !self.download_cache.is_dir() {
+            std::fs::create_dir_all(&self.download_cache)
+                .map_err(ZvError::Io)
+                .wrap_err("Creation of download cache directory failed")?;
+        }
+        Ok(())
     }
     fn versions_path(&self) -> PathBuf {
         self.base_path.join("versions")
@@ -107,4 +135,40 @@ impl ZvNetwork {
     pub fn download_version() {
         todo!("Implement version download logic")
     }
+    pub async fn fetch_master_version(&mut self) -> Result<ZigVersion, ZvError> {
+        self.ensure_download_cache().map_err(|e| {
+            tracing::warn!(target: TARGET, "Failed to ensure download cache: {e}");
+            e
+        })?;
+
+        let response = self
+            .retry_client
+            .get(ZIG_DOWNLOAD_INDEX_JSON)
+            .header("Range", "bytes=0-1023")
+            .send()
+            .await
+            .map_err(|e| NetErr::ReqwestMiddleware(e))
+            .wrap_err("Failed to fetch Zig master version")?;
+
+        if response.status() == 206 {
+            // Partial Content
+            let partial_text = response
+                .text()
+                .await
+                .map_err(NetErr::Reqwest)
+                .map_err(ZvError::NetworkError)?;
+            extract_master_version_from_partial(&partial_text)
+        } else {
+            // Server doesn't support range requests, get full content
+            let full_text = response
+                .text()
+                .await
+                .map_err(NetErr::Reqwest)
+                .map_err(ZvError::NetworkError)?;
+            extract_master_version_from_json(&full_text)
+        }
+
+        todo!()
+    }
 }
+

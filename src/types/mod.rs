@@ -3,10 +3,8 @@
 pub mod error;
 pub use error::*;
 
-mod zig;
 mod zigversion;
 
-pub use zig::*;
 pub use zigversion::*;
 
 use color_eyre::eyre::eyre;

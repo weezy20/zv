@@ -372,6 +372,9 @@ pub enum NetErr {
     #[error("Reqwest error: {0}")]
     Reqwest(#[source] reqwest::Error),
 
+    #[error("Reqwest middleware error: {0}")]
+    ReqwestMiddleware(#[source] reqwest_middleware::Error),
+
     #[error("Download timeout: {0}")]
     Timeout(String),
 
@@ -417,7 +420,7 @@ pub enum CfgErr {
 
     /// Write failed
     #[error("Config flush failed for file: {1}")]
-    WriteFail(#[source] Report, &'static str),
+    WriteFail(#[source] Report, String),
 
     /// Cache expired
     #[error("Cache expired for {0}")]

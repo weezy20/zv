@@ -238,7 +238,7 @@ impl MirrorsIndex {
 
         tokio::fs::write(path, content)
             .await
-            .map_err(|io_err| CfgErr::WriteFail(io_err.into(), "mirrors index"))?;
+            .map_err(|io_err| CfgErr::WriteFail(io_err.into(), String::from("mirrors index")))?;
 
         Ok(())
     }

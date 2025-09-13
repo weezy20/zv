@@ -10,11 +10,11 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
     let placeholder_version = SemverVersion::new(0, 0, 0);
     // First check that if version is a valid version & resolve it to a Semver i.e. ZigVersion::Semver
     let using_version: ZigVersion = match zig_version {
-        ZigVersion::Semver(ref v) => {
-            if *v == placeholder_version {
+        ZigVersion::Semver(v) => {
+            if v == placeholder_version {
                 return Err(eyre!("Invalid semver version: {}", v));
             } else {
-                ZigVersion::Semver(*v)
+                ZigVersion::Semver(v)
             }
         }
         ZigVersion::Master(ref v) => {
@@ -24,11 +24,11 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
             );
             app.fetch_master_version().await?
         }
-        ZigVersion::Stable(ref v) => {
-            if *v == placeholder_version {
+        ZigVersion::Stable(v) => {
+            if v == placeholder_version {
                 app.fetch_stable_version().await?
             } else {
-                ZigVersion::Semver(*v)
+                ZigVersion::Semver(v)
             }
         }
         ZigVersion::Latest(ref v) => {
