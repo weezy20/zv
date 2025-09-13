@@ -8,14 +8,13 @@ mod utils;
 use color_eyre::eyre::{Context as _, eyre};
 use toolchain::ToolchainManager;
 
-use crate::app::network::FetchResult;
 use crate::tools::canonicalize;
 use crate::types::*;
 use crate::{Shell, path_utils};
+pub use network::CacheStrategy;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
-
 /// Zv App State
 #[derive(Debug, Default, Clone)]
 pub struct App {
@@ -223,7 +222,7 @@ impl App {
         todo!()
     }
 
-    /// Fetch latest master
+    /// Fetch latest master and returns a [ZigVersion::Semver]
     pub async fn fetch_master_version(&mut self) -> Result<ZigVersion, ZvError> {
         self.ensure_network().await?;
         let version = self
@@ -234,21 +233,26 @@ impl App {
             .await?;
         return Ok(version);
     }
-    /// Fetch latest stable
-    pub async fn fetch_stable_version(&mut self) -> Result<ZigVersion, ZvError> {
+    /// Fetch latest stable and returns a [ZigVersion::Semver]
+    pub async fn fetch_latest_version(
+        &mut self,
+        cache_strategy: CacheStrategy,
+    ) -> Result<ZigVersion, ZvError> {
         self.ensure_network().await?;
-        self.network
+        let version = self.network
             .as_mut()
             .unwrap()
-            .fetch_stable_version()
+            .fetch_last_stable_version(cache_strategy)
             .await?;
-        // Placeholder implementation
-        Ok(ZigVersion::Semver(semver::Version::new(0, 9, 1)))
+        return Ok(version);
     }
-    /// Fetch latest release
-    pub async fn fetch_latest_version(&mut self) -> Result<ZigVersion, ZvError> {
+    /// Validate if a semver version exists in the index and returns a [ZigVersion::Semver]
+    pub async fn validate_semver(
+        &mut self,
+        version: &semver::Version,
+    ) -> Result<ZigVersion, ZvError> {
         self.ensure_network().await?;
-        // Placeholder implementation
-        Ok(ZigVersion::Semver(semver::Version::new(0, 10, 0)))
+        todo!("impl validate_semver");
+        Ok(ZigVersion::Semver(version.to_owned()))
     }
 }

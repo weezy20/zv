@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::io::AsyncWriteExt;
+use tracing_indicatif::IndicatifLayer;
 use yansi::Paint;
 mod mirror;
 use mirror::*;
@@ -52,6 +53,13 @@ pub static MIRRORS_TTL_DAYS: LazyLock<i64> = LazyLock::new(|| {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(21)
+});
+/// Network timeout in seconds for operations
+pub static NETWORK_TIMEOUT_SECS: LazyLock<u64> = LazyLock::new(|| {
+    std::env::var("ZV_NETWORK_TIMEOUT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(15)
 });
 
 #[derive(Debug, Clone)]
@@ -159,30 +167,37 @@ impl ZvNetwork {
         todo!("Implement version download logic")
     }
 
-    /// Fetch the latest stable version using prefer-cache strategy
-    /// Returns the latest stable version from the Zig download index
-    pub async fn fetch_stable_version(&mut self) -> Result<ZigVersion, ZvError> {
-        // Ensure download cache directory exists
-        self.ensure_download_cache().await.map_err(|e| {
-            tracing::warn!(target: TARGET, "Failed to ensure download cache: {e}");
-            e
-        })?;
-
-        // Load index with preferred cache strategy
-        self.index_manager
-            .ensure_loaded(CacheStrategy::PreferCache)
-            .await?;
+    /// Returns the latest stable version from the Zig download index. Network request is controlled by [CacheStrategy].
+    pub async fn fetch_last_stable_version(
+        &mut self,
+        cache_strategy: CacheStrategy,
+    ) -> Result<ZigVersion, ZvError> {
+        // Create a spinner progress bar
+        let spinner = ProgressBar::new_spinner();
+        spinner.set_style(
+            ProgressStyle::default_spinner()
+                .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+                .template("{spinner:.blue} {msg}")
+                .unwrap(),
+        );
+        spinner.set_message("Loading zig index...");
+        spinner.enable_steady_tick(Duration::from_millis(120));
+        // Load index with cache strategy
+        self.index_manager.ensure_loaded(cache_strategy).await?;
 
         // Get the index and retrieve latest stable version
         let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
 
         match index.get_latest_stable() {
             Some(stable_version) => {
-                tracing::info!(target: TARGET, "Found latest stable version: {}", stable_version);
+                spinner.finish_with_message(format!(
+                    "✓ Found latest stable version from index: {}",
+                    Paint::green(&stable_version).bold()
+                ));
                 Ok(stable_version)
             }
             None => {
-                tracing::error!(target: TARGET, "No stable version found in index");
+                spinner.finish_with_message("✗ No stable version found in index");
                 Err(eyre!("No stable version found in Zig download index").into())
             }
         }
@@ -190,30 +205,79 @@ impl ZvNetwork {
 
     /// Fetch the latest master as a [ZigVersion::Semver] using smart optimizations
     pub async fn fetch_master_version(&mut self) -> Result<ZigVersion, ZvError> {
-        match try_partial_fetch(self.client.clone()).await {
-            Ok(fetched_version) => {
-                println!(
-                    "{} Fetched master version via partial fetch: {}",
-                    Paint::blue("Info:").bold(),
-                    Paint::green(&fetched_version.to_string()).bold()
-                );
-                return Ok(fetched_version);
-            }
-            Err(err) => {
-                // Partial fetch failed - fall back to full index fetch
-                tracing::warn!(target: TARGET, "Partial fetch failed: {err}, falling back to full fetch");
-                self.index_manager
-                    .ensure_loaded(CacheStrategy::AlwaysRefresh)
-                    .await?;
-                let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
+        // Create a spinner progress bar
+        let spinner = ProgressBar::new_spinner();
+        spinner.set_style(
+            ProgressStyle::default_spinner()
+                .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+                .template("{spinner:.blue} {msg}")
+                .unwrap(),
+        );
+        spinner.set_message("Fetching master version...");
+        spinner.enable_steady_tick(Duration::from_millis(120));
 
-                if let Some(master_release) = index.get_master_version() {
-                    Ok(master_release)
-                } else {
-                    Err(eyre!("No master version found in index").into())
+        // Wrap the entire operation with a timeout to ensure fast failure
+        let fetch_op = async {
+            match try_partial_fetch(self.client.clone()).await {
+                Ok(fetched_version) => {
+                    spinner.set_message("✓ Fetched master version via partial fetch");
+                    Ok(fetched_version)
+                }
+                Err(err) => {
+                    // Partial fetch failed - fall back to full index fetch
+                    spinner.set_message("Partial fetch failed, falling back to full index fetch");
+
+                    match self
+                        .index_manager
+                        .ensure_loaded(CacheStrategy::AlwaysRefresh)
+                        .await
+                    {
+                        Ok(_) => {
+                            let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
+
+                            if let Some(master_release) = index.get_master_version() {
+                                spinner.set_message("✓ Fetched master version from full index");
+                                Ok(master_release)
+                            } else {
+                                spinner.finish_with_message("✗ Failed to fetch master version");
+                                Err(eyre!("No master version found in index").into())
+                            }
+                        }
+                        Err(e) => {
+                            spinner.finish_with_message("✗ Failed to fetch master version");
+                            Err(e)
+                        }
+                    }
                 }
             }
+        };
+        use tokio::time::timeout;
+        // Apply timeout to the entire operation
+        let result = match timeout(Duration::from_secs(*NETWORK_TIMEOUT_SECS), fetch_op).await {
+            Ok(operation_result) => operation_result,
+            Err(_) => {
+                // Timeout occurred
+                spinner.finish_with_message("✗ Operation timed out");
+                return Err(eyre!(
+                    "Master version fetch timed out after {} seconds",
+                    *NETWORK_TIMEOUT_SECS
+                )
+                .into());
+            }
+        };
+
+        match &result {
+            Ok(version) => {
+                spinner.finish_with_message(format!(
+                    "✓ Fetched Master Version: {}",
+                    Paint::green(&version.to_string()).bold()
+                ));
+            }
+            Err(_) => {
+                // Error cases are already handled above with immediate spinner finish
+            }
         }
+        result
     }
 }
 
@@ -223,6 +287,7 @@ async fn try_partial_fetch(client: Arc<reqwest::Client>) -> Result<ZigVersion> {
     let response = client
         .get(ZIG_DOWNLOAD_INDEX_JSON)
         .header("Range", "bytes=0-88")
+        .timeout(Duration::from_secs(*NETWORK_TIMEOUT_SECS))
         .send()
         .await?;
 

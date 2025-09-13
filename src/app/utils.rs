@@ -5,8 +5,9 @@ use crate::{
 };
 use color_eyre::eyre::eyre;
 use same_file::Handle;
-use std::path::{Path, PathBuf};
-
+use std::{
+    path::{Path, PathBuf},
+};
 /// Checks if a file is a valid zv shim by comparing it with the current executable
 fn is_zv_shim(shim_path: &Path, current_exe_handle: &Handle) -> bool {
     // First check for hard links using same-file crate
