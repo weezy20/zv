@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
     #[cfg(windows)]
     apply_windows_security_mitigations();
 
-    check_recursion()?;
+    check_recursion_with_context("zv main")?;
 
     #[cfg(feature = "dotenv")]
     dotenv::dotenv().ok();
@@ -143,7 +143,8 @@ pub fn apply_windows_security_mitigations() {
     tracing::debug!("Applied Windows DLL security mitigations");
 }
 
-fn check_recursion() -> Result<()> {
+/// Check recursion depth with context for better error messages
+pub fn check_recursion_with_context(context: &str) -> Result<()> {
     // Recursion guard - prevent infinite loops but allow zig subcommands such as zv init --zig :  zv -> zig
     let recursion_count = std::env::var("ZV_RECURSION_COUNT")
         .unwrap_or_else(|_| "0".to_string())
@@ -152,9 +153,9 @@ fn check_recursion() -> Result<()> {
 
     if recursion_count > ZV_RECURSION_MAX {
         eprintln!(
-            "Error: Too many recursive calls detected (depth: {}). \
+            "Error: Too many recursive calls detected in {} (depth: {}). \
              The zv binary may be calling itself infinitely.",
-            recursion_count
+            context, recursion_count
         );
         std::process::exit(1);
     }

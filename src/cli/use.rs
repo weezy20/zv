@@ -1,4 +1,7 @@
-use crate::{Result, app::App};
+use crate::{
+    Result,
+    app::{App, CacheStrategy},
+};
 use crate::{ZigVersion, tools};
 use color_eyre::eyre::eyre;
 use semver::Version as SemverVersion;
@@ -14,7 +17,7 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
             if v == placeholder_version {
                 return Err(eyre!("Invalid semver version: {}", v));
             } else {
-                ZigVersion::Semver(v)
+                app.validate_semver(v).await?
             }
         }
         ZigVersion::Master(ref v) => {
@@ -26,9 +29,9 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
         }
         ZigVersion::Stable(v) => {
             if v == placeholder_version {
-                app.fetch_stable_version().await?
+                app.fetch_latest_version(CacheStrategy::RespectTtl).await?
             } else {
-                ZigVersion::Semver(v)
+                app.validate_semver(v).await?
             }
         }
         ZigVersion::Latest(ref v) => {
@@ -36,7 +39,8 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
                 *v == placeholder_version,
                 "Impossible to construct Latest with non-placeholder version"
             );
-            app.fetch_latest_version().await?
+            app.fetch_latest_version(CacheStrategy::AlwaysRefresh)
+                .await?
         }
     };
     // println!(

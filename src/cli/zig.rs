@@ -1,16 +1,11 @@
-use crate::{App, Shell, UserConfig, ZigVersion, tools};
+use crate::{App, UserConfig, ZigVersion, tools};
 use color_eyre::eyre::{bail, eyre};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-const MAX_RECURSION: u32 = 10;
-
 pub fn zig_main() -> crate::Result<()> {
-    // Recursion guard
-    let recursion_count: u32 = std::env::var("ZV_RECURSION_COUNT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
+    // Recursion guard - check early to prevent infinite loops
+    crate::check_recursion_with_context("zig proxy")?;
 
     // Collect command line arguments
     let mut args: Vec<String> = std::env::args().collect();
@@ -35,6 +30,12 @@ pub fn zig_main() -> crate::Result<()> {
         find_default_zig()?
     };
 
+    // Get current recursion count for incrementing
+    let recursion_count: u32 = std::env::var("ZV_RECURSION_COUNT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
     let mut child = Command::new(zig_path)
         .args(args)
         .env("ZV_RECURSION_COUNT", (recursion_count + 1).to_string())
@@ -53,14 +54,8 @@ pub fn zig_main() -> crate::Result<()> {
 
 /// Find the Zig executable for a specific version
 fn find_zig_for_version(version: &ZigVersion) -> crate::Result<PathBuf> {
-    // Initialize app to access zv directory structure
+    // Get zv directory structure
     let (zv_base_path, _) = tools::fetch_zv_dir()?;
-
-    let app = App::init(UserConfig {
-        zv_base_path: zv_base_path.clone(),
-        shell: None,
-    })
-    .map_err(|e| eyre!("Failed to initialize zv: {}", e))?;
 
     match version {
         ZigVersion::Semver(v) => {
