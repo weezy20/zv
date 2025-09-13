@@ -369,7 +369,7 @@ pub enum NetErr {
     #[error("Network IO error: {0}")]
     FileIo(#[source] std::io::Error),
 
-    #[error("Reqwest error: {0}")]
+    #[error("Reqwest error")]
     Reqwest(#[source] reqwest::Error),
 
     #[error("Reqwest middleware error: {0}")]

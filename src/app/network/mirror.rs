@@ -58,6 +58,7 @@ use chrono::{DateTime, Utc};
 use color_eyre::eyre::{Result, WrapErr};
 use rand::{Rng, prelude::IndexedRandom};
 use reqwest::Client;
+use reqwest_middleware::ClientWithMiddleware;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -252,6 +253,8 @@ impl MirrorsIndex {
 pub struct MirrorManager {
     /// HTTP client for network requests
     client: Arc<Client>,
+    /// Retry client for downloads
+    retry_client: Arc<ClientWithMiddleware>,
     /// Currently loaded mirrors
     mirrors: Vec<Mirror>,
     /// Cached mirrors index (lazy loaded)
@@ -265,9 +268,14 @@ impl MirrorManager {
     // MIRROR MANAGER - CONSTRUCTION AND INITIALIZATION
     // ============================================================================
     /// Create a new mirror manager (doesn't load mirrors yet)
-    pub fn new(cache_path: impl AsRef<Path>, client: Arc<Client>) -> Self {
+    pub fn new(
+        cache_path: impl AsRef<Path>,
+        client: Arc<Client>,
+        retry_client: Arc<ClientWithMiddleware>,
+    ) -> Self {
         Self {
             client,
+            retry_client,
             mirrors: Vec::with_capacity(7), // 7 mirrors listed as of September 2025
             mirrors_index: None,
             cache_path: cache_path.as_ref().to_path_buf(),
@@ -279,8 +287,9 @@ impl MirrorManager {
         cache_path: impl AsRef<Path>,
         cache_strategy: CacheStrategy,
         client: Arc<Client>,
+        retry_client: Arc<ClientWithMiddleware>,
     ) -> Result<Self, NetErr> {
-        let mut manager = Self::new(cache_path, client);
+        let mut manager = Self::new(cache_path, client, retry_client);
         manager.load_mirrors(cache_strategy).await?;
         Ok(manager)
     }

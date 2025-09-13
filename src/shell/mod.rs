@@ -1,4 +1,3 @@
-use crate::ZvError;
 use std::path::{Path, PathBuf};
 
 mod detection;

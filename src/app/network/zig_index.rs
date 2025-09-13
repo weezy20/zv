@@ -8,6 +8,7 @@ use crate::{
     },
 };
 use chrono::{DateTime, Utc};
+use reqwest::Client;
 use reqwest_middleware::ClientWithMiddleware;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
@@ -274,7 +275,7 @@ impl ZigIndex {
 #[derive(Debug, Clone)]
 /// In memory index manager for zig download index
 pub struct IndexManager {
-    client: Arc<ClientWithMiddleware>,
+    client: Arc<Client>,
     index_path: PathBuf,
     index: Option<ZigIndex>,
 }
@@ -285,8 +286,8 @@ impl IndexManager {
     /// # Arguments
     ///
     /// * `index_path` - The file path where the index will be cached on disk.
-    /// * `client` - An `Arc<ClientWithMiddleware>` for making network requests.
-    pub fn new(index_path: PathBuf, client: Arc<ClientWithMiddleware>) -> Self {
+    /// * `client` - An `Arc<Client>` for making network requests.
+    pub fn new(index_path: PathBuf, client: Arc<Client>) -> Self {
         Self {
             index_path,
             index: None,
@@ -404,7 +405,7 @@ impl IndexManager {
             .get(ZIG_DOWNLOAD_INDEX_JSON)
             .send()
             .await
-            .map_err(NetErr::ReqwestMiddleware)
+            .map_err(NetErr::Reqwest)
             .map_err(ZvError::NetworkError)?;
         if !response.status().is_success() {
             return Err(ZvError::NetworkError(NetErr::HTTP(response.status())));

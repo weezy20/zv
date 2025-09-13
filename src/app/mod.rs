@@ -8,6 +8,7 @@ mod utils;
 use color_eyre::eyre::{Context as _, eyre};
 use toolchain::ToolchainManager;
 
+use crate::app::network::FetchResult;
 use crate::tools::canonicalize;
 use crate::types::*;
 use crate::{Shell, path_utils};
@@ -225,11 +226,22 @@ impl App {
     /// Fetch latest master
     pub async fn fetch_master_version(&mut self) -> Result<ZigVersion, ZvError> {
         self.ensure_network().await?;
-        self.network.as_mut().unwrap().fetch_master_version().await
+        let version = self
+            .network
+            .as_mut()
+            .unwrap()
+            .fetch_master_version()
+            .await?;
+        return Ok(version);
     }
     /// Fetch latest stable
     pub async fn fetch_stable_version(&mut self) -> Result<ZigVersion, ZvError> {
         self.ensure_network().await?;
+        self.network
+            .as_mut()
+            .unwrap()
+            .fetch_stable_version()
+            .await?;
         // Placeholder implementation
         Ok(ZigVersion::Semver(semver::Version::new(0, 9, 1)))
     }

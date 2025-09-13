@@ -17,6 +17,16 @@ mod mirror;
 use mirror::*;
 mod zig_index;
 use zig_index::*;
+
+/// Result of fetching master version with optimization hints
+#[derive(Debug, Clone)]
+pub struct FetchResult {
+    /// The determined master version
+    pub version: ZigVersion,
+    /// Whether the index needs to be updated due to version mismatch or missing data
+    pub index_needs_update: bool,
+}
+
 /// Cache strategy for index loading
 #[derive(Debug, Clone, Copy)]
 pub enum CacheStrategy {
@@ -67,7 +77,7 @@ impl ZvNetwork {
     /// Initialize ZvNetwork with given base path (ZV_DIR)
     pub async fn new(
         zv_base_path: impl AsRef<Path>,
-        version_manager: Arc<ToolchainManager>,
+        toolchain_manager: Arc<ToolchainManager>,
     ) -> Result<Self, ZvError> {
         use reqwest_middleware::ClientBuilder;
         use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
@@ -102,6 +112,7 @@ impl ZvNetwork {
             mirrors_path,
             CacheStrategy::RespectTtl,
             Arc::clone(&client),
+            Arc::clone(&retry_client),
         )
         .await
         .map_err(|net_err| {
@@ -109,21 +120,23 @@ impl ZvNetwork {
             ZvError::NetworkError(net_err)
         })?;
         Ok(Self {
-            client,
             download_cache: zv_base_path.as_ref().join("downloads"),
             index_manager: IndexManager::new(
                 zv_base_path.as_ref().join("index.toml"),
-                Arc::clone(&retry_client),
+                Arc::clone(&client),
             ),
+            client,
+            toolchain_manager,
             retry_client,
             base_path: zv_base_path.as_ref().to_path_buf(),
             mirror_manager,
         })
     }
     /// Ensure download cache directory exists (i.e. ZV_DIR/downloads)
-    fn ensure_download_cache(&self) -> Result<(), ZvError> {
+    async fn ensure_download_cache(&self) -> Result<(), ZvError> {
         if !self.download_cache.is_dir() {
-            std::fs::create_dir_all(&self.download_cache)
+            tokio::fs::create_dir_all(&self.download_cache)
+                .await
                 .map_err(ZvError::Io)
                 .wrap_err("Creation of download cache directory failed")?;
         }
@@ -145,42 +158,55 @@ impl ZvNetwork {
     pub fn download_version() {
         todo!("Implement version download logic")
     }
-    /// Fetch the latest master as a [ZigVersion::Semver] using smart optimizations
-    pub async fn fetch_master_version(&mut self) -> Result<ZigVersion, ZvError> {
-        self.ensure_download_cache().map_err(|e| {
+
+    /// Fetch the latest stable version using prefer-cache strategy
+    /// Returns the latest stable version from the Zig download index
+    pub async fn fetch_stable_version(&mut self) -> Result<ZigVersion, ZvError> {
+        // Ensure download cache directory exists
+        self.ensure_download_cache().await.map_err(|e| {
             tracing::warn!(target: TARGET, "Failed to ensure download cache: {e}");
             e
         })?;
 
+        // Load index with preferred cache strategy
+        self.index_manager
+            .ensure_loaded(CacheStrategy::PreferCache)
+            .await?;
+
+        // Get the index and retrieve latest stable version
+        let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
+
+        match index.get_latest_stable() {
+            Some(stable_version) => {
+                tracing::info!(target: TARGET, "Found latest stable version: {}", stable_version);
+                Ok(stable_version)
+            }
+            None => {
+                tracing::error!(target: TARGET, "No stable version found in index");
+                Err(eyre!("No stable version found in Zig download index").into())
+            }
+        }
+    }
+
+    /// Fetch the latest master as a [ZigVersion::Semver] using smart optimizations
+    pub async fn fetch_master_version(&mut self) -> Result<ZigVersion, ZvError> {
         match try_partial_fetch(self.client.clone()).await {
-            Ok(version) => {
+            Ok(fetched_version) => {
                 println!(
                     "{} Fetched master version via partial fetch: {}",
                     Paint::blue("Info:").bold(),
-                    Paint::green(&version.to_string()).bold()
+                    Paint::green(&fetched_version.to_string()).bold()
                 );
-                self.index_manager
-                    .ensure_loaded(CacheStrategy::PreferCache)
-                    .await?;
-                let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
-                if let Some(master_release) = index.get_master_version() {
-                    if let Some(master_version) = &master_release.version()
-                        && *master_version != version.version().unwrap()
-                    {
-                        tracing::info!(target: TARGET, "Master version from partial fetch ({}) differs from partial fetch ({}) - refreshing index", version, master_version);
-                        self.index_manager
-                            .ensure_loaded(CacheStrategy::AlwaysRefresh)
-                            .await?;
-                    }
-                }
-                todo!()
+                return Ok(fetched_version);
             }
             Err(err) => {
+                // Partial fetch failed - fall back to full index fetch
                 tracing::warn!(target: TARGET, "Partial fetch failed: {err}, falling back to full fetch");
                 self.index_manager
                     .ensure_loaded(CacheStrategy::AlwaysRefresh)
                     .await?;
                 let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
+
                 if let Some(master_release) = index.get_master_version() {
                     Ok(master_release)
                 } else {
