@@ -4,17 +4,19 @@ use crate::{
     CfgErr, NetErr, ZigVersion, ZvError,
     app::{
         constants::ZIG_DOWNLOAD_INDEX_JSON,
-        network::{INDEX_TTL_DAYS, TARGET},
+        network::{CacheStrategy, INDEX_TTL_DAYS, TARGET},
     },
 };
 use chrono::{DateTime, Utc};
+use reqwest_middleware::ClientWithMiddleware;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
 /// Represents a download artifact with tarball URL, SHA sum, and size
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadArtifact {
-    pub tarball: String,
+    #[serde(rename = "tarball")]
+    pub ziglang_org_tarball: String,
     pub shasum: String,
     #[serde(deserialize_with = "deserialize_str_to_u64")]
     pub size: u64,
@@ -267,44 +269,80 @@ impl ZigIndex {
     pub fn update_sync_time(&mut self) {
         self.last_synced = Some(Utc::now());
     }
-
-    /// Get master release
-    pub fn get_master(&self) -> Option<&ZigRelease> {
-        self.releases.get("master")
-    }
 }
 
 #[derive(Debug, Clone)]
 /// In memory index manager for zig download index
 pub struct IndexManager {
+    client: Arc<ClientWithMiddleware>,
     index_path: PathBuf,
     index: Option<ZigIndex>,
 }
 
 impl IndexManager {
-    pub fn new(index_path: PathBuf) -> Self {
+    pub fn new(index_path: PathBuf, client: Arc<ClientWithMiddleware>) -> Self {
         Self {
             index_path,
             index: None,
+            client,
         }
     }
-    /// Load index from disk if exists
-    pub fn ensure_loaded(self) -> Result<Self, CfgErr> {
-        let index = if self.index_path.is_file() {
-            let data = std::fs::read_to_string(&self.index_path)
-                .map_err(|io_err| CfgErr::NotFound(io_err.into()))?;
+    /// Load index from disk if exists, handling different cache strategies
+    pub async fn ensure_loaded(&mut self, cache_strategy: CacheStrategy) -> Result<(), ZvError> {
+        match cache_strategy {
+            CacheStrategy::AlwaysRefresh => {
+                // Always fetch fresh data from network
+                tracing::debug!(target: TARGET, "Refreshing index - fetching from network");
+                self.refresh_from_network().await?;
+            }
+            CacheStrategy::PreferCache => {
+                // Use cached data if available, only fetch if no cache exists
+                if self.index_path.is_file() {
+                    let data =
+                        tokio::fs::read_to_string(&self.index_path)
+                            .await
+                            .map_err(|io_err| {
+                                ZvError::ZvConfigError(CfgErr::NotFound(io_err.into()))
+                            })?;
 
-            let mut index: ZigIndex =
-                toml::from_str(&data).map_err(|e| CfgErr::ParseFail(e.into()))?;
+                    let index: ZigIndex = toml::from_str(&data)
+                        .map_err(|e| ZvError::ZvConfigError(CfgErr::ParseFail(e.into())))?;
 
-            Some(index)
-        } else {
-            None
-        };
-        Ok(Self {
-            index_path: self.index_path,
-            index,
-        })
+                    self.index = Some(index);
+                    tracing::debug!(target: TARGET, "Using cached index");
+                } else {
+                    tracing::debug!(target: TARGET, "No cache found - fetching from network");
+                    self.refresh_from_network().await?;
+                }
+            }
+            CacheStrategy::RespectTtl => {
+                // Respect TTL - use cache if not expired, otherwise refresh
+                if self.index_path.is_file() {
+                    let data =
+                        tokio::fs::read_to_string(&self.index_path)
+                            .await
+                            .map_err(|io_err| {
+                                ZvError::ZvConfigError(CfgErr::NotFound(io_err.into()))
+                            })?;
+
+                    let index: ZigIndex = toml::from_str(&data)
+                        .map_err(|e| ZvError::ZvConfigError(CfgErr::ParseFail(e.into())))?;
+
+                    if index.is_expired() {
+                        tracing::debug!(target: TARGET, "Cache expired - refreshing from network");
+                        self.refresh_from_network().await?;
+                    } else {
+                        tracing::debug!(target: TARGET, "Using valid cached index");
+                        self.index = Some(index);
+                    }
+                } else {
+                    tracing::debug!(target: TARGET, "No cache found - fetching from network");
+                    self.refresh_from_network().await?;
+                }
+            }
+        }
+
+        Ok(())
     }
     /// Save current index to disk
     pub async fn save_to_disk(&self) -> Result<(), CfgErr> {
@@ -321,15 +359,13 @@ impl IndexManager {
     }
     /// Fetch the index from network and update internal state & save to disk
     /// If write fails, it is non-fatal and logged and the in-memory index is still updated
-    pub async fn refresh_from_network(
-        mut self,
-        client: Arc<reqwest::Client>,
-    ) -> Result<Self, ZvError> {
-        let response = client
+    pub async fn refresh_from_network(&mut self) -> Result<(), ZvError> {
+        let response = self
+            .client
             .get(ZIG_DOWNLOAD_INDEX_JSON)
             .send()
             .await
-            .map_err(NetErr::Reqwest)
+            .map_err(NetErr::ReqwestMiddleware)
             .map_err(ZvError::NetworkError)?;
         if !response.status().is_success() {
             return Err(ZvError::NetworkError(NetErr::HTTP(response.status())));
@@ -353,6 +389,6 @@ impl IndexManager {
             // Non-fatal error, log and continue
             tracing::warn!(target: TARGET, "Failed to save refreshed index to disk: {}", e);
         });
-        Ok(self)
+        Ok(())
     }
 }
