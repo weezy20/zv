@@ -3,15 +3,17 @@
 mod config;
 mod constants;
 mod network;
+mod toolchain;
 mod utils;
-
 use color_eyre::eyre::{Context as _, eyre};
+use toolchain::ToolchainManager;
 
 use crate::tools::canonicalize;
 use crate::types::*;
 use crate::{Shell, path_utils};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::Arc;
 
 /// Zv App State
 #[derive(Debug, Default, Clone)]
@@ -34,6 +36,8 @@ pub struct App {
     config: Option<config::ZvConfig>,
     /// Network client
     network: Option<network::ZvNetwork>,
+    /// Toolchain manager
+    toolchain_manager: Arc<ToolchainManager>,
     /// <ZV_DIR>/bin in $PATH? If not prompt user to run `setup` or add `source <ZV_DIR>/env to their shell profile`
     pub(crate) source_set: bool,
     /// Current detected shell
@@ -96,6 +100,7 @@ impl App {
             config_path,
             env_path,
             config,
+            toolchain_manager: Arc::new(ToolchainManager::new(versions_path.as_path())),
             versions_path,
             shell: shell,
         };
@@ -114,7 +119,13 @@ impl App {
     /// Initialize network client if not already done
     pub async fn ensure_network(&mut self) -> Result<(), ZvError> {
         if self.network.is_none() {
-            self.network = Some(network::ZvNetwork::new(self.zv_base_path.as_path()).await?);
+            self.network = Some(
+                network::ZvNetwork::new(
+                    self.zv_base_path.as_path(),
+                    self.toolchain_manager.clone(),
+                )
+                .await?,
+            );
         }
         Ok(())
     }

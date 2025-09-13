@@ -224,7 +224,7 @@ impl<'de> Deserialize<'de> for ZigIndex {
 }
 
 impl ZigIndex {
-    /// Get the latest stable release version
+    /// Get the latest stable release version - Returns [ZigVersion::Semver]
     pub fn get_latest_stable(&self) -> Option<ZigVersion> {
         self.releases
             .keys()
@@ -239,12 +239,12 @@ impl ZigIndex {
             .map(ZigVersion::Semver)
     }
 
-    /// Get master version info
+    /// Get master version info - Returns [ZigVersion::Semver]
     pub fn get_master_version(&self) -> Option<ZigVersion> {
         self.releases
             .get("master")
             .and_then(|release| semver::Version::parse(&release.version).ok())
-            .map(ZigVersion::Master)
+            .map(ZigVersion::Semver)
     }
 
     /// Get all available target platforms for a specific version
@@ -280,6 +280,12 @@ pub struct IndexManager {
 }
 
 impl IndexManager {
+    /// Creates a new `IndexManager` instance with the specified index path and HTTP client.
+    ///
+    /// # Arguments
+    ///
+    /// * `index_path` - The file path where the index will be cached on disk.
+    /// * `client` - An `Arc<ClientWithMiddleware>` for making network requests.
     pub fn new(index_path: PathBuf, client: Arc<ClientWithMiddleware>) -> Self {
         Self {
             index_path,
@@ -287,10 +293,26 @@ impl IndexManager {
             client,
         }
     }
+
+    /// Returns a reference to the loaded `ZigIndex` if available.
+    ///
+    /// Call [`Self::ensure_loaded`] before calling this to guarantee the index is loaded and safe to unwrap.
     pub fn get_index(&self) -> Option<&ZigIndex> {
         self.index.as_ref()
     }
-    /// Load index from disk if exists, handling different cache strategies
+
+    /// Ensures the index is loaded based on the provided cache strategy.
+    ///
+    /// This method handles loading the index from disk or fetching it from the network
+    /// depending on the `CacheStrategy`. It updates the internal state with the loaded or fetched index.
+    ///
+    /// # Arguments
+    ///
+    /// * `cache_strategy` - The strategy to use for caching and loading the index.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or a `ZvError` if loading or fetching fails.
     pub async fn ensure_loaded(&mut self, cache_strategy: CacheStrategy) -> Result<(), ZvError> {
         match cache_strategy {
             CacheStrategy::AlwaysRefresh => {
@@ -347,7 +369,14 @@ impl IndexManager {
 
         Ok(())
     }
-    /// Save current index to disk
+
+    /// Saves the current in-memory index to disk as a TOML file.
+    ///
+    /// If no index is loaded, this method does nothing.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or a `CfgErr` if serialization or writing fails.
     pub async fn save_to_disk(&self) -> Result<(), CfgErr> {
         if let Some(ref index) = self.index {
             let toml_str =
@@ -360,8 +389,15 @@ impl IndexManager {
         }
         Ok(())
     }
-    /// Fetch the index from network and update internal state & save to disk
-    /// If write fails, it is non-fatal and logged and the in-memory index is still updated
+
+    /// Fetches the latest index from the network, updates the internal state, and attempts to save it to disk.
+    ///
+    /// The index is fetched from `ZIG_DOWNLOAD_INDEX_JSON`, parsed as JSON, and the `last_synced` timestamp is updated.
+    /// If saving to disk fails, it is logged as a warning but does not fail the operation.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or a `ZvError` if the network request or parsing fails.
     pub async fn refresh_from_network(&mut self) -> Result<(), ZvError> {
         let response = self
             .client

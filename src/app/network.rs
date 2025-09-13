@@ -1,4 +1,5 @@
 use crate::app::constants::ZIG_DOWNLOAD_INDEX_JSON;
+use crate::app::toolchain::ToolchainManager;
 use crate::app::utils::zv_agent;
 use crate::{NetErr, ZigVersion, ZvError, tools};
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
@@ -57,12 +58,17 @@ pub struct ZvNetwork {
     client: Arc<reqwest::Client>,
     /// Client with retry logic
     retry_client: Arc<reqwest_middleware::ClientWithMiddleware>,
+    /// Reference to ToolchainManager for version management
+    toolchain_manager: Arc<ToolchainManager>,
 }
 
 // === Initialize ZvNetwork ===
 impl ZvNetwork {
     /// Initialize ZvNetwork with given base path (ZV_DIR)
-    pub async fn new(zv_base_path: impl AsRef<Path>) -> Result<Self, ZvError> {
+    pub async fn new(
+        zv_base_path: impl AsRef<Path>,
+        version_manager: Arc<ToolchainManager>,
+    ) -> Result<Self, ZvError> {
         use reqwest_middleware::ClientBuilder;
         use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 
@@ -139,14 +145,36 @@ impl ZvNetwork {
     pub fn download_version() {
         todo!("Implement version download logic")
     }
+    /// Fetch the latest master as a [ZigVersion::Semver] using smart optimizations
     pub async fn fetch_master_version(&mut self) -> Result<ZigVersion, ZvError> {
         self.ensure_download_cache().map_err(|e| {
             tracing::warn!(target: TARGET, "Failed to ensure download cache: {e}");
             e
         })?;
 
-        match self.try_partial_fetch().await {
-            Ok(version) => Ok(version),
+        match try_partial_fetch(self.client.clone()).await {
+            Ok(version) => {
+                println!(
+                    "{} Fetched master version via partial fetch: {}",
+                    Paint::blue("Info:").bold(),
+                    Paint::green(&version.to_string()).bold()
+                );
+                self.index_manager
+                    .ensure_loaded(CacheStrategy::PreferCache)
+                    .await?;
+                let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
+                if let Some(master_release) = index.get_master_version() {
+                    if let Some(master_version) = &master_release.version()
+                        && *master_version != version.version().unwrap()
+                    {
+                        tracing::info!(target: TARGET, "Master version from partial fetch ({}) differs from partial fetch ({}) - refreshing index", version, master_version);
+                        self.index_manager
+                            .ensure_loaded(CacheStrategy::AlwaysRefresh)
+                            .await?;
+                    }
+                }
+                todo!()
+            }
             Err(err) => {
                 tracing::warn!(target: TARGET, "Partial fetch failed: {err}, falling back to full fetch");
                 self.index_manager
@@ -161,8 +189,55 @@ impl ZvNetwork {
             }
         }
     }
+}
 
-    async fn try_partial_fetch(&self) -> Result<ZigVersion, ZvError> {
-        todo!()
+/// Attempts to fetch just the beginning of the JSON file to get master version
+async fn try_partial_fetch(client: Arc<reqwest::Client>) -> Result<ZigVersion> {
+    // Try to get first 1024 bytes - should be enough for master version
+    let response = client
+        .get(ZIG_DOWNLOAD_INDEX_JSON)
+        .header("Range", "bytes=0-88")
+        .send()
+        .await?;
+
+    if response.status() == 206 {
+        // Partial Content
+        let partial_text = response.text().await?;
+        let v = parse_master_version_fast(&partial_text)?;
+        return Ok(ZigVersion::Semver(semver::Version::parse(&v).map_err(|e| {
+            tracing::error!(target: TARGET, "Failed to parse master version from partial fetch: {e}");
+            eyre!(e)
+        })?));
+    } else {
+        bail!("Server did not support partial content")
     }
+}
+
+/// Ultra-fast string parsing approach - for partial JSON content  
+fn parse_master_version_fast(json_text: &str) -> Result<String> {
+    // Look for: "master": { "version": "..."
+    if let Some(master_start) = json_text.find(r#""master""#) {
+        let search_area = &json_text[master_start..];
+
+        // Find the version field within the master object
+        if let Some(version_start) = search_area.find(r#""version""#) {
+            let after_version = &search_area[version_start + 9..]; // Skip past "version" which is 9 chars including quotes
+
+            // Find the colon and opening quote
+            if let Some(colon_pos) = after_version.find(':') {
+                let after_colon = &after_version[colon_pos + 1..];
+                if let Some(quote_start) = after_colon.find('"') {
+                    let version_content = &after_colon[quote_start + 1..];
+
+                    // Find closing quote
+                    if let Some(quote_end) = version_content.find('"') {
+                        let version = &version_content[..quote_end];
+                        return Ok(version.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    bail!("Could not extract master version from partial JSON")
 }
