@@ -287,6 +287,9 @@ impl IndexManager {
             client,
         }
     }
+    pub fn get_index(&self) -> Option<&ZigIndex> {
+        self.index.as_ref()
+    }
     /// Load index from disk if exists, handling different cache strategies
     pub async fn ensure_loaded(&mut self, cache_strategy: CacheStrategy) -> Result<(), ZvError> {
         match cache_strategy {

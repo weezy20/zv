@@ -1,7 +1,7 @@
 use crate::app::constants::ZIG_DOWNLOAD_INDEX_JSON;
 use crate::app::utils::zv_agent;
 use crate::{NetErr, ZigVersion, ZvError, tools};
-use color_eyre::eyre::{Result, WrapErr, eyre};
+use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use futures::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Url;
@@ -104,13 +104,17 @@ impl ZvNetwork {
         })?;
         Ok(Self {
             client,
-            retry_client,
             download_cache: zv_base_path.as_ref().join("downloads"),
-            index_manager: IndexManager::new(zv_base_path.as_ref().join("index.toml")),
+            index_manager: IndexManager::new(
+                zv_base_path.as_ref().join("index.toml"),
+                Arc::clone(&retry_client),
+            ),
+            retry_client,
             base_path: zv_base_path.as_ref().to_path_buf(),
             mirror_manager,
         })
     }
+    /// Ensure download cache directory exists (i.e. ZV_DIR/downloads)
     fn ensure_download_cache(&self) -> Result<(), ZvError> {
         if !self.download_cache.is_dir() {
             std::fs::create_dir_all(&self.download_cache)
@@ -141,34 +145,24 @@ impl ZvNetwork {
             e
         })?;
 
-        let response = self
-            .retry_client
-            .get(ZIG_DOWNLOAD_INDEX_JSON)
-            .header("Range", "bytes=0-1023")
-            .send()
-            .await
-            .map_err(|e| NetErr::ReqwestMiddleware(e))
-            .wrap_err("Failed to fetch Zig master version")?;
-
-        if response.status() == 206 {
-            // Partial Content
-            let partial_text = response
-                .text()
-                .await
-                .map_err(NetErr::Reqwest)
-                .map_err(ZvError::NetworkError)?;
-            extract_master_version_from_partial(&partial_text)
-        } else {
-            // Server doesn't support range requests, get full content
-            let full_text = response
-                .text()
-                .await
-                .map_err(NetErr::Reqwest)
-                .map_err(ZvError::NetworkError)?;
-            extract_master_version_from_json(&full_text)
+        match self.try_partial_fetch().await {
+            Ok(version) => Ok(version),
+            Err(err) => {
+                tracing::warn!(target: TARGET, "Partial fetch failed: {err}, falling back to full fetch");
+                self.index_manager
+                    .ensure_loaded(CacheStrategy::AlwaysRefresh)
+                    .await?;
+                let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
+                if let Some(master_release) = index.get_master_version() {
+                    Ok(master_release)
+                } else {
+                    Err(eyre!("No master version found in index").into())
+                }
+            }
         }
+    }
 
+    async fn try_partial_fetch(&self) -> Result<ZigVersion, ZvError> {
         todo!()
     }
 }
-
