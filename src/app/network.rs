@@ -90,7 +90,8 @@ impl ZvNetwork {
 
         let base_client = reqwest::Client::builder()
             .user_agent(zv_agent())
-            .connect_timeout(Duration::from_secs(*NETWORK_TIMEOUT_SECS))
+            .pool_max_idle_per_host(0) // Don't keep idle connections
+            .pool_idle_timeout(None) // Disable timout for idle connections
             .build()
             .map_err(NetErr::Reqwest)
             .wrap_err("Failed to build HTTP client")?;
@@ -199,8 +200,9 @@ impl ZvNetwork {
     pub async fn fetch_master_version(&mut self) -> Result<ZigVersion, ZvError> {
         let progress = ProgressHandle::spawn();
 
-        progress.start("Fetching master version...").await;
-
+        progress
+            .start(Paint::blue("Fetching master version...").bold().to_string())
+            .await;
         let result = match try_partial_fetch(self.client.clone()).await {
             Ok(fetched_version) => {
                 progress
@@ -239,7 +241,7 @@ impl ZvNetwork {
                         } else {
                             progress
                                 .finish_with_error(
-                                    "✗ Failed to fetch master version from refreshed index",
+                                    "✗ Failed to fetch master version from updated index.",
                                 )
                                 .await;
                             Err(eyre!("No master version found in index").into())
@@ -247,15 +249,16 @@ impl ZvNetwork {
                     }
                     Err(e) => {
                         progress
-                            .finish_with_error(format!("✗ Failed to fetch master version: {}", e.to_string()))
+                            .finish_with_error(format!(
+                                "✗ Failed to fetch master version due to {}",
+                                e.to_string()
+                            ))
                             .await;
                         Err(e)
                     }
                 }
             }
         };
-
-        // Thread automatically cleaned up when `progress` goes out of scope
         result
     }
 }

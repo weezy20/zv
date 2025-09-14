@@ -306,11 +306,9 @@ impl Drop for ProgressHandle {
         // Send shutdown message (ignore errors as channel might be closed)
         let _ = self.tx.try_send(ProgressMessage::Shutdown);
 
-        // Wait for thread to finish with a timeout
         if let Some(handle) = self.handle.take() {
-            // Wait with a timeout of 1 second
-            std::thread::park_timeout(Duration::from_millis(200));
             let _ = handle.join();
+            tracing::debug!(target: "app::util", "Dropped ProgessHandle");
         }
     }
 }
