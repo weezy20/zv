@@ -91,7 +91,7 @@ impl ZvNetwork {
         let base_client = reqwest::Client::builder()
             .user_agent(zv_agent())
             .pool_max_idle_per_host(0) // Don't keep idle connections
-            .pool_idle_timeout(None) // Disable timout for idle connections
+            .connect_timeout(Duration::from_secs(5.min(*NETWORK_TIMEOUT_SECS)))
             .build()
             .map_err(NetErr::Reqwest)
             .wrap_err("Failed to build HTTP client")?;
@@ -217,7 +217,13 @@ impl ZvNetwork {
 
                 Ok(fetched_version)
             }
-            Err(_) => {
+            Err(partial_err) => {
+                if let PartialFetchError::Timeout(err) = partial_err {
+                    tracing::error!(target: "zv::network::fetch_master_version", "Partial fetch timed out: {}", err);
+                    progress.finish_with_error(Paint::red("Unable to reach network").to_string()).await;
+                    return Err(ZvError::NetworkError(NetErr::Reqwest(err)));
+                }
+                tracing::error!(target: "zv::network::fetch_master_version", "Partial fetch failed: {:?}", partial_err);
                 progress
                     .update("Partial fetch failed, falling back to full index fetch")
                     .await;
@@ -263,29 +269,45 @@ impl ZvNetwork {
     }
 }
 
-/// Attempts to fetch just the beginning of the JSON file to get master version
-async fn try_partial_fetch(client: Arc<reqwest::Client>) -> Result<ZigVersion> {
-    // Try to get first 1024 bytes - should be enough for master version
+#[derive(thiserror::Error, Debug)]
+enum PartialFetchError {
+    #[error("Failed to parse partial JSON: {0}")]
+    Parse(color_eyre::Report),
+    #[error("Network error: {0}")]
+    Network(reqwest::Error),
+    #[error("Timeout error: {0}")]
+    Timeout(reqwest::Error),
+    #[error("Unexpected status code: {0}")]
+    Not206(reqwest::StatusCode),
+}
+
+async fn try_partial_fetch(client: Arc<reqwest::Client>) -> Result<ZigVersion, PartialFetchError> {
     let response = client
         .get(ZIG_DOWNLOAD_INDEX_JSON)
         .header("Range", "bytes=0-88")
         .timeout(Duration::from_secs(*NETWORK_TIMEOUT_SECS))
         .send()
-        .await?;
+        .await
+        .map_err(|err| {
+            if err.is_timeout() {
+                PartialFetchError::Timeout(err)
+            } else {
+                PartialFetchError::Network(err)
+            }
+        })?;
 
     if response.status() == 206 {
         // Partial Content
-        let partial_text = response.text().await?;
-        let v = parse_master_version_fast(&partial_text)?;
-        return Ok(ZigVersion::Semver(semver::Version::parse(&v).map_err(|e| {
-            tracing::error!(target: TARGET, "Failed to parse master version from partial fetch: {e}");
-            eyre!(e)
-        })?));
+        let partial_text = response.text().await.map_err(PartialFetchError::Network)?;
+        let v =
+            parse_master_version_fast(&partial_text).map_err(|e| PartialFetchError::Parse(e))?; // Assume parse fail means unsupported
+        let version = semver::Version::parse(&v).map_err(|e| PartialFetchError::Parse(e.into()))?;
+        Ok(ZigVersion::Semver(version))
     } else {
-        bail!("Server did not support partial content")
+        // Server responded but didn't give partial content
+        Err(PartialFetchError::Not206(response.status()))
     }
 }
-
 /// Ultra-fast string parsing approach - for partial JSON content  
 fn parse_master_version_fast(json_text: &str) -> Result<String> {
     // Look for: "master": { "version": "..."
