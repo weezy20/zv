@@ -403,6 +403,7 @@ impl IndexManager {
         let response = self
             .client
             .get(ZIG_DOWNLOAD_INDEX_JSON)
+            .timeout(std::time::Duration::from_secs(*super::NETWORK_TIMEOUT_SECS))
             .send()
             .await
             .map_err(NetErr::Reqwest)

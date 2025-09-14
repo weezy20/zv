@@ -1,10 +1,9 @@
 use crate::app::constants::ZIG_DOWNLOAD_INDEX_JSON;
 use crate::app::toolchain::ToolchainManager;
-use crate::app::utils::zv_agent;
+use crate::app::utils::{ProgressHandle, zv_agent};
 use crate::{NetErr, ZigVersion, ZvError, tools};
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use futures::StreamExt;
-use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Url;
 use std::sync::{Arc, LazyLock};
 use std::{
@@ -171,15 +170,8 @@ impl ZvNetwork {
         cache_strategy: CacheStrategy,
     ) -> Result<ZigVersion, ZvError> {
         // Create a spinner progress bar
-        let spinner = ProgressBar::new_spinner();
-        spinner.set_style(
-            ProgressStyle::default_spinner()
-                .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
-                .template("{spinner:.blue} {msg}")
-                .unwrap(),
-        );
-        spinner.set_message("Loading zig index...");
-        spinner.enable_steady_tick(Duration::from_millis(120));
+        let spinner = ProgressHandle::spawn();
+        spinner.start("Loading zig index...").await;
         // Load index with cache strategy
         self.index_manager.ensure_loaded(cache_strategy).await?;
 
@@ -188,14 +180,16 @@ impl ZvNetwork {
 
         match index.get_latest_stable() {
             Some(stable_version) => {
-                spinner.finish_with_message(format!(
-                    "✓ Found latest stable version from index: {}",
-                    Paint::green(&stable_version).bold()
-                ));
+                spinner
+                    .finish(format!(
+                        "✓ Found latest stable version from index: {}",
+                        Paint::green(&stable_version).bold()
+                    ))
+                    .await;
                 Ok(stable_version)
             }
             None => {
-                spinner.finish_with_message("✗ No stable version found in index");
+                spinner.finish_with_error("✗ No stable version found in index");
                 Err(eyre!("No stable version found in Zig download index").into())
             }
         }
@@ -203,25 +197,28 @@ impl ZvNetwork {
 
     /// Fetch the latest master as a [ZigVersion::Semver] using smart optimizations
     pub async fn fetch_master_version(&mut self) -> Result<ZigVersion, ZvError> {
-        // Create a spinner progress bar
-        let spinner = ProgressBar::new_spinner();
-        spinner.set_style(
-            ProgressStyle::default_spinner()
-                .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
-                .template("{spinner:.blue} {msg}")
-                .unwrap(),
-        );
-        spinner.set_message("Fetching master version...");
-        spinner.enable_steady_tick(Duration::from_millis(120));
+        let progress = ProgressHandle::spawn();
+
+        progress.start("Fetching master version...").await;
 
         let result = match try_partial_fetch(self.client.clone()).await {
             Ok(fetched_version) => {
-                spinner.set_message("✓ Fetched master version via partial fetch");
+                progress
+                    .update("✓ Fetched master version via partial fetch")
+                    .await;
+                progress
+                    .finish(&format!(
+                        "✓ Fetched Master Version: {}",
+                        Paint::green(&fetched_version.to_string()).bold()
+                    ))
+                    .await;
+
                 Ok(fetched_version)
             }
-            Err(err) => {
-                // Partial fetch failed - fall back to full index fetch
-                spinner.set_message("Partial fetch failed, falling back to full index fetch");
+            Err(_) => {
+                progress
+                    .update("Partial fetch failed, falling back to full index fetch")
+                    .await;
 
                 match self
                     .index_manager
@@ -229,35 +226,36 @@ impl ZvNetwork {
                     .await
                 {
                     Ok(_) => {
-                        let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
+                        let index = self.index_manager.get_index().unwrap();
 
                         if let Some(master_release) = index.get_master_version() {
-                            spinner.set_message("✓ Fetched master version from full index");
+                            progress
+                                .finish(&format!(
+                                    "✓ Fetched Master Version: {}",
+                                    Paint::green(&master_release.to_string()).bold()
+                                ))
+                                .await;
                             Ok(master_release)
                         } else {
-                            spinner.finish_with_message("✗ Failed to fetch master version");
+                            progress
+                                .finish_with_error(
+                                    "✗ Failed to fetch master version from refreshed index",
+                                )
+                                .await;
                             Err(eyre!("No master version found in index").into())
                         }
                     }
                     Err(e) => {
-                        spinner.finish_with_message("✗ Failed to fetch master version");
+                        progress
+                            .finish_with_error(format!("✗ Failed to fetch master version: {}", e.to_string()))
+                            .await;
                         Err(e)
                     }
                 }
             }
         };
 
-        match &result {
-            Ok(version) => {
-                spinner.finish_with_message(format!(
-                    "✓ Fetched Master Version: {}",
-                    Paint::green(&version.to_string()).bold()
-                ));
-            }
-            Err(_) => {
-                // Error cases are already handled above with immediate spinner finish
-            }
-        }
+        // Thread automatically cleaned up when `progress` goes out of scope
         result
     }
 }
