@@ -208,6 +208,10 @@ impl ShellErr {
 #[derive(thiserror::Error, Debug)]
 /// ZV error type
 pub enum ZvError {
+    /// Cache not found at location
+    #[error("File not found at: {0}")]
+    CacheNotFound(String),
+
     /// Failure type for parse Zig version
     #[error("failed to parse semantic version")]
     ZigVersionError(#[from] semver::Error),

@@ -304,6 +304,12 @@ impl MirrorManager {
                     self.refresh_from_network().await?;
                 }
             }
+            CacheStrategy::OnlyCache => {
+                if self.try_load_index_from_cache().await.is_err() {
+                    tracing::warn!(target: TARGET, "mirrors cache not found. OnlyCache strategy... returning EmptyMirrors");
+                    return Err(NetErr::EmptyMirrors);
+                }
+            }
             CacheStrategy::RespectTtl => match self.try_load_index_from_cache().await {
                 Ok(()) => {
                     if self.is_cache_expired() {

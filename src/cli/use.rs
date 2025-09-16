@@ -20,7 +20,7 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
                 let zv = app
                     .validate_semver(v)
                     .await
-                    .wrap_err_with(|| format!("Version {v} is not a valid zig version"))?;
+                    .wrap_err_with(|| format!("Invalid semver version: {}", v))?;
                 zv
             }
         }
@@ -38,7 +38,7 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
                 let zv = app
                     .validate_semver(v)
                     .await
-                    .wrap_err_with(|| format!("Version {v} is not a valid zig version"))?;
+                    .wrap_err_with(|| format!("Invalid semver version: {}", v))?;
                 zv
             }
         }
@@ -51,11 +51,11 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
                 .await?
         }
     };
-    // println!(
-    //     "{} {:#?}",
-    //     Paint::blue("Using Zig version:").bold(),
-    //     version
-    // );
+    println!(
+        "{} {:#?}",
+        Paint::blue("Using Zig version:").bold(),
+        using_version
+    );
     // let set_zig_version = app.set_active_version(version).await?;
     // println!(
     //     "{} {:#?}",

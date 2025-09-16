@@ -366,6 +366,28 @@ impl IndexManager {
                     self.refresh_from_network().await?;
                 }
             }
+            CacheStrategy::OnlyCache => {
+                // Use cached data if available, only fetch if no cache exists
+                if self.index_path.is_file() {
+                    let data =
+                        tokio::fs::read_to_string(&self.index_path)
+                            .await
+                            .map_err(|io_err| {
+                                ZvError::ZvConfigError(CfgErr::NotFound(io_err.into()))
+                            })?;
+
+                    let index: ZigIndex = toml::from_str(&data)
+                        .map_err(|e| ZvError::ZvConfigError(CfgErr::ParseFail(e.into())))?;
+
+                    self.index = Some(index);
+                    tracing::debug!(target: TARGET, "Using cached index");
+                } else {
+                    tracing::debug!(target: TARGET, "No cache found - OnlyCache strategy... returning");
+                    return Err(ZvError::CacheNotFound(
+                        self.index_path.to_string_lossy().to_string(),
+                    ));
+                }
+            }
         }
 
         Ok(())

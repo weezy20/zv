@@ -26,6 +26,8 @@ pub enum CacheStrategy {
     PreferCache,
     /// Respect TTL - use cache if not expired, otherwise refresh
     RespectTtl,
+    /// Only load from cache, no network request
+    OnlyCache,
 }
 
 const TARGET: &str = "zv::network";
@@ -137,9 +139,6 @@ impl ZvNetwork {
         &mut self,
         cache_strategy: CacheStrategy,
     ) -> Result<ZigVersion, ZvError> {
-        // Create a spinner progress bar
-        let spinner = ProgressHandle::spawn();
-        spinner.start("Loading zig index...").await;
         // Load index with cache strategy
         self.index_manager.ensure_loaded(cache_strategy).await?;
 
@@ -147,49 +146,17 @@ impl ZvNetwork {
         let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
 
         match index.get_latest_stable() {
-            Some(stable_version) => {
-                spinner
-                    .finish(format!(
-                        "✓ Found latest stable version from index: {}",
-                        Paint::green(&stable_version).bold()
-                    ))
-                    .await;
-                Ok(stable_version)
-            }
-            None => {
-                spinner.finish_with_error("✗ No stable version found in index");
-                Err(eyre!("No stable version found in Zig download index").into())
-            }
+            Some(stable_version) => Ok(stable_version),
+            None => Err(eyre!("No stable version found in Zig download index").into()),
         }
     }
 
     /// Fetch the latest master as a [ZigVersion::Semver] using smart optimizations
     pub async fn fetch_master_version(&mut self) -> Result<ZigVersion, ZvError> {
-        let progress = ProgressHandle::spawn();
-
-        progress
-            .start(Paint::blue("Fetching master version...").bold().to_string())
-            .await;
-
         match try_partial_fetch(&self.client).await {
-            Ok(fetched_version) => {
-                progress
-                    .update("✓ Fetched master version via partial fetch")
-                    .await;
-                progress
-                    .finish(&format!(
-                        "✓ Fetched Master Version: {}",
-                        Paint::green(&fetched_version.to_string()).bold()
-                    ))
-                    .await;
-
-                Ok(fetched_version)
-            }
+            Ok(fetched_version) => Ok(fetched_version),
             Err(partial_err) => {
                 tracing::error!(target: "zv::network::fetch_master_version", "Partial fetch failed: {}", partial_err);
-                progress
-                    .update("Partial fetch failed, falling back to full index fetch")
-                    .await;
 
                 match self
                     .index_manager
@@ -200,32 +167,32 @@ impl ZvNetwork {
                         let index = self.index_manager.get_index().unwrap();
 
                         if let Some(master_release) = index.get_master_version() {
-                            progress
-                                .finish(&format!(
-                                    "✓ Fetched Master Version: {}",
-                                    Paint::green(&master_release.to_string()).bold()
-                                ))
-                                .await;
                             Ok(master_release)
                         } else {
-                            progress
-                                .finish_with_error(
-                                    "✗ Failed to fetch master version from updated index.",
-                                )
-                                .await;
                             Err(eyre!("No master version found in index").into())
                         }
                     }
                     Err(e) => {
-                        progress
-                            .finish_with_error(
-                                Paint::red(&format!(
-                                    "✗ Failed to fetch master version due to {}",
-                                    e.to_string()
-                                ))
-                                .to_string(),
-                            )
-                            .await;
+                        tracing::error!(target: "zv::network::fetch_master_version", "Failed to get current master version from network: {e}. Falling back to cached index");
+                        match self
+                            .index_manager
+                            .ensure_loaded(CacheStrategy::OnlyCache)
+                            .await
+                        {
+                            Ok(_) => {
+                                let index = self.index_manager.get_index().unwrap();
+                                return index.get_master_version().ok_or_else(|| {
+                                    eyre!("No master version found in index").into()
+                                });
+                            }
+                            Err(err) => {
+                                tracing::error!(
+                                    target: "zv::network::fetch_master_version",
+                                    "Cache read failed. Cannot determine master version"
+                                );
+                                return Err(err);
+                            }
+                        }
                         Err(e)
                     }
                 }
@@ -306,7 +273,7 @@ pub(crate) fn create_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent(zv_agent())
         .pool_max_idle_per_host(0) // Don't keep idle connections
-        .connect_timeout(Duration::from_secs(10.min(*NETWORK_TIMEOUT_SECS)))
+        .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(*NETWORK_TIMEOUT_SECS))
         .build()
         .map_err(|e| ZvError::NetworkError(NetErr::Reqwest(e)))
