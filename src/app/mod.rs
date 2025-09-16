@@ -129,6 +129,21 @@ impl App {
         }
         Ok(())
     }
+    /// Initialize network client with mirror manager if not already done
+    pub async fn ensure_network_with_mirrors(&mut self) -> Result<(), ZvError> {
+        if self.network.is_none() {
+            let mut net = network::ZvNetwork::new(
+                self.zv_base_path.as_path(),
+                self.toolchain_manager.clone(),
+            )
+            .await?;
+            net.ensure_mirror_manager().await?;
+            self.network = Some(net);
+        } else if self.network.is_some() {
+            self.network.as_mut().unwrap().ensure_mirror_manager().await?;
+        }
+        Ok(())
+    }
 
     /// Get the current active Zig version
     pub fn get_active_version(&self) -> Option<&ZigVersion> {
@@ -239,7 +254,8 @@ impl App {
         cache_strategy: CacheStrategy,
     ) -> Result<ZigVersion, ZvError> {
         self.ensure_network().await?;
-        let version = self.network
+        let version = self
+            .network
             .as_mut()
             .unwrap()
             .fetch_last_stable_version(cache_strategy)
@@ -252,7 +268,7 @@ impl App {
         version: &semver::Version,
     ) -> Result<ZigVersion, ZvError> {
         self.ensure_network().await?;
-        todo!("impl validate_semver");
+        // todo!("impl validate_semver");
         Ok(ZigVersion::Semver(version.to_owned()))
     }
 }

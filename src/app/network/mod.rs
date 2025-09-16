@@ -56,7 +56,7 @@ pub static NETWORK_TIMEOUT_SECS: LazyLock<u64> = LazyLock::new(|| {
 #[derive(Debug, Clone)]
 pub struct ZvNetwork {
     /// Management layer for community-mirrors
-    mirror_manager: MirrorManager,
+    mirror_manager: Option<MirrorManager>,
     /// Zig version index
     index_manager: IndexManager,
     /// ZV_DIR
@@ -76,25 +76,8 @@ impl ZvNetwork {
         zv_base_path: impl AsRef<Path>,
         toolchain_manager: Arc<ToolchainManager>,
     ) -> Result<Self, ZvError> {
-        use reqwest_middleware::ClientBuilder;
-
         let client = create_client()?;
 
-        if !zv_base_path.as_ref().join("downloads").is_dir() {
-            tokio::fs::create_dir_all(zv_base_path.as_ref().join("downloads"))
-                .await
-                .map_err(|io_err| {
-                    tracing::error!(target: TARGET, "Failed to create \"downloads\" directory: {io_err}");
-                    ZvError::Io(io_err)
-                })?;
-        }
-        let mirrors_path = zv_base_path.as_ref().join("mirrors.toml");
-        let mirror_manager = MirrorManager::init_and_load(mirrors_path, CacheStrategy::RespectTtl)
-            .await
-            .map_err(|net_err| {
-                tracing::error!(target: TARGET, "MirrorManager initialization failed: {net_err}");
-                ZvError::NetworkError(net_err)
-            })?;
         Ok(Self {
             download_cache: zv_base_path.as_ref().join("downloads"),
             index_manager: IndexManager::new(
@@ -104,18 +87,32 @@ impl ZvNetwork {
             client,
             toolchain_manager,
             base_path: zv_base_path.as_ref().to_path_buf(),
-            mirror_manager,
+            mirror_manager: None,
         })
     }
-    /// Ensure download cache directory exists (i.e. ZV_DIR/downloads)
-    async fn ensure_download_cache(&self) -> Result<(), ZvError> {
+    /// Load the mirror manager if not already done
+    pub async fn ensure_mirror_manager(&mut self) -> Result<&mut MirrorManager, ZvError> {
         if !self.download_cache.is_dir() {
             tokio::fs::create_dir_all(&self.download_cache)
                 .await
                 .map_err(ZvError::Io)
                 .wrap_err("Creation of download cache directory failed")?;
         }
-        Ok(())
+        if self.mirror_manager.is_none() {
+            let mirrors_path = self.base_path.join("mirrors.toml");
+            let mirror_manager = MirrorManager::init_and_load(
+                mirrors_path,
+                CacheStrategy::RespectTtl,
+            )
+            .await
+            .map_err(|net_err| {
+                tracing::error!(target: TARGET, "MirrorManager initialization failed: {net_err}");
+                ZvError::NetworkError(net_err)
+            })?;
+            self.mirror_manager = Some(mirror_manager);
+            tracing::info!(target: TARGET, "Loaded {} community mirrors", self.mirror_manager.as_mut().unwrap().mirrors().await.unwrap_or(&[]).len());
+        }
+        Ok(self.mirror_manager.as_mut().unwrap())
     }
     fn versions_path(&self) -> PathBuf {
         self.base_path.join("versions")
