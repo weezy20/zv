@@ -140,7 +140,11 @@ impl App {
             net.ensure_mirror_manager().await?;
             self.network = Some(net);
         } else if self.network.is_some() {
-            self.network.as_mut().unwrap().ensure_mirror_manager().await?;
+            self.network
+                .as_mut()
+                .unwrap()
+                .ensure_mirror_manager()
+                .await?;
         }
         Ok(())
     }
@@ -258,7 +262,7 @@ impl App {
             .network
             .as_mut()
             .unwrap()
-            .fetch_last_stable_version(cache_strategy)
+            .fetch_latest_stable_version(cache_strategy)
             .await?;
         return Ok(version);
     }
@@ -268,7 +272,7 @@ impl App {
         version: &semver::Version,
     ) -> Result<ZigVersion, ZvError> {
         self.ensure_network().await?;
-        // todo!("impl validate_semver");
+        todo!("Implement semver validation against index");
         Ok(ZigVersion::Semver(version.to_owned()))
     }
 }

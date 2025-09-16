@@ -132,22 +132,60 @@ impl ZvNetwork {
     }
 
     /// Returns the latest stable version from the Zig download index. Network request is controlled by [CacheStrategy].
-    pub async fn fetch_last_stable_version(
+    /// For AlwaysRefresh and RespectTtl strategies, falls back to OnlyCache if network operations fail.
+    pub async fn fetch_latest_stable_version(
         &mut self,
         cache_strategy: CacheStrategy,
     ) -> Result<ZigVersion, ZvError> {
-        // Load index with cache strategy
-        self.index_manager.ensure_loaded(cache_strategy).await?;
+        match cache_strategy {
+            CacheStrategy::AlwaysRefresh | CacheStrategy::RespectTtl => {
+                match self.index_manager.ensure_loaded(cache_strategy).await {
+                    Ok(_) => {
+                        let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
+                        index
+                            .get_latest_stable()
+                            .ok_or_else(|| eyre!("No stable version found in Zig download index"))
+                            .map_err(ZvError::ZigVersionResolveError)
+                    }
+                    Err(e) => {
+                        tracing::error!(target: "zv::network::fetch_latest_stable_version", "Failed to get latest stable version from network: {e}. Falling back to cached index");
 
-        // Get the index and retrieve latest stable version
-        let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
+                        // Fall back to OnlyCache strategy
+                        match self
+                            .index_manager
+                            .ensure_loaded(CacheStrategy::OnlyCache)
+                            .await
+                        {
+                            Ok(_) => {
+                                let index = self.index_manager.get_index().unwrap();
+                                index
+                                    .get_latest_stable()
+                                    .ok_or_else(|| eyre!("No stable version found in cached index"))
+                                    .map_err(ZvError::ZigVersionResolveError)
+                            }
+                            Err(cache_err) => {
+                                tracing::error!(
+                                    target: "zv::network::fetch_latest_stable_version",
+                                    "Cache read failed. Cannot determine latest stable version"
+                                );
+                                Err(ZvError::ZigVersionResolveError(cache_err.into()))
+                            }
+                        }
+                    }
+                }
+            }
+            CacheStrategy::PreferCache | CacheStrategy::OnlyCache => {
+                // For these strategies, use the original logic without fallback
+                self.index_manager.ensure_loaded(cache_strategy).await?;
 
-        match index.get_latest_stable() {
-            Some(stable_version) => Ok(stable_version),
-            None => Err(eyre!("No stable version found in Zig download index").into()),
+                let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
+                match index.get_latest_stable() {
+                    Some(stable_version) => Ok(stable_version),
+                    None => Err(eyre!("No stable version found in Zig download index").into()),
+                }
+            }
         }
     }
-
     /// Fetch the latest master as a [ZigVersion::Semver] using smart optimizations
     pub async fn fetch_master_version(&mut self) -> Result<ZigVersion, ZvError> {
         match try_partial_fetch(&self.client).await {
