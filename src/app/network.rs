@@ -17,15 +17,6 @@ use mirror::*;
 mod zig_index;
 use zig_index::*;
 
-/// Result of fetching master version with optimization hints
-#[derive(Debug, Clone)]
-pub struct FetchResult {
-    /// The determined master version
-    pub version: ZigVersion,
-    /// Whether the index needs to be updated due to version mismatch or missing data
-    pub index_needs_update: bool,
-}
-
 /// Cache strategy for index loading
 #[derive(Debug, Clone, Copy)]
 pub enum CacheStrategy {
@@ -71,9 +62,7 @@ pub struct ZvNetwork {
     /// Download cache path (ZV_DIR/downloads)
     download_cache: PathBuf,
     /// Network Client
-    client: Arc<reqwest::Client>,
-    /// Client with retry logic
-    retry_client: Arc<reqwest_middleware::ClientWithMiddleware>,
+    client: reqwest::Client,
     /// Reference to ToolchainManager for version management
     toolchain_manager: Arc<ToolchainManager>,
 }
@@ -86,24 +75,8 @@ impl ZvNetwork {
         toolchain_manager: Arc<ToolchainManager>,
     ) -> Result<Self, ZvError> {
         use reqwest_middleware::ClientBuilder;
-        use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 
-        let base_client = reqwest::Client::builder()
-            .user_agent(zv_agent())
-            .pool_max_idle_per_host(0) // Don't keep idle connections
-            .connect_timeout(Duration::from_secs(5.min(*NETWORK_TIMEOUT_SECS)))
-            .build()
-            .map_err(NetErr::Reqwest)
-            .wrap_err("Failed to build HTTP client")?;
-
-        let client = Arc::new(base_client.clone());
-
-        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
-        let retry_client = Arc::new(
-            ClientBuilder::new(base_client)
-                .with(RetryTransientMiddleware::new_with_policy(retry_policy))
-                .build(),
-        );
+        let client = create_client()?;
 
         if !zv_base_path.as_ref().join("downloads").is_dir() {
             tokio::fs::create_dir_all(zv_base_path.as_ref().join("downloads"))
@@ -114,26 +87,20 @@ impl ZvNetwork {
                 })?;
         }
         let mirrors_path = zv_base_path.as_ref().join("mirrors.toml");
-        let mirror_manager = MirrorManager::init_and_load(
-            mirrors_path,
-            CacheStrategy::RespectTtl,
-            Arc::clone(&client),
-            Arc::clone(&retry_client),
-        )
-        .await
-        .map_err(|net_err| {
-            tracing::error!(target: TARGET, "MirrorManager initialization failed: {net_err}");
-            ZvError::NetworkError(net_err)
-        })?;
+        let mirror_manager = MirrorManager::init_and_load(mirrors_path, CacheStrategy::RespectTtl)
+            .await
+            .map_err(|net_err| {
+                tracing::error!(target: TARGET, "MirrorManager initialization failed: {net_err}");
+                ZvError::NetworkError(net_err)
+            })?;
         Ok(Self {
             download_cache: zv_base_path.as_ref().join("downloads"),
             index_manager: IndexManager::new(
                 zv_base_path.as_ref().join("index.toml"),
-                Arc::clone(&client),
+                client.clone(),
             ),
             client,
             toolchain_manager,
-            retry_client,
             base_path: zv_base_path.as_ref().to_path_buf(),
             mirror_manager,
         })
@@ -203,7 +170,8 @@ impl ZvNetwork {
         progress
             .start(Paint::blue("Fetching master version...").bold().to_string())
             .await;
-        let result = match try_partial_fetch(self.client.clone()).await {
+
+        match try_partial_fetch(&self.client).await {
             Ok(fetched_version) => {
                 progress
                     .update("✓ Fetched master version via partial fetch")
@@ -218,12 +186,7 @@ impl ZvNetwork {
                 Ok(fetched_version)
             }
             Err(partial_err) => {
-                if let PartialFetchError::Timeout(err) = partial_err {
-                    tracing::error!(target: "zv::network::fetch_master_version", "Partial fetch timed out: {}", err);
-                    progress.finish_with_error(Paint::red("Unable to reach network").to_string()).await;
-                    return Err(ZvError::NetworkError(NetErr::Reqwest(err)));
-                }
-                tracing::error!(target: "zv::network::fetch_master_version", "Partial fetch failed: {:?}", partial_err);
+                tracing::error!(target: "zv::network::fetch_master_version", "Partial fetch failed: {}", partial_err);
                 progress
                     .update("Partial fetch failed, falling back to full index fetch")
                     .await;
@@ -255,17 +218,19 @@ impl ZvNetwork {
                     }
                     Err(e) => {
                         progress
-                            .finish_with_error(format!(
-                                "✗ Failed to fetch master version due to {}",
-                                e.to_string()
-                            ))
+                            .finish_with_error(
+                                Paint::red(&format!(
+                                    "✗ Failed to fetch master version due to {}",
+                                    e.to_string()
+                                ))
+                                .to_string(),
+                            )
                             .await;
                         Err(e)
                     }
                 }
             }
-        };
-        result
+        }
     }
 }
 
@@ -281,7 +246,7 @@ enum PartialFetchError {
     Not206(reqwest::StatusCode),
 }
 
-async fn try_partial_fetch(client: Arc<reqwest::Client>) -> Result<ZigVersion, PartialFetchError> {
+async fn try_partial_fetch(client: &reqwest::Client) -> Result<ZigVersion, PartialFetchError> {
     let response = client
         .get(ZIG_DOWNLOAD_INDEX_JSON)
         .header("Range", "bytes=0-88")
@@ -335,4 +300,15 @@ fn parse_master_version_fast(json_text: &str) -> Result<String> {
     }
 
     bail!("Could not extract master version from partial JSON")
+}
+
+pub(crate) fn create_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent(zv_agent())
+        .pool_max_idle_per_host(0) // Don't keep idle connections
+        .connect_timeout(Duration::from_secs(10.min(*NETWORK_TIMEOUT_SECS)))
+        .timeout(Duration::from_secs(*NETWORK_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| ZvError::NetworkError(NetErr::Reqwest(e)))
+        .wrap_err("Failed to build HTTP client")
 }

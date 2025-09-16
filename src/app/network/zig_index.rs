@@ -275,7 +275,7 @@ impl ZigIndex {
 #[derive(Debug, Clone)]
 /// In memory index manager for zig download index
 pub struct IndexManager {
-    client: Arc<Client>,
+    client: Client,
     index_path: PathBuf,
     index: Option<ZigIndex>,
 }
@@ -286,8 +286,8 @@ impl IndexManager {
     /// # Arguments
     ///
     /// * `index_path` - The file path where the index will be cached on disk.
-    /// * `client` - An `Arc<Client>` for making network requests.
-    pub fn new(index_path: PathBuf, client: Arc<Client>) -> Self {
+    /// * `client` - A reqwest client for making network requests.
+    pub fn new(index_path: PathBuf, client: Client) -> Self {
         Self {
             index_path,
             index: None,
