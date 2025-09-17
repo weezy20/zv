@@ -328,7 +328,7 @@ impl IndexManager {
 
     /// Returns a reference to the loaded `ZigIndex` if available.
     ///
-    /// Call [`Self::ensure_loaded`] before calling this to guarantee the index is loaded and safe to unwrap.
+    /// Note: Consider using `ensure_loaded` instead to guarantee the index is available.
     pub fn get_index(&self) -> Option<&ZigIndex> {
         self.index.as_ref()
     }
@@ -344,8 +344,8 @@ impl IndexManager {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` on success, or a `ZvError` if loading or fetching fails.
-    pub async fn ensure_loaded(&mut self, cache_strategy: CacheStrategy) -> Result<(), ZvError> {
+    /// Returns `Ok(&ZigIndex)` on success, or a `ZvError` if loading or fetching fails.
+    pub async fn ensure_loaded(&mut self, cache_strategy: CacheStrategy) -> Result<&ZigIndex, ZvError> {
         match cache_strategy {
             CacheStrategy::AlwaysRefresh => {
                 // Always fetch fresh data from network
@@ -390,7 +390,7 @@ impl IndexManager {
                     if index.is_err() {
                         tracing::debug!(target: TARGET, "zig index - refreshing from network");
                         self.refresh_from_network().await?;
-                        return Ok(());
+                        return Ok(self.index.as_ref().expect("Index should be loaded after refresh"));
                     }
                     let index = index.unwrap();
                     if index.is_expired() {
@@ -429,7 +429,7 @@ impl IndexManager {
             }
         }
 
-        Ok(())
+        Ok(self.index.as_ref().expect("Index should be loaded after ensure_loaded"))
     }
 
     /// Saves the current in-memory index to disk as a TOML file.

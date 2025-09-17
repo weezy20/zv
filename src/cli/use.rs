@@ -19,6 +19,8 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
             }
             if app.check_installed(v, None)? {
                 app.set_active_version(ZigVersion::Semver(v.clone())).await?;
+            } else {
+                let zig_release = app.validate_semver(v).await?;
             }
         }
         _ => {}

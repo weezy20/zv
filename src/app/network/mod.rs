@@ -123,12 +123,7 @@ impl ZvNetwork {
             .ensure_loaded(CacheStrategy::RespectTtl)
             .await
         {
-            Ok(_) => {
-                let index = self
-                    .index_manager
-                    .get_index()
-                    .expect("Index should be available after successful ensure_loaded");
-
+            Ok(index) => {
                 index.contains_version(version).cloned().ok_or_else(|| {
                     ZvError::ZigNotFound(eyre!(
                         "Version {} not found in Zig download index",
@@ -148,12 +143,7 @@ impl ZvNetwork {
                     .ensure_loaded(CacheStrategy::OnlyCache)
                     .await
                 {
-                    Ok(_) => {
-                        let index = self
-                            .index_manager
-                            .get_index()
-                            .expect("Index should be available after successful cache load");
-
+                    Ok(index) => {
                         index.contains_version(version).cloned().ok_or_else(|| {
                             ZvError::ZigNotFound(eyre!(
                                 "Version {} not found in cached Zig download index",
@@ -189,15 +179,12 @@ impl ZvNetwork {
                 );
 
                 // Check if we have this version in cache
-                if let Ok(_) = self
+                if let Ok(index) = self
                     .index_manager
                     .ensure_loaded(CacheStrategy::RespectTtl)
                     .await
                 {
-                    if let Some(cached_master) = self
-                        .index_manager
-                        .get_index()
-                        .and_then(|index| index.get_master_version())
+                    if let Some(cached_master) = index.get_master_version()
                         .and_then(|cached_master| {
                             semver::Version::parse(&cached_master.version)
                                 .ok()
@@ -232,12 +219,7 @@ impl ZvNetwork {
             .ensure_loaded(CacheStrategy::AlwaysRefresh)
             .await
         {
-            Ok(_) => {
-                let index = self
-                    .index_manager
-                    .get_index()
-                    .expect("Index should be available after successful ensure_loaded");
-
+            Ok(index) => {
                 index.get_master_version().cloned().ok_or_else(|| {
                     ZvError::ZigVersionResolveError(eyre!(
                         "No master version found in Zig download index after full refresh"
@@ -256,12 +238,7 @@ impl ZvNetwork {
                     .ensure_loaded(CacheStrategy::OnlyCache)
                     .await
                 {
-                    Ok(_) => {
-                        let index = self
-                            .index_manager
-                            .get_index()
-                            .expect("Index should be available after successful cache load");
-
+                    Ok(index) => {
                         index.get_master_version().cloned().ok_or_else(|| {
                             ZvError::ZigVersionResolveError(eyre!(
                                 "No master version found in cached index"
@@ -289,12 +266,7 @@ impl ZvNetwork {
             CacheStrategy::AlwaysRefresh | CacheStrategy::RespectTtl => {
                 // Try the requested strategy first, fallback to cache on network failure
                 match self.index_manager.ensure_loaded(cache_strategy).await {
-                    Ok(_) => {
-                        let index = self
-                            .index_manager
-                            .get_index()
-                            .expect("Index should be available after successful ensure_loaded");
-
+                    Ok(index) => {
                         index.get_latest_stable().cloned().ok_or_else(|| {
                             ZvError::ZigVersionResolveError(eyre!(
                                 "No stable version found in Zig download index"
@@ -313,11 +285,7 @@ impl ZvNetwork {
                             .ensure_loaded(CacheStrategy::OnlyCache)
                             .await
                         {
-                            Ok(_) => {
-                                let index = self.index_manager.get_index().expect(
-                                    "Index should be available after successful cache load",
-                                );
-
+                            Ok(index) => {
                                 index.get_latest_stable().cloned().ok_or_else(|| {
                                     ZvError::ZigVersionResolveError(eyre!(
                                         "No stable version found in cached index"
@@ -336,12 +304,7 @@ impl ZvNetwork {
                 }
             }
             CacheStrategy::PreferCache | CacheStrategy::OnlyCache => {
-                self.index_manager.ensure_loaded(cache_strategy).await?;
-
-                let index = self
-                    .index_manager
-                    .get_index()
-                    .expect("Index should be available after successful ensure_loaded");
+                let index = self.index_manager.ensure_loaded(cache_strategy).await?;
 
                 index.get_latest_stable().cloned().ok_or_else(|| {
                     ZvError::ZigVersionResolveError(eyre!(
