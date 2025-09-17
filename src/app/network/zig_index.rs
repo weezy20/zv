@@ -43,6 +43,34 @@ pub struct ZigRelease {
     pub targets: BTreeMap<String, DownloadArtifact>,
 }
 
+impl ZigRelease {
+    /// Fast target-support check.
+    pub fn has_target(&self, triple: &str) -> bool {
+        self.targets.contains_key(triple)
+    }
+
+    /// Borrow the artifact for a target (if any).
+    pub fn target_artifact(&self, triple: &str) -> Option<&DownloadArtifact> {
+        self.targets.get(triple)
+    }
+
+    /// ziglang tarball URL for a target.
+    pub fn tarball_url(&self, triple: &str) -> Option<&str> {
+        self.target_artifact(triple)
+            .map(|a| a.ziglang_org_tarball.as_str())
+    }
+
+    /// Convenience: SHA-256 for a target.
+    pub fn shasum(&self, triple: &str) -> Option<&str> {
+        self.target_artifact(triple).map(|a| a.shasum.as_str())
+    }
+
+    /// Iterator over all supported triples for this release.
+    pub fn targets(&self) -> impl Iterator<Item = &str> + '_ {
+        self.targets.keys().map(String::as_str)
+    }
+}
+
 impl Serialize for ZigRelease {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
