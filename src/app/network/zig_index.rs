@@ -351,9 +351,17 @@ impl IndexManager {
                                 ZvError::ZvConfigError(CfgErr::NotFound(io_err.into()))
                             })?;
 
-                    let index: ZigIndex = toml::from_str(&data)
-                        .map_err(|e| ZvError::ZvConfigError(CfgErr::ParseFail(e.into())))?;
+                    let index = toml::from_str::<ZigIndex>(&data).map_err(|e| {
+                        tracing::error!(target: TARGET, "Parse error on cached zig index: {e}");
+                        e
+                    });
 
+                    if index.is_err() {
+                        tracing::debug!(target: TARGET, "zig index - refreshing from network");
+                        self.refresh_from_network().await?;
+                        return Ok(());
+                    }
+                    let index = index.unwrap();
                     if index.is_expired() {
                         tracing::debug!(target: TARGET, "Cache expired - refreshing from network");
                         self.refresh_from_network().await?;

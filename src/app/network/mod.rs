@@ -131,6 +131,57 @@ impl ZvNetwork {
         todo!("Implement version download logic")
     }
 
+    /// Checks if the given version is valid by checking it against the index
+    pub async fn validate_semver(
+        &mut self,
+        version: &semver::Version,
+    ) -> Result<ZigVersion, ZvError> {
+        match self
+            .index_manager
+            .ensure_loaded(CacheStrategy::RespectTtl)
+            .await
+        {
+            Ok(_) => {
+                let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
+                if index.contains_version(version) {
+                    Ok(ZigVersion::Semver(version.to_owned()))
+                } else {
+                    Err(ZvError::ZigError(eyre!(
+                        "Version {} not found in Zig download index",
+                        version
+                    )))
+                }
+            }
+            Err(e) => {
+                if let ZvError::NetworkError(_) = e {
+                    match self
+                        .index_manager
+                        .ensure_loaded(CacheStrategy::OnlyCache)
+                        .await
+                    {
+                        Ok(_) => {
+                            let index = self.index_manager.get_index().unwrap();
+                            if index.contains_version(version) {
+                                Ok(ZigVersion::Semver(version.to_owned()))
+                            } else {
+                                Err(ZvError::ZigError(eyre!(
+                                    "Version {} not found in cached Zig download index",
+                                    version
+                                )))
+                            }
+                        }
+                        Err(cache_err) => {
+                            tracing::error!(target: TARGET, "Cache read failed. Cannot validate version");
+                            Err(ZvError::ZigVersionResolveError(cache_err.into()))
+                        }
+                    }
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
     /// Returns the latest stable version from the Zig download index. Network request is controlled by [CacheStrategy].
     /// For AlwaysRefresh and RespectTtl strategies, falls back to OnlyCache if network operations fail.
     pub async fn fetch_latest_stable_version(

@@ -271,8 +271,14 @@ impl App {
         &mut self,
         version: &semver::Version,
     ) -> Result<ZigVersion, ZvError> {
+        // todo!("Implement semver validation against installed versions and return early or else");
         self.ensure_network().await?;
-        todo!("Implement semver validation against index");
-        Ok(ZigVersion::Semver(version.to_owned()))
+        let zig_version = self
+            .network
+            .as_mut()
+            .unwrap()
+            .validate_semver(version)
+            .await?;
+        Ok(zig_version)
     }
 }
