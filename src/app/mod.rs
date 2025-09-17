@@ -1,10 +1,10 @@
 #![allow(unused)]
 
-mod config;
+pub(crate) mod config;
 pub mod constants;
-mod network;
-mod toolchain;
-mod utils;
+pub(crate) mod network;
+pub(crate) mod toolchain;
+pub(crate) mod utils;
 use crate::tools::canonicalize;
 use crate::types::*;
 use crate::{Shell, path_utils};
@@ -131,7 +131,10 @@ impl App {
     }
 
     /// Set the active Zig version
-    pub async fn set_active_version(&mut self, version: ZigVersion) -> Result<ZigVersion, ZvError> {
+    pub async fn set_active_version<'b>(
+        &mut self,
+        version: &'b ZigVersion,
+    ) -> Result<&'b ZigVersion, ZvError> {
         println!("App::set_active_version called with version: {:?}", version);
         println!("This is a placeholder implementation");
 
@@ -312,5 +315,11 @@ impl App {
         nested: Option<&str>,
     ) -> Result<bool, ZvError> {
         self.toolchain_manager.is_version_installed(version, nested)
+    }
+
+    /// Install a Zig version and returns the install path
+    pub async fn install_version(&mut self, version: &str) -> Result<PathBuf, ZvError> {
+        self.ensure_network_with_mirrors().await?;
+        todo!("Implement install_version logic");
     }
 }

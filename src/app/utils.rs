@@ -108,8 +108,30 @@ pub fn detect_shim(bin_path: &Path, shim: Shim) -> Option<PathBuf> {
 /// to {arch}-{os}-{version}
 pub fn zig_tarball(zig_version: &ZigVersion, extension: Option<ArchiveExt>) -> Option<String> {
     use target_lexicon::HOST;
-    // Return None for Unknown variant
-    let semver_version = zig_version.version();
+
+    // Get the semver version, return None if not available
+    let semver_version = zig_version.version()?;
+
+    // Get the host target string
+    let target = host_target(&semver_version)?;
+
+    // Determine the extension
+    let ext = if let Some(ext) = extension {
+        ext
+    } else if HOST.operating_system == target_lexicon::OperatingSystem::Windows {
+        ArchiveExt::Zip
+    } else {
+        ArchiveExt::TarXz
+    };
+
+    Some(format!("zig-{target}-{semver_version}.{ext}"))
+}
+
+/// Returns the host target string in the format used by Zig releases
+/// Returns arch-os for versions 0.14.1+ or os-arch for older versions
+/// Returns None if the host architecture or OS is not supported by Zig
+pub fn host_target(semver_version: &semver::Version) -> Option<String> {
+    use target_lexicon::HOST;
 
     let arch = match HOST.architecture {
         target_lexicon::Architecture::X86_64 => "x86_64",
@@ -132,21 +154,12 @@ pub fn zig_tarball(zig_version: &ZigVersion, extension: Option<ArchiveExt>) -> O
         target_lexicon::OperatingSystem::Netbsd => "netbsd",
         _ => return None,
     };
-    let ext = if let Some(ext) = extension {
-        ext
-    } else if HOST.operating_system == target_lexicon::OperatingSystem::Windows {
-        ArchiveExt::Zip
+
+    if semver_version.le(&semver::Version::new(0, 14, 0)) {
+        Some(format!("{os}-{arch}"))
     } else {
-        ArchiveExt::TarXz
-    };
-    if let Some(v) = semver_version {
-        if v.le(&semver::Version::new(0, 14, 0)) {
-            return Some(format!("zig-{os}-{arch}-{v}.{ext}"));
-        } else {
-            return Some(format!("zig-{arch}-{os}-{v}.{ext}"));
-        }
+        Some(format!("{arch}-{os}"))
     }
-    None
 }
 
 /// User-Agent string for network requests
