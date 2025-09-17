@@ -3,8 +3,9 @@
 use crate::{
     CfgErr, NetErr, ZigVersion, ZvError,
     app::{
+        INDEX_TTL_DAYS, NETWORK_TIMEOUT_SECS,
         constants::ZIG_DOWNLOAD_INDEX_JSON,
-        network::{CacheStrategy, INDEX_TTL_DAYS, TARGET},
+        network::{CacheStrategy, TARGET},
     },
 };
 use chrono::{DateTime, Utc};
@@ -253,8 +254,12 @@ impl<'de> Deserialize<'de> for ZigIndex {
 }
 
 impl ZigIndex {
-    /// Get the latest stable release version - Returns [ZigVersion::Semver]
-    pub fn get_latest_stable(&self) -> Option<ZigVersion> {
+    /// Check if a semver is in index, if it does, returns the corresponding ZigRelease
+    pub fn contains_version(&self, version: &semver::Version) -> Option<&ZigRelease> {
+        self.releases.get(&version.to_string())
+    }
+    /// Get the latest stable release version
+    pub fn get_latest_stable(&self) -> Option<&ZigRelease> {
         self.releases
             .keys()
             .filter(|k| *k != "master") // Filter out master
@@ -263,17 +268,15 @@ impl ZigIndex {
                 semver::Version::parse(version_key)
                     .ok()
                     .filter(|v| v.pre.is_empty()) // Ensure it's not a prerelease
+                    .map(|v| (v, version_key))
             })
-            .max() // Get the maximum version using semver comparison
-            .map(ZigVersion::Semver)
+            .max_by(|a, b| a.0.cmp(&b.0)) // Get the maximum version using semver comparison
+            .and_then(|(_, key)| self.releases.get(key))
     }
 
-    /// Get master version info - Returns [ZigVersion::Semver]
-    pub fn get_master_version(&self) -> Option<ZigVersion> {
-        self.releases
-            .get("master")
-            .and_then(|release| semver::Version::parse(&release.version).ok())
-            .map(ZigVersion::Semver)
+    /// Get master version info
+    pub fn get_master_version(&self) -> Option<&ZigRelease> {
+        self.releases.get("master")
     }
 
     /// Get all available target platforms for a specific version
@@ -461,7 +464,7 @@ impl IndexManager {
         let response = self
             .client
             .get(ZIG_DOWNLOAD_INDEX_JSON)
-            .timeout(std::time::Duration::from_secs(*super::NETWORK_TIMEOUT_SECS))
+            .timeout(std::time::Duration::from_secs(*NETWORK_TIMEOUT_SECS))
             .send()
             .await
             .map_err(NetErr::Reqwest)

@@ -1,3 +1,4 @@
+use crate::app::NETWORK_TIMEOUT_SECS;
 use crate::app::constants::ZIG_DOWNLOAD_INDEX_JSON;
 use crate::app::toolchain::ToolchainManager;
 use crate::app::utils::{ProgressHandle, zv_agent};
@@ -16,6 +17,7 @@ mod mirror;
 use mirror::*;
 mod zig_index;
 use zig_index::*;
+pub use zig_index::{DownloadArtifact, ZigRelease};
 
 /// Cache strategy for index loading
 #[derive(Debug, Clone, Copy)]
@@ -31,27 +33,6 @@ pub enum CacheStrategy {
 }
 
 const TARGET: &str = "zv::network";
-/// 21 days default TTL for index
-pub static INDEX_TTL_DAYS: LazyLock<i64> = LazyLock::new(|| {
-    std::env::var("ZV_INDEX_TTL_DAYS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(21)
-});
-/// 21 days default TTL for mirrors list
-pub static MIRRORS_TTL_DAYS: LazyLock<i64> = LazyLock::new(|| {
-    std::env::var("ZV_MIRRORS_TTL_DAYS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(21)
-});
-/// Network timeout in seconds for operations
-pub static NETWORK_TIMEOUT_SECS: LazyLock<u64> = LazyLock::new(|| {
-    std::env::var("ZV_NETWORK_TIMEOUT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(15)
-});
 
 #[derive(Debug, Clone)]
 pub struct ZvNetwork {
@@ -135,160 +116,256 @@ impl ZvNetwork {
     pub async fn validate_semver(
         &mut self,
         version: &semver::Version,
-    ) -> Result<ZigVersion, ZvError> {
+    ) -> Result<ZigRelease, ZvError> {
+        // Try to load index with TTL respect, fallback to cache on network failure
         match self
             .index_manager
             .ensure_loaded(CacheStrategy::RespectTtl)
             .await
         {
             Ok(_) => {
-                let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
-                if index.contains_version(version) {
-                    Ok(ZigVersion::Semver(version.to_owned()))
-                } else {
-                    Err(ZvError::ZigError(eyre!(
+                let index = self
+                    .index_manager
+                    .get_index()
+                    .expect("Index should be available after successful ensure_loaded");
+
+                index.contains_version(version).cloned().ok_or_else(|| {
+                    ZvError::ZigNotFound(eyre!(
                         "Version {} not found in Zig download index",
                         version
-                    )))
+                    ))
+                })
+            }
+            Err(network_err) => {
+                tracing::error!(
+                    target: "zv::network::validate_semver",
+                    "Failed to load index from network: {network_err}. Falling back to cached index"
+                );
+
+                // Fallback to cache
+                match self
+                    .index_manager
+                    .ensure_loaded(CacheStrategy::OnlyCache)
+                    .await
+                {
+                    Ok(_) => {
+                        let index = self
+                            .index_manager
+                            .get_index()
+                            .expect("Index should be available after successful cache load");
+
+                        index.contains_version(version).cloned().ok_or_else(|| {
+                            ZvError::ZigNotFound(eyre!(
+                                "Version {} not found in cached Zig download index",
+                                version
+                            ))
+                        })
+                    }
+                    Err(cache_err) => {
+                        tracing::error!(
+                            target: "zv::network::validate_semver",
+                            "Cache read failed. Cannot validate version"
+                        );
+                        Err(cache_err)
+                    }
                 }
             }
-            Err(e) => {
-                if let ZvError::NetworkError(_) = e {
-                    match self
+        }
+    }
+    pub async fn fetch_master_version(&mut self) -> Result<ZigRelease, ZvError> {
+        // Try enhanced partial fetch first
+        match try_partial_fetch_master(&self.client).await {
+            Ok(PartialFetchResult::Complete(complete_release)) => {
+                tracing::debug!(
+                    target: "zv::network::fetch_master_version",
+                    "Got complete master ZigRelease from partial fetch, no additional network calls needed"
+                );
+                return Ok(complete_release);
+            }
+            Ok(PartialFetchResult::VersionOnly(partial_master_version)) => {
+                tracing::debug!(
+                    target: "zv::network::fetch_master_version",
+                    "Got version from partial fetch: {partial_master_version}, checking against cache"
+                );
+
+                // Check if we have this version in cache
+                if let Ok(_) = self
+                    .index_manager
+                    .ensure_loaded(CacheStrategy::RespectTtl)
+                    .await
+                {
+                    if let Some(cached_master) = self
                         .index_manager
-                        .ensure_loaded(CacheStrategy::OnlyCache)
-                        .await
+                        .get_index()
+                        .and_then(|index| index.get_master_version())
+                        .and_then(|cached_master| {
+                            semver::Version::parse(&cached_master.version)
+                                .ok()
+                                .filter(|cached_version| *cached_version == partial_master_version)
+                                .map(|_| cached_master.clone())
+                        })
                     {
-                        Ok(_) => {
-                            let index = self.index_manager.get_index().unwrap();
-                            if index.contains_version(version) {
-                                Ok(ZigVersion::Semver(version.to_owned()))
-                            } else {
-                                Err(ZvError::ZigError(eyre!(
-                                    "Version {} not found in cached Zig download index",
-                                    version
-                                )))
-                            }
-                        }
-                        Err(cache_err) => {
-                            tracing::error!(target: TARGET, "Cache read failed. Cannot validate version");
-                            Err(ZvError::ZigVersionResolveError(cache_err.into()))
-                        }
+                        tracing::debug!(
+                            target: "zv::network::fetch_master_version",
+                            "Partial fetch version matches cached version, using cache"
+                        );
+                        return Ok(cached_master);
                     }
-                } else {
-                    Err(e)
+                }
+
+                tracing::debug!(
+                    target: "zv::network::fetch_master_version",
+                    "Version mismatch or no cache, forcing full refresh"
+                );
+            }
+            Err(err) => {
+                tracing::debug!(
+                    target: "zv::network::fetch_master_version",
+                    "Partial fetch failed: {err}, falling back to full fetch"
+                );
+            }
+        }
+
+        // Fallback to full index fetch with cache fallback on failure
+        match self
+            .index_manager
+            .ensure_loaded(CacheStrategy::AlwaysRefresh)
+            .await
+        {
+            Ok(_) => {
+                let index = self
+                    .index_manager
+                    .get_index()
+                    .expect("Index should be available after successful ensure_loaded");
+
+                index.get_master_version().cloned().ok_or_else(|| {
+                    ZvError::ZigVersionResolveError(eyre!(
+                        "No master version found in Zig download index after full refresh"
+                    ))
+                })
+            }
+            Err(network_err) => {
+                tracing::error!(
+                    target: "zv::network::fetch_master_version",
+                    "Failed to refresh index: {network_err}. Falling back to cached index"
+                );
+
+                // Fallback to cache
+                match self
+                    .index_manager
+                    .ensure_loaded(CacheStrategy::OnlyCache)
+                    .await
+                {
+                    Ok(_) => {
+                        let index = self
+                            .index_manager
+                            .get_index()
+                            .expect("Index should be available after successful cache load");
+
+                        index.get_master_version().cloned().ok_or_else(|| {
+                            ZvError::ZigVersionResolveError(eyre!(
+                                "No master version found in cached index"
+                            ))
+                        })
+                    }
+                    Err(cache_err) => {
+                        tracing::error!(
+                            target: "zv::network::fetch_master_version",
+                            "Cache read failed. Cannot determine master version"
+                        );
+                        Err(cache_err)
+                    }
                 }
             }
         }
     }
 
-    /// Returns the latest stable version from the Zig download index. Network request is controlled by [CacheStrategy].
-    /// For AlwaysRefresh and RespectTtl strategies, falls back to OnlyCache if network operations fail.
+    /// Returns the latest stable version from the Zig download index with consistent error handling
     pub async fn fetch_latest_stable_version(
         &mut self,
         cache_strategy: CacheStrategy,
-    ) -> Result<ZigVersion, ZvError> {
+    ) -> Result<ZigRelease, ZvError> {
         match cache_strategy {
             CacheStrategy::AlwaysRefresh | CacheStrategy::RespectTtl => {
+                // Try the requested strategy first, fallback to cache on network failure
                 match self.index_manager.ensure_loaded(cache_strategy).await {
                     Ok(_) => {
-                        let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
-                        index
-                            .get_latest_stable()
-                            .ok_or_else(|| eyre!("No stable version found in Zig download index"))
-                            .map_err(ZvError::ZigVersionResolveError)
-                    }
-                    Err(e) => {
-                        tracing::error!(target: "zv::network::fetch_latest_stable_version", "Failed to get latest stable version from network: {e}. Falling back to cached index");
+                        let index = self
+                            .index_manager
+                            .get_index()
+                            .expect("Index should be available after successful ensure_loaded");
 
-                        // Fall back to OnlyCache strategy
+                        index.get_latest_stable().cloned().ok_or_else(|| {
+                            ZvError::ZigVersionResolveError(eyre!(
+                                "No stable version found in Zig download index"
+                            ))
+                        })
+                    }
+                    Err(network_err) => {
+                        tracing::error!(
+                            target: "zv::network::fetch_latest_stable_version",
+                            "Failed to get latest stable version from network: {network_err}. Falling back to cached index"
+                        );
+
+                        // Fallback to cache
                         match self
                             .index_manager
                             .ensure_loaded(CacheStrategy::OnlyCache)
                             .await
                         {
                             Ok(_) => {
-                                let index = self.index_manager.get_index().unwrap();
-                                index
-                                    .get_latest_stable()
-                                    .ok_or_else(|| eyre!("No stable version found in cached index"))
-                                    .map_err(ZvError::ZigVersionResolveError)
+                                let index = self.index_manager.get_index().expect(
+                                    "Index should be available after successful cache load",
+                                );
+
+                                index.get_latest_stable().cloned().ok_or_else(|| {
+                                    ZvError::ZigVersionResolveError(eyre!(
+                                        "No stable version found in cached index"
+                                    ))
+                                })
                             }
                             Err(cache_err) => {
                                 tracing::error!(
                                     target: "zv::network::fetch_latest_stable_version",
                                     "Cache read failed. Cannot determine latest stable version"
                                 );
-                                Err(ZvError::ZigVersionResolveError(cache_err.into()))
+                                Err(cache_err)
                             }
                         }
                     }
                 }
             }
             CacheStrategy::PreferCache | CacheStrategy::OnlyCache => {
-                // For these strategies, use the original logic without fallback
                 self.index_manager.ensure_loaded(cache_strategy).await?;
 
-                let index = self.index_manager.get_index().unwrap(); // Safe unwrap after ensure_loaded
-                match index.get_latest_stable() {
-                    Some(stable_version) => Ok(stable_version),
-                    None => Err(eyre!("No stable version found in Zig download index").into()),
-                }
-            }
-        }
-    }
-    /// Fetch the latest master as a [ZigVersion::Semver] using smart optimizations
-    pub async fn fetch_master_version(&mut self) -> Result<ZigVersion, ZvError> {
-        match try_partial_fetch(&self.client).await {
-            Ok(fetched_version) => Ok(fetched_version),
-            Err(partial_err) => {
-                tracing::error!(target: "zv::network::fetch_master_version", "Partial fetch failed: {}", partial_err);
-
-                match self
+                let index = self
                     .index_manager
-                    .ensure_loaded(CacheStrategy::AlwaysRefresh)
-                    .await
-                {
-                    Ok(_) => {
-                        let index = self.index_manager.get_index().unwrap();
+                    .get_index()
+                    .expect("Index should be available after successful ensure_loaded");
 
-                        if let Some(master_release) = index.get_master_version() {
-                            Ok(master_release)
-                        } else {
-                            Err(eyre!("No master version found in index").into())
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!(target: "zv::network::fetch_master_version", "Failed to get current master version from network: {e}. Falling back to cached index");
-                        match self
-                            .index_manager
-                            .ensure_loaded(CacheStrategy::OnlyCache)
-                            .await
-                        {
-                            Ok(_) => {
-                                let index = self.index_manager.get_index().unwrap();
-                                return index.get_master_version().ok_or_else(|| {
-                                    eyre!("No master version found in index").into()
-                                });
-                            }
-                            Err(err) => {
-                                tracing::error!(
-                                    target: "zv::network::fetch_master_version",
-                                    "Cache read failed. Cannot determine master version"
-                                );
-                                return Err(err);
-                            }
-                        }
-                        Err(e)
-                    }
-                }
+                index.get_latest_stable().cloned().ok_or_else(|| {
+                    ZvError::ZigVersionResolveError(eyre!(
+                        "No stable version found in Zig download index"
+                    ))
+                })
             }
         }
     }
 }
 
+pub(crate) fn create_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent(zv_agent())
+        .pool_max_idle_per_host(0) // Don't keep idle connections
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(*NETWORK_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| ZvError::NetworkError(NetErr::Reqwest(e)))
+        .wrap_err("Failed to build HTTP client")
+}
+
 #[derive(thiserror::Error, Debug)]
-enum PartialFetchError {
+pub(crate) enum PartialFetchError {
     #[error("Failed to parse partial JSON: {0}")]
     Parse(color_eyre::Report),
     #[error("Network error: {0}")]
@@ -299,10 +376,21 @@ enum PartialFetchError {
     Not206(reqwest::StatusCode),
 }
 
-async fn try_partial_fetch(client: &reqwest::Client) -> Result<ZigVersion, PartialFetchError> {
+#[derive(Debug, Clone)]
+pub(crate) enum PartialFetchResult {
+    /// We got the complete ZigRelease for master
+    Complete(ZigRelease),
+    /// We only got the version string, need full fetch
+    VersionOnly(semver::Version),
+}
+
+pub(crate) async fn try_partial_fetch_master(
+    client: &reqwest::Client,
+) -> Result<PartialFetchResult, PartialFetchError> {
+    // Fetch more data (1KB) to increase chances of getting complete master object
     let response = client
         .get(ZIG_DOWNLOAD_INDEX_JSON)
-        .header("Range", "bytes=0-88")
+        .header("Range", "bytes=0-1023") // 1KB should be enough for most master objects
         .timeout(Duration::from_secs(*NETWORK_TIMEOUT_SECS))
         .send()
         .await
@@ -315,19 +403,100 @@ async fn try_partial_fetch(client: &reqwest::Client) -> Result<ZigVersion, Parti
         })?;
 
     if response.status() == 206 {
-        // Partial Content
         let partial_text = response.text().await.map_err(PartialFetchError::Network)?;
-        let v =
-            parse_master_version_fast(&partial_text).map_err(|e| PartialFetchError::Parse(e))?; // Assume parse fail means unsupported
-        let version = semver::Version::parse(&v).map_err(|e| PartialFetchError::Parse(e.into()))?;
-        Ok(ZigVersion::Semver(version))
+
+        // First try to extract complete master ZigRelease
+        match try_extract_complete_master(&partial_text) {
+            Ok(complete_release) => {
+                tracing::debug!(
+                    target: "zv::network::partial_fetch",
+                    "Successfully extracted complete master ZigRelease from partial fetch"
+                );
+                return Ok(PartialFetchResult::Complete(complete_release));
+            }
+            Err(e) => {
+                tracing::debug!(
+                    target: "zv::network::partial_fetch",
+                    "Could not extract complete master object: {e}, falling back to version-only parsing"
+                );
+            }
+        }
+
+        // Fallback to version-only extraction
+        let version_str =
+            parse_master_version_fast(&partial_text).map_err(PartialFetchError::Parse)?;
+        let version =
+            semver::Version::parse(&version_str).map_err(|e| PartialFetchError::Parse(e.into()))?;
+
+        Ok(PartialFetchResult::VersionOnly(version))
     } else {
-        // Server responded but didn't give partial content
         Err(PartialFetchError::Not206(response.status()))
     }
 }
-/// Ultra-fast string parsing approach - for partial JSON content  
-fn parse_master_version_fast(json_text: &str) -> Result<String> {
+
+/// Attempts to extract a complete master ZigRelease from partial JSON
+/// This works by finding the master object boundaries and trying to parse it
+fn try_extract_complete_master(json_text: &str) -> Result<ZigRelease> {
+    // Find the start of the master object
+    let master_start = json_text
+        .find(r#""master":"#)
+        .ok_or_else(|| eyre!("Could not find master key in partial JSON"))?;
+
+    // Find the opening brace after "master":
+    let after_master_key = &json_text[master_start + 8..]; // Skip past "master"
+    let colon_pos = after_master_key
+        .find(':')
+        .ok_or_else(|| eyre!("Could not find colon after master key"))?;
+
+    let after_colon = &after_master_key[colon_pos + 1..].trim_start();
+    if !after_colon.starts_with('{') {
+        return Err(eyre!("Master value is not an object"));
+    }
+
+    // Now we need to find the complete master object by counting braces
+    let mut brace_count = 0;
+    let mut in_string = false;
+    let mut escape_next = false;
+    let mut end_pos = None;
+
+    for (i, ch) in after_colon.char_indices() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if in_string => escape_next = true,
+            '"' => in_string = !in_string,
+            '{' if !in_string => {
+                brace_count += 1;
+                if brace_count == 1 && i == 0 {
+                    continue; // This is our opening brace
+                }
+            }
+            '}' if !in_string => {
+                brace_count -= 1;
+                if brace_count == 0 {
+                    end_pos = Some(i + 1); // Include the closing brace
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let end_pos = end_pos.ok_or_else(|| eyre!("Could not find end of master object"))?;
+    let master_json = &after_colon[..end_pos];
+
+    // Try to parse the extracted JSON as a ZigRelease
+    let master_release: ZigRelease = serde_json::from_str(master_json)
+        .map_err(|e| eyre!("Failed to parse extracted master JSON: {e}"))?;
+
+    Ok(master_release)
+}
+
+/// Ultra-fast string parsing approach - for partial JSON content when complete extraction fails
+pub(crate) fn parse_master_version_fast(json_text: &str) -> Result<String> {
     // Look for: "master": { "version": "..."
     if let Some(master_start) = json_text.find(r#""master""#) {
         let search_area = &json_text[master_start..];
@@ -352,16 +521,5 @@ fn parse_master_version_fast(json_text: &str) -> Result<String> {
         }
     }
 
-    bail!("Could not extract master version from partial JSON")
-}
-
-pub(crate) fn create_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .user_agent(zv_agent())
-        .pool_max_idle_per_host(0) // Don't keep idle connections
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(*NETWORK_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| ZvError::NetworkError(NetErr::Reqwest(e)))
-        .wrap_err("Failed to build HTTP client")
+    Err(eyre!("Could not extract master version from partial JSON"))
 }

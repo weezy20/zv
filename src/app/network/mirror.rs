@@ -49,10 +49,10 @@ use std::{
     sync::Arc,
 };
 
-use super::{CacheStrategy, MIRRORS_TTL_DAYS, TARGET};
+use super::{CacheStrategy, TARGET};
 use crate::{
     CfgErr, NetErr, ZvError,
-    app::{constants::ZIG_COMMUNITY_MIRRORS, utils::zv_agent},
+    app::{MIRRORS_TTL_DAYS, constants::ZIG_COMMUNITY_MIRRORS, utils::zv_agent},
 };
 use chrono::{DateTime, Utc};
 use color_eyre::eyre::{Result, WrapErr};

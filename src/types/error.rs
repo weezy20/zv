@@ -256,13 +256,9 @@ pub enum ZvError {
     #[error("Network error")]
     NetworkError(#[source] NetErr),
 
-    /// SystemZig Error
-    #[error("SystemZig error")]
-    SystemZigError(#[source] Report),
-
     /// Zig Error
-    #[error("Zig error")]
-    ZigError(#[source] Report),
+    #[error("Zig not found")]
+    ZigNotFound(#[source] Report),
 
     /// Shell setup and environment errors
     #[error("Shell error")]

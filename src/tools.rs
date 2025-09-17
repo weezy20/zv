@@ -1,4 +1,6 @@
-use crate::ZvError;
+use crate::{
+    ZvError,
+};
 use color_eyre::{
     Result,
     eyre::{WrapErr, bail, eyre},
@@ -181,3 +183,4 @@ pub fn files_have_same_hash(path1: &Path, path2: &Path) -> Result<bool> {
 
     Ok(calculate_file_hash(path1)? == calculate_file_hash(path2)?)
 }
+

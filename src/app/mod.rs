@@ -1,20 +1,43 @@
 #![allow(unused)]
 
 mod config;
-mod constants;
+pub mod constants;
 mod network;
 mod toolchain;
 mod utils;
-use color_eyre::eyre::{Context as _, eyre};
-use toolchain::ToolchainManager;
-
 use crate::tools::canonicalize;
 use crate::types::*;
 use crate::{Shell, path_utils};
+use color_eyre::eyre::{Context as _, eyre};
 pub use network::CacheStrategy;
+pub use network::ZigRelease;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+use toolchain::ToolchainManager;
+
+/// 21 days default TTL for index
+pub static INDEX_TTL_DAYS: LazyLock<i64> = LazyLock::new(|| {
+    std::env::var("ZV_INDEX_TTL_DAYS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(21)
+});
+/// 21 days default TTL for mirrors list
+pub static MIRRORS_TTL_DAYS: LazyLock<i64> = LazyLock::new(|| {
+    std::env::var("ZV_MIRRORS_TTL_DAYS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(21)
+});
+/// Network timeout in seconds for operations
+pub static NETWORK_TIMEOUT_SECS: LazyLock<u64> = LazyLock::new(|| {
+    std::env::var("ZV_NETWORK_TIMEOUT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(15)
+});
+
 /// Zv App State
 #[derive(Debug, Default, Clone)]
 pub struct App {
@@ -241,44 +264,53 @@ impl App {
         todo!()
     }
 
-    /// Fetch latest master and returns a [ZigVersion::Semver]
-    pub async fn fetch_master_version(&mut self) -> Result<ZigVersion, ZvError> {
+    /// Fetch latest master and returns a [ZigRelease]
+    pub async fn fetch_master_version(&mut self) -> Result<ZigRelease, ZvError> {
         self.ensure_network().await?;
-        let version = self
+        let zig_release = self
             .network
             .as_mut()
             .unwrap()
             .fetch_master_version()
             .await?;
-        return Ok(version);
+        return Ok(zig_release);
     }
-    /// Fetch latest stable and returns a [ZigVersion::Semver]
+    /// Fetch latest stable and returns a [ZigRelease]
     pub async fn fetch_latest_version(
         &mut self,
         cache_strategy: CacheStrategy,
-    ) -> Result<ZigVersion, ZvError> {
+    ) -> Result<ZigRelease, ZvError> {
         self.ensure_network().await?;
-        let version = self
+        let zig_release = self
             .network
             .as_mut()
             .unwrap()
             .fetch_latest_stable_version(cache_strategy)
             .await?;
-        return Ok(version);
+        return Ok(zig_release);
     }
-    /// Validate if a semver version exists in the index and returns a [ZigVersion::Semver]
+    /// Validate if a semver version exists in the index and returns a [ZigRelease]
     pub async fn validate_semver(
         &mut self,
         version: &semver::Version,
-    ) -> Result<ZigVersion, ZvError> {
+    ) -> Result<ZigRelease, ZvError> {
         // todo!("Implement semver validation against installed versions and return early or else");
         self.ensure_network().await?;
-        let zig_version = self
+        let zig_release = self
             .network
             .as_mut()
             .unwrap()
             .validate_semver(version)
             .await?;
-        Ok(zig_version)
+        Ok(zig_release)
+    }
+
+    /// Check if version is installed
+    pub fn check_installed(
+        &self,
+        version: &semver::Version,
+        nested: Option<&str>,
+    ) -> Result<bool, ZvError> {
+        self.toolchain_manager.is_version_installed(version, nested)
     }
 }
