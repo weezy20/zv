@@ -10,17 +10,15 @@ use yansi::Paint;
 
 /// Main entry point for the use command
 pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Result<()> {
-    let placeholder_version = SemverVersion::new(0, 0, 0);
     let normalized_zig_version = match zig_version {
-        ZigVersion::Semver(ref v) if *v == placeholder_version => {
+        ZigVersion::Semver(ref v) if *v == SemverVersion::new(0, 0, 0) => {
             return Err(eyre!("Invalid version: {v}"));
         }
-        zv @ ZigVersion::Semver(_) => zv,
-        ZigVersion::Latest(ref v) if *v != placeholder_version => {
-            unreachable!("Impossible to construct Latest with non-placeholder version")
-        }
-        zv @ ZigVersion::Latest(_) => zv,
-        ZigVersion::Stable(ref v) if *v == placeholder_version => {
+        // Direct semver version - use as-is
+        zv @ ZigVersion::Semver(_)  => zv,
+
+        // Unresolved stable - fetch from network/index
+        ZigVersion::Stable(None) => {
             let stable_version = app.fetch_latest_version(CacheStrategy::RespectTtl).await;
             if let Err(err) = stable_version {
                 tracing::error!("Failed to fetch stable version from index: {err}");
@@ -32,11 +30,23 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
                     .wrap_err_with(|| "Failed to parse ZigRelease version as semver")?,
             )
         }
-        ZigVersion::Stable(ref v) if *v != placeholder_version => {
-            unreachable!("Handled by ZigVersion::Semver arm")
+
+        // Already resolved stable - convert to Semver
+        ZigVersion::Stable(Some(v)) => ZigVersion::Semver(v),
+
+        // Handle latest versions
+        zv @ ZigVersion::Latest(None) => zv,
+        ZigVersion::Latest(Some(_)) => {
+            unreachable!("Impossible to construct latest with concrete version")
         }
-        _ => todo!(),
+
+        // Handle master versions
+        zv @ ZigVersion::Master(None) => zv,
+        ZigVersion::Master(Some(_)) => {
+            unreachable!("Impossible to construct master with concrete version")
+        }
     };
+
     println!("Using Zig version: {normalized_zig_version}");
     // First check that if version is a valid version & resolve it to a Semver i.e. ZigVersion::Semver
     // let set_result = match zig_version {
