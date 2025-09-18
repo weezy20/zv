@@ -84,7 +84,19 @@ impl FromStr for ZigVersion {
                 if let Some((prefix, version_str)) = s.split_once('@') {
                     let version = Self::parse_normalized_version(version_str)?;
                     return match prefix {
-                        "stable" => Ok(ZigVersion::Semver(version)),
+                        "stable" => {
+                            // Validate that the version is stable (no pre-release or dev builds)
+                            // Check if pre-release is empty (no alpha, beta, rc, dev, etc.)
+                            // Optionally check build metadata is empty (though build metadata shouldn't affect precedence)
+                            if version.pre.is_empty() && version.build.is_empty() {
+                                Ok(ZigVersion::Semver(version))
+                            } else {
+                                Err(ZvError::General(eyre!(
+                                    "stable@<version> only accepts stable versions. '{}' appears to be a pre-release or dev build",
+                                    version_str
+                                )))
+                            }
+                        }
                         _ => Err(ZvError::General(eyre!(
                             "Invalid version prefix: {}. Supported: stable@<version>",
                             prefix
