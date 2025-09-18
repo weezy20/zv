@@ -5,6 +5,7 @@ pub mod constants;
 pub(crate) mod network;
 pub(crate) mod toolchain;
 pub(crate) mod utils;
+use crate::app::utils::zig_tarball;
 use crate::tools::canonicalize;
 use crate::types::*;
 use crate::{Shell, path_utils};
@@ -315,7 +316,44 @@ impl App {
 
     /// Install a Zig version and returns the install path
     pub async fn install_release(&mut self, zig_release: &ZigRelease) -> Result<PathBuf, ZvError> {
+        let semver_version = semver::Version::parse(zig_release.version())
+            .wrap_err_with(|| "Failed to parse ZigRelease version as semver")?;
         self.ensure_network_with_mirrors().await?;
-        todo!("Implement install_version logic");
+        let host_target = utils::host_target().ok_or_else(|| {
+            eyre!(
+                "Could not determine host target for Zig version {}",
+                zig_release.version()
+            )
+        })?;
+        let download_artifact = zig_release.target_artifact(&host_target).ok_or_else(|| {
+            eyre!(
+                "No download artifact found for target <{}> in release {}",
+                host_target,
+                zig_release.version()
+            )
+        })?;
+        let tarball = zig_tarball(&semver_version, None).ok_or_else(|| {
+            eyre!(
+                "Could not determine tarball name for Zig version {}",
+                zig_release.version()
+            )
+        })?;
+        let download_path = self
+            .network
+            .as_mut()
+            .unwrap()
+            .download_version(&tarball, download_artifact)
+            .await?;
+        // self.toolchain_manager
+        //     .install_version(&download_path, &semver_version, None)
+        //     .await
+        //     .wrap_err_with(|| {
+        //         format!(
+        //             "Failed to install Zig version {} from archive {:?}",
+        //             zig_release.version(),
+        //             download_path
+        //         )
+        //     })?;
+        Ok(download_path)
     }
 }

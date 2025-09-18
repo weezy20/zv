@@ -106,16 +106,32 @@ pub fn detect_shim(bin_path: &Path, shim: Shim) -> Option<PathBuf> {
 
 /// Construct the zig tarball name based on HOST arch, os. zig 0.14.1 onwards, the naming convention changed
 /// to {arch}-{os}-{version}
-pub fn zig_tarball(zig_version: &ZigVersion, extension: Option<ArchiveExt>) -> Option<String> {
+pub fn zig_tarball(
+    semver_version: &semver::Version,
+    extension: Option<ArchiveExt>,
+) -> Option<String> {
     use target_lexicon::HOST;
+    let arch = match HOST.architecture {
+        target_lexicon::Architecture::X86_64 => "x86_64",
+        target_lexicon::Architecture::Aarch64(_) => "aarch64",
+        target_lexicon::Architecture::X86_32(_) => "x86",
+        target_lexicon::Architecture::Arm(_) => "arm",
+        target_lexicon::Architecture::Riscv64(_) => "riscv64",
+        target_lexicon::Architecture::Powerpc64 => "powerpc64",
+        target_lexicon::Architecture::Powerpc64le => "powerpc64le",
+        target_lexicon::Architecture::S390x => "s390x",
+        target_lexicon::Architecture::LoongArch64 => "loongarch64",
+        _ => return None,
+    };
 
-    // Get the semver version, return None if not available
-    let semver_version = zig_version.version()?;
-
-    // Get the host target string
-    let target = host_target(&semver_version)?;
-
-    // Determine the extension
+    let os = match HOST.operating_system {
+        target_lexicon::OperatingSystem::Linux => "linux",
+        target_lexicon::OperatingSystem::Darwin(_) => "macos",
+        target_lexicon::OperatingSystem::Windows => "windows",
+        target_lexicon::OperatingSystem::Freebsd => "freebsd",
+        target_lexicon::OperatingSystem::Netbsd => "netbsd",
+        _ => return None,
+    };
     let ext = if let Some(ext) = extension {
         ext
     } else if HOST.operating_system == target_lexicon::OperatingSystem::Windows {
@@ -123,14 +139,15 @@ pub fn zig_tarball(zig_version: &ZigVersion, extension: Option<ArchiveExt>) -> O
     } else {
         ArchiveExt::TarXz
     };
-
-    Some(format!("zig-{target}-{semver_version}.{ext}"))
+    if semver_version.le(&semver::Version::new(0, 14, 0)) {
+        return Some(format!("zig-{os}-{arch}-{semver_version}.{ext}"));
+    } else {
+        return Some(format!("zig-{arch}-{os}-{semver_version}.{ext}"));
+    }
 }
 
 /// Returns the host target string in the format used by Zig releases
-/// Returns arch-os for versions 0.14.1+ or os-arch for older versions
-/// Returns None if the host architecture or OS is not supported by Zig
-pub fn host_target(semver_version: &semver::Version) -> Option<String> {
+pub fn host_target() -> Option<String> {
     use target_lexicon::HOST;
 
     let arch = match HOST.architecture {
@@ -155,11 +172,7 @@ pub fn host_target(semver_version: &semver::Version) -> Option<String> {
         _ => return None,
     };
 
-    if semver_version.le(&semver::Version::new(0, 14, 0)) {
-        Some(format!("{os}-{arch}"))
-    } else {
-        Some(format!("{arch}-{os}"))
-    }
+    Some(format!("{arch}-{os}"))
 }
 
 /// User-Agent string for network requests

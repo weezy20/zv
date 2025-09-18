@@ -60,7 +60,11 @@ impl ZigRelease {
 
     /// Borrow the artifact for a target (if any).
     pub fn target_artifact(&self, triple: &str) -> Option<&DownloadArtifact> {
-        self.targets.get(triple)
+        tracing::debug!(target: TARGET, "Length of targets: {}", self.targets.len());
+        for k in self.targets.keys() {
+            tracing::debug!(target: TARGET, "Available target: {}", k);
+        }
+        self.targets.get(&format!("{}-{}", self.version, triple))
     }
 
     /// ziglang tarball URL for a target.

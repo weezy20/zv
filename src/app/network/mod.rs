@@ -108,8 +108,16 @@ impl ZvNetwork {
 
 // === Usage ===
 impl ZvNetwork {
-    pub fn download_version() {
-        todo!("Implement version download logic")
+    /// Download a given zig_tarball URL to the download cache, returns the path to the downloaded file
+    pub async fn download_version(
+        &mut self,
+        zig_tarball: &str,
+        download_artifact: &DownloadArtifact,
+    ) -> Result<PathBuf, ZvError> {
+        Err(ZvError::General(eyre!(
+            "Direct download of {} not implemented yet, use mirrors",
+            zig_tarball
+        )))
     }
 
     /// Checks if the given version is valid by checking it against the index
@@ -123,14 +131,9 @@ impl ZvNetwork {
             .ensure_loaded(CacheStrategy::RespectTtl)
             .await
         {
-            Ok(index) => {
-                index.contains_version(version).cloned().ok_or_else(|| {
-                    ZvError::ZigNotFound(eyre!(
-                        "Version {} not found in Zig download index",
-                        version
-                    ))
-                })
-            }
+            Ok(index) => index.contains_version(version).cloned().ok_or_else(|| {
+                ZvError::ZigNotFound(eyre!("Version {} not found in Zig download index", version))
+            }),
             Err(network_err) => {
                 tracing::error!(
                     target: "zv::network::validate_semver",
@@ -143,14 +146,12 @@ impl ZvNetwork {
                     .ensure_loaded(CacheStrategy::OnlyCache)
                     .await
                 {
-                    Ok(index) => {
-                        index.contains_version(version).cloned().ok_or_else(|| {
-                            ZvError::ZigNotFound(eyre!(
-                                "Version {} not found in cached Zig download index",
-                                version
-                            ))
-                        })
-                    }
+                    Ok(index) => index.contains_version(version).cloned().ok_or_else(|| {
+                        ZvError::ZigNotFound(eyre!(
+                            "Version {} not found in cached Zig download index",
+                            version
+                        ))
+                    }),
                     Err(cache_err) => {
                         tracing::error!(
                             target: "zv::network::validate_semver",
@@ -184,8 +185,8 @@ impl ZvNetwork {
                     .ensure_loaded(CacheStrategy::RespectTtl)
                     .await
                 {
-                    if let Some(cached_master) = index.get_master_version()
-                        .and_then(|cached_master| {
+                    if let Some(cached_master) =
+                        index.get_master_version().and_then(|cached_master| {
                             semver::Version::parse(&cached_master.version())
                                 .ok()
                                 .filter(|cached_version| *cached_version == partial_master_version)
@@ -219,13 +220,11 @@ impl ZvNetwork {
             .ensure_loaded(CacheStrategy::AlwaysRefresh)
             .await
         {
-            Ok(index) => {
-                index.get_master_version().cloned().ok_or_else(|| {
-                    ZvError::ZigVersionResolveError(eyre!(
-                        "No master version found in Zig download index after full refresh"
-                    ))
-                })
-            }
+            Ok(index) => index.get_master_version().cloned().ok_or_else(|| {
+                ZvError::ZigVersionResolveError(eyre!(
+                    "No master version found in Zig download index after full refresh"
+                ))
+            }),
             Err(network_err) => {
                 tracing::error!(
                     target: "zv::network::fetch_master_version",
@@ -238,13 +237,11 @@ impl ZvNetwork {
                     .ensure_loaded(CacheStrategy::OnlyCache)
                     .await
                 {
-                    Ok(index) => {
-                        index.get_master_version().cloned().ok_or_else(|| {
-                            ZvError::ZigVersionResolveError(eyre!(
-                                "No master version found in cached index"
-                            ))
-                        })
-                    }
+                    Ok(index) => index.get_master_version().cloned().ok_or_else(|| {
+                        ZvError::ZigVersionResolveError(eyre!(
+                            "No master version found in cached index"
+                        ))
+                    }),
                     Err(cache_err) => {
                         tracing::error!(
                             target: "zv::network::fetch_master_version",
@@ -266,13 +263,11 @@ impl ZvNetwork {
             CacheStrategy::AlwaysRefresh | CacheStrategy::RespectTtl => {
                 // Try the requested strategy first, fallback to cache on network failure
                 match self.index_manager.ensure_loaded(cache_strategy).await {
-                    Ok(index) => {
-                        index.get_latest_stable().cloned().ok_or_else(|| {
-                            ZvError::ZigVersionResolveError(eyre!(
-                                "No stable version found in Zig download index"
-                            ))
-                        })
-                    }
+                    Ok(index) => index.get_latest_stable().cloned().ok_or_else(|| {
+                        ZvError::ZigVersionResolveError(eyre!(
+                            "No stable version found in Zig download index"
+                        ))
+                    }),
                     Err(network_err) => {
                         tracing::error!(
                             target: "zv::network::fetch_latest_stable_version",
@@ -285,13 +280,11 @@ impl ZvNetwork {
                             .ensure_loaded(CacheStrategy::OnlyCache)
                             .await
                         {
-                            Ok(index) => {
-                                index.get_latest_stable().cloned().ok_or_else(|| {
-                                    ZvError::ZigVersionResolveError(eyre!(
-                                        "No stable version found in cached index"
-                                    ))
-                                })
-                            }
+                            Ok(index) => index.get_latest_stable().cloned().ok_or_else(|| {
+                                ZvError::ZigVersionResolveError(eyre!(
+                                    "No stable version found in cached index"
+                                ))
+                            }),
                             Err(cache_err) => {
                                 tracing::error!(
                                     target: "zv::network::fetch_latest_stable_version",

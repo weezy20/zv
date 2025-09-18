@@ -40,6 +40,8 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
 /// - Semver(v) - for concrete versions, stable/latest resolved from network
 /// - Latest(None) - if latest version could not be resolved from network
 /// - Master(None) - if master version could not be resolved from network
+/// - Stable(None) - if stable version could not be resolved from network
+/// For Latest, Master, Stable with None variants, the caller should fallback to locally available versions
 async fn normalize_zig_version(zig_version: ZigVersion, app: &mut App) -> Result<ZigVersion> {
     Ok(match zig_version {
         ZigVersion::Semver(ref v) if *v == SemverVersion::new(0, 0, 0) => {
