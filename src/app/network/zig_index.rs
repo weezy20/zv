@@ -37,14 +37,22 @@ where
 #[derive(Debug, Clone)]
 pub struct ZigRelease {
     /// Semver version string (optional for regular releases, required for master)
-    pub version: String,
+    version: String,
     /// Publish date
-    pub date: String,
-    /// Platform-specific artifacts
-    pub targets: BTreeMap<String, DownloadArtifact>,
+    date: String,
+    /// Platform-specific artifacts (Key: target triple i.e. {arch}-{os} or before 0.14.1 {os}-{arch}, Value: DownloadArtifact)
+    targets: BTreeMap<String, DownloadArtifact>,
 }
 
 impl ZigRelease {
+    /// Get version
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+    /// Release date
+    pub fn date(&self) -> &str {
+        &self.date
+    }
     /// Fast target-support check.
     pub fn has_target(&self, triple: &str) -> bool {
         self.targets.contains_key(triple)
@@ -56,7 +64,7 @@ impl ZigRelease {
     }
 
     /// ziglang tarball URL for a target.
-    pub fn tarball_url(&self, triple: &str) -> Option<&str> {
+    pub fn ziglang_org_tarball_url(&self, triple: &str) -> Option<&str> {
         self.target_artifact(triple)
             .map(|a| a.ziglang_org_tarball.as_str())
     }
@@ -64,6 +72,11 @@ impl ZigRelease {
     /// Convenience: SHA-256 for a target.
     pub fn shasum(&self, triple: &str) -> Option<&str> {
         self.target_artifact(triple).map(|a| a.shasum.as_str())
+    }
+
+    /// Convenience: size in bytes for a target.
+    pub fn size(&self, triple: &str) -> Option<u64> {
+        self.target_artifact(triple).map(|a| a.size)
     }
 
     /// Iterator over all supported triples for this release.
@@ -345,7 +358,10 @@ impl IndexManager {
     /// # Returns
     ///
     /// Returns `Ok(&ZigIndex)` on success, or a `ZvError` if loading or fetching fails.
-    pub async fn ensure_loaded(&mut self, cache_strategy: CacheStrategy) -> Result<&ZigIndex, ZvError> {
+    pub async fn ensure_loaded(
+        &mut self,
+        cache_strategy: CacheStrategy,
+    ) -> Result<&ZigIndex, ZvError> {
         match cache_strategy {
             CacheStrategy::AlwaysRefresh => {
                 // Always fetch fresh data from network
@@ -390,7 +406,10 @@ impl IndexManager {
                     if index.is_err() {
                         tracing::debug!(target: TARGET, "zig index - refreshing from network");
                         self.refresh_from_network().await?;
-                        return Ok(self.index.as_ref().expect("Index should be loaded after refresh"));
+                        return Ok(self
+                            .index
+                            .as_ref()
+                            .expect("Index should be loaded after refresh"));
                     }
                     let index = index.unwrap();
                     if index.is_expired() {
@@ -429,7 +448,10 @@ impl IndexManager {
             }
         }
 
-        Ok(self.index.as_ref().expect("Index should be loaded after ensure_loaded"))
+        Ok(self
+            .index
+            .as_ref()
+            .expect("Index should be loaded after ensure_loaded"))
     }
 
     /// Saves the current in-memory index to disk as a TOML file.

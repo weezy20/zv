@@ -186,7 +186,7 @@ impl ZvNetwork {
                 {
                     if let Some(cached_master) = index.get_master_version()
                         .and_then(|cached_master| {
-                            semver::Version::parse(&cached_master.version)
+                            semver::Version::parse(&cached_master.version())
                                 .ok()
                                 .filter(|cached_version| *cached_version == partial_master_version)
                                 .map(|_| cached_master.clone())
