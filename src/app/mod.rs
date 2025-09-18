@@ -309,16 +309,12 @@ impl App {
     }
 
     /// Check if version is installed
-    pub fn check_installed(
-        &self,
-        version: &semver::Version,
-        nested: Option<&str>,
-    ) -> Result<bool, ZvError> {
+    pub fn check_installed(&self, version: &str, nested: Option<&str>) -> bool {
         self.toolchain_manager.is_version_installed(version, nested)
     }
 
     /// Install a Zig version and returns the install path
-    pub async fn install_version(&mut self, version: &str) -> Result<PathBuf, ZvError> {
+    pub async fn install_release(&mut self, zig_release: &ZigRelease) -> Result<PathBuf, ZvError> {
         self.ensure_network_with_mirrors().await?;
         todo!("Implement install_version logic");
     }

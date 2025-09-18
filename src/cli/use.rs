@@ -4,6 +4,7 @@ use crate::{
 };
 use crate::{ZigVersion, tools};
 use color_eyre::eyre::{Context, eyre};
+use semver::Version;
 use semver::Version as SemverVersion;
 use std::path::PathBuf;
 use yansi::Paint;
@@ -12,13 +13,26 @@ use yansi::Paint;
 pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Result<()> {
     // Normalize ZigVersion to either Semver or one of network fetched versions Latest(_), Master(_)
     let normalized_zig_version = normalize_zig_version(zig_version, app).await?;
-    match normalized_zig_version {
-        ZigVersion::Semver(v) => {
-            let release = app.validate_semver(&v).await?;
+    let set_result = match normalized_zig_version {
+        zv_semver @ ZigVersion::Semver(_) => 'semver: {
+            let release = app
+                .validate_semver(zv_semver.version().expect("Valid semver"))
+                .await?;
+            if app.check_installed(release.version(), None) {
+                break 'semver app.set_active_version(&zv_semver).await?.to_owned();
+            } else {
+                app.install_release(&release).await.wrap_err_with(|| {
+                    format!(
+                        "Failed to download and install Zig version {}",
+                        zv_semver.version().expect("Valid semver")
+                    )
+                })?;
+                break 'semver app.set_active_version(&zv_semver).await?.to_owned();
+            }
         }
         _ => todo!(),
-    }
-
+    };
+    println!("✅ Active zig version set: {}", Paint::blue(&set_result));
     Ok(())
 }
 

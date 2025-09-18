@@ -208,6 +208,12 @@ impl ShellErr {
 #[derive(thiserror::Error, Debug)]
 /// ZV error type
 pub enum ZvError {
+    /// Cannot Set Active Version
+    #[error("Cannot set active version to {version}: {reason}")]
+    CannotSetActiveVersion {
+        version: semver::Version,
+        reason: String,
+    },
     /// Cache not found at location
     #[error("File not found at: {0}")]
     CacheNotFound(String),
