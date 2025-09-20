@@ -169,7 +169,7 @@ impl ZvNetwork {
             Ok(PartialFetchResult::Complete(complete_release)) => {
                 tracing::debug!(
                     target: "zv::network::fetch_master_version",
-                    "Got complete master ZigRelease from partial fetch, no additional network calls needed"
+                    "Got complete master ZigRelease from partial fetch"
                 );
                 return Ok(complete_release);
             }
@@ -343,10 +343,10 @@ pub(crate) enum PartialFetchResult {
 pub(crate) async fn try_partial_fetch_master(
     client: &reqwest::Client,
 ) -> Result<PartialFetchResult, PartialFetchError> {
-    // Fetch more data (1KB) to increase chances of getting complete master object
+    // (8KB) to increase chances of getting complete master object
     let response = client
         .get(ZIG_DOWNLOAD_INDEX_JSON)
-        .header("Range", "bytes=0-1023") // 1KB should be enough for most master objects
+        .header("Range", "bytes=0-8191") // 8KB should be enough for most master objects
         .timeout(Duration::from_secs(*NETWORK_TIMEOUT_SECS))
         .send()
         .await
@@ -396,7 +396,7 @@ fn try_extract_complete_master(json_text: &str) -> Result<ZigRelease> {
     // Find the start of the master object
     let master_start = json_text
         .find(r#""master":"#)
-        .ok_or_else(|| eyre!("Could not find master key in partial JSON"))?;
+        .ok_or_else(|| eyre!("Could not find master key in partial JSON (length: {})", json_text.len()))?;
 
     // Find the opening brace after "master":
     let after_master_key = &json_text[master_start + 8..]; // Skip past "master"
@@ -441,12 +441,19 @@ fn try_extract_complete_master(json_text: &str) -> Result<ZigRelease> {
         }
     }
 
-    let end_pos = end_pos.ok_or_else(|| eyre!("Could not find end of master object"))?;
+    let end_pos = end_pos.ok_or_else(|| {
+        eyre!(
+            "Could not find end of master object (brace_count: {}, partial_length: {}, in_string: {})", 
+            brace_count, 
+            after_colon.len(),
+            in_string
+        )
+    })?;
     let master_json = &after_colon[..end_pos];
 
     // Try to parse the extracted JSON as a ZigRelease
     let master_release: ZigRelease = serde_json::from_str(master_json)
-        .map_err(|e| eyre!("Failed to parse extracted master JSON: {e}"))?;
+        .map_err(|e| eyre!("Failed to parse extracted master JSON (length: {}): {e}", master_json.len()))?;
 
     Ok(master_release)
 }
