@@ -365,8 +365,7 @@ impl ZigIndex {
     }
     /// Find the highest stable version in the index
     fn find_highest_stable_version(&self) -> Option<ResolvedZigVersion> {
-        self
-            .releases()
+        self.releases()
             .keys()
             .filter_map(|resolved_version| {
                 match resolved_version {
@@ -460,7 +459,11 @@ impl From<NetworkZigIndex> for ZigIndex {
                     match semver::Version::parse(version_str) {
                         Ok(version) => ResolvedZigVersion::Master(version),
                         Err(err) => {
-                            tracing::warn!("Failed to parse master version: {}, {}", version_str, err);
+                            tracing::warn!(
+                                "Failed to parse master version: {}, {}",
+                                version_str,
+                                err
+                            );
                             continue; // Skip this release
                         }
                     }
@@ -507,24 +510,24 @@ impl From<NetworkZigIndex> for ZigIndex {
     }
 }
 
-impl From<ZigIndex> for CacheZigIndex {
-    fn from(runtime_index: ZigIndex) -> Self {
+impl From<&ZigIndex> for CacheZigIndex {
+    fn from(runtime_index: &ZigIndex) -> Self {
         let mut cache_releases = Vec::new();
 
-        for (resolved_version, runtime_release) in runtime_index.releases {
+        for (resolved_version, runtime_release) in runtime_index.releases.iter() {
             // Convert ResolvedZigVersion to string for cache storage
-            let version_string = match &resolved_version {
+            let version_string = match resolved_version {
                 ResolvedZigVersion::Semver(v) => v.to_string(),
                 ResolvedZigVersion::Master(v) => format!("master@{}", v),
             };
 
             // Convert runtime artifacts to cache artifacts
             let mut cache_artifacts = Vec::new();
-            for (target_triple, artifact_info) in runtime_release.artifacts {
+            for (target_triple, artifact_info) in runtime_release.artifacts.iter() {
                 let cache_artifact = CacheArtifact {
                     target: target_triple.to_key(),
-                    tarball_url: artifact_info.ziglang_org_tarball,
-                    shasum: artifact_info.shasum,
+                    tarball_url: artifact_info.ziglang_org_tarball.clone(),
+                    shasum: artifact_info.shasum.clone(),
                     size: artifact_info.size,
                 };
                 cache_artifacts.push(cache_artifact);
@@ -535,7 +538,7 @@ impl From<ZigIndex> for CacheZigIndex {
 
             let cache_release = CacheZigRelease {
                 version: version_string,
-                date: runtime_release.date,
+                date: runtime_release.date.clone(),
                 artifacts: cache_artifacts,
             };
 

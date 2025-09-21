@@ -72,7 +72,6 @@ impl ZigRelease {
     }
 }
 
-
 #[derive(Debug, Clone)]
 /// In memory index manager for zig download index
 pub struct IndexManager {
@@ -224,7 +223,7 @@ impl IndexManager {
     pub async fn save_to_disk(&self) -> Result<(), CfgErr> {
         if let Some(ref runtime_index) = self.index {
             // Convert runtime index to cache index for TOML serialization
-            let cache_index: CacheZigIndex = runtime_index.clone().into();
+            let cache_index = CacheZigIndex::from(runtime_index);
             let toml_str =
                 toml::to_string_pretty(&cache_index).map_err(|e| CfgErr::ParseFail(e.into()))?;
             tokio::fs::write(&self.index_path, toml_str)
