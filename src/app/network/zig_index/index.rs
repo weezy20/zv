@@ -21,7 +21,7 @@ impl ZigRelease {
         // Extract the actual semver version from ResolvedZigVersion
         match self.resolved_version() {
             ResolvedZigVersion::Semver(v) => v.to_string(),
-            ResolvedZigVersion::MasterVersion(v) => v.to_string(),
+            ResolvedZigVersion::Master(v) => v.to_string(),
         }
     }
 
@@ -107,7 +107,7 @@ impl ZigIndex {
         for (resolved_version, _) in self.releases() {
             let version_string = match resolved_version {
                 ResolvedZigVersion::Semver(v) => v.to_string(),
-                ResolvedZigVersion::MasterVersion(v) => v.to_string(),
+                ResolvedZigVersion::Master(v) => v.to_string(),
             };
             
             if version_string == version || (version == "master" && resolved_version.is_master()) {
@@ -145,7 +145,7 @@ impl ZigIndex {
         for (version, release) in self.releases() {
             let key = match version {
                 ResolvedZigVersion::Semver(v) => v.to_string(),
-                ResolvedZigVersion::MasterVersion(v) => v.to_string(),
+                ResolvedZigVersion::Master(v) => v.to_string(),
             };
             result.insert(key, release);
         }

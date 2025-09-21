@@ -461,7 +461,7 @@ fn try_extract_complete_master(json_text: &str) -> Result<ZigRelease> {
     // Convert to ZigRelease
     let resolved_version = if let Some(version_str) = &network_release.version {
         match semver::Version::parse(version_str) {
-            Ok(version) => ResolvedZigVersion::MasterVersion(version),
+            Ok(version) => ResolvedZigVersion::Master(version),
             Err(_) => {
                 tracing::warn!("Failed to parse master version: {}", version_str);
                 return Err(eyre!(

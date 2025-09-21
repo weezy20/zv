@@ -29,7 +29,7 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
     // Create a version string for installation checking
     let (version_string, nesting) = match &resolved_version {
         ResolvedZigVersion::Semver(v) => (v.to_string(), None),
-        ResolvedZigVersion::MasterVersion(v) => (v.to_string(), None),
+        ResolvedZigVersion::Master(v) => (v.to_string(), None),
     };
 
     let set_result = if app.check_installed(&version_string, nesting) {
@@ -89,7 +89,7 @@ pub fn normalize_zig_version(version: &ZigVersion, index: &ZigIndex) -> Option<R
 
         // Master with specific version - verify it matches the index
         ZigVersion::Master(Some(v)) => {
-            let resolved = ResolvedZigVersion::MasterVersion(v.clone());
+            let resolved = ResolvedZigVersion::Master(v.clone());
             if index.has_version(&resolved) {
                 Some(resolved)
             } else {
@@ -102,7 +102,7 @@ pub fn normalize_zig_version(version: &ZigVersion, index: &ZigIndex) -> Option<R
             // Find any master version in the index
             index.releases().keys().find_map(|version| {
                 match version {
-                    ResolvedZigVersion::MasterVersion(_) => Some(version.clone()),
+                    ResolvedZigVersion::Master(_) => Some(version.clone()),
                     _ => None,
                 }
             })
@@ -189,13 +189,13 @@ pub async fn resolve_zig_version(
             // Extract the semver version from the resolved version for comparison
             let index_master_version = match master_version {
                 ResolvedZigVersion::Semver(semver) => semver,
-                ResolvedZigVersion::MasterVersion(semver) => semver,
+                ResolvedZigVersion::Master(semver) => semver,
             };
 
             // Verify the requested version matches the actual master version
             if index_master_version == v {
                 app.to_install = Some(master_release);
-                Ok(ResolvedZigVersion::MasterVersion(v.clone()))
+                Ok(ResolvedZigVersion::Master(v.clone()))
             } else {
                 Err(ZvError::ZigVersionResolveError(eyre!(
                     "Master version mismatch: requested {}, but master is {}",
@@ -212,14 +212,14 @@ pub async fn resolve_zig_version(
             
             // Extract the concrete version from the master release
             match master_version {
-                ResolvedZigVersion::MasterVersion(v) => {
+                ResolvedZigVersion::Master(v) => {
                     app.to_install = Some(master_release);
-                    Ok(ResolvedZigVersion::MasterVersion(v))
+                    Ok(ResolvedZigVersion::Master(v))
                 }
                 ResolvedZigVersion::Semver(v) => {
                     // If master is returned as a semver, convert it to MasterVersion
                     app.to_install = Some(master_release);
-                    Ok(ResolvedZigVersion::MasterVersion(v))
+                    Ok(ResolvedZigVersion::Master(v))
                 }
             }
         }

@@ -220,7 +220,7 @@ impl ZigRelease {
         // Extract semver::Version from our ResolvedZigVersion
         let semver_version = match &self.version {
             ResolvedZigVersion::Semver(v) => v,
-            ResolvedZigVersion::MasterVersion(v) => v,
+            ResolvedZigVersion::Master(v) => v,
         };
 
         // Generate tarball name for the specific target
@@ -354,7 +354,7 @@ impl From<NetworkZigIndex> for ZigIndex {
                 // For master, use the version field if available
                 if let Some(version_str) = &network_release.version {
                     match semver::Version::parse(version_str) {
-                        Ok(version) => ResolvedZigVersion::MasterVersion(version),
+                        Ok(version) => ResolvedZigVersion::Master(version),
                         Err(_) => {
                             tracing::warn!("Failed to parse master version: {}", version_str);
                             continue; // Skip this release
@@ -408,7 +408,7 @@ impl From<ZigIndex> for CacheZigIndex {
             // Convert ResolvedZigVersion to string for cache storage
             let version_string = match &resolved_version {
                 ResolvedZigVersion::Semver(v) => v.to_string(),
-                ResolvedZigVersion::MasterVersion(v) => format!("master@{}", v),
+                ResolvedZigVersion::Master(v) => format!("master@{}", v),
             };
 
             // Convert runtime artifacts to cache artifacts
@@ -453,7 +453,7 @@ impl From<CacheZigIndex> for ZigIndex {
             // Parse the version string back to ResolvedZigVersion
             let resolved_version = if let Some(version_str) = cache_release.version.strip_prefix("master@") {
                 match semver::Version::parse(version_str) {
-                    Ok(version) => ResolvedZigVersion::MasterVersion(version),
+                    Ok(version) => ResolvedZigVersion::Master(version),
                     Err(e) => {
                         tracing::warn!(
                             "Failed to parse cached master version '{}': {}",

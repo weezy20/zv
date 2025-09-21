@@ -14,7 +14,7 @@ pub enum ResolvedZigVersion {
     /// A semantic version that exists in the index
     Semver(Version),
     /// Specific master version that matches the index
-    MasterVersion(Version),
+    Master(Version),
 }
 
 #[derive(Debug, Clone)]
@@ -281,7 +281,7 @@ impl fmt::Display for ResolvedZigVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ResolvedZigVersion::Semver(v) => write!(f, "{}", v),
-            ResolvedZigVersion::MasterVersion(v) => write!(f, "master <{}>", v),
+            ResolvedZigVersion::Master(v) => write!(f, "master <{}>", v),
         }
     }
 }
@@ -303,13 +303,13 @@ impl ResolvedZigVersion {
     pub fn version(&self) -> Option<&Version> {
         match self {
             ResolvedZigVersion::Semver(v) => Some(v),
-            ResolvedZigVersion::MasterVersion(v) => Some(v),
+            ResolvedZigVersion::Master(v) => Some(v),
         }
     }
 
     /// Returns true if this is a master variant (MasterVersion)
     pub fn is_master(&self) -> bool {
-        matches!(self, ResolvedZigVersion::MasterVersion(_))
+        matches!(self, ResolvedZigVersion::Master(_))
     }
 
     /// Returns true if this is a semver variant
@@ -327,7 +327,7 @@ mod tests {
         let v1 = ResolvedZigVersion::Semver(Version::parse("1.0.0").unwrap());
         let v2 = ResolvedZigVersion::Semver(Version::parse("1.0.0").unwrap());
         let v3 = ResolvedZigVersion::Semver(Version::parse("2.0.0").unwrap());
-        let master_version = ResolvedZigVersion::MasterVersion(Version::parse("1.5.0").unwrap());
+        let master_version = ResolvedZigVersion::Master(Version::parse("1.5.0").unwrap());
 
         // Test PartialEq and Eq
         assert_eq!(v1, v2);
@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn test_resolved_zig_version_display() {
         let semver = ResolvedZigVersion::Semver(Version::parse("1.0.0").unwrap());
-        let master_version = ResolvedZigVersion::MasterVersion(Version::parse("1.5.0").unwrap());
+        let master_version = ResolvedZigVersion::Master(Version::parse("1.5.0").unwrap());
 
         assert_eq!(format!("{}", semver), "1.0.0");
         assert_eq!(format!("{}", master_version), "master <1.5.0>");
@@ -362,7 +362,7 @@ mod tests {
     #[test]
     fn test_resolved_zig_version_methods() {
         let semver = ResolvedZigVersion::Semver(Version::parse("1.0.0").unwrap());
-        let master_version = ResolvedZigVersion::MasterVersion(Version::parse("1.5.0").unwrap());
+        let master_version = ResolvedZigVersion::Master(Version::parse("1.5.0").unwrap());
 
         // Test version() method
         assert!(semver.version().is_some());
