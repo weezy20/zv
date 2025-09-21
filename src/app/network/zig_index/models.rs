@@ -363,6 +363,27 @@ impl ZigIndex {
 
         None
     }
+    /// Find the highest stable version in the index
+    fn find_highest_stable_version(&self) -> Option<ResolvedZigVersion> {
+        self
+            .releases()
+            .keys()
+            .filter_map(|resolved_version| {
+                match resolved_version {
+                    ResolvedZigVersion::Semver(v) => {
+                        // Only consider stable releases (no pre-release or build metadata)
+                        if v.pre.is_empty() && v.build.is_empty() {
+                            Some(resolved_version.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    // Master variants are not considered stable
+                    _ => None,
+                }
+            })
+            .max() // BTreeMap keys are ordered, so max() gives us the highest version
+    }
 
     /// Get all available target platforms for a specific version (backward compatibility)
     pub fn get_targets_for_version(&self, version: &str) -> Vec<String> {
@@ -438,8 +459,8 @@ impl From<NetworkZigIndex> for ZigIndex {
                 if let Some(version_str) = &network_release.version {
                     match semver::Version::parse(version_str) {
                         Ok(version) => ResolvedZigVersion::Master(version),
-                        Err(_) => {
-                            tracing::warn!("Failed to parse master version: {}", version_str);
+                        Err(err) => {
+                            tracing::warn!("Failed to parse master version: {}, {}", version_str, err);
                             continue; // Skip this release
                         }
                     }
@@ -451,8 +472,8 @@ impl From<NetworkZigIndex> for ZigIndex {
                 // Try to parse as semver version
                 match semver::Version::parse(&version_key) {
                     Ok(version) => ResolvedZigVersion::Semver(version),
-                    Err(_) => {
-                        tracing::warn!("Failed to parse version key: {}", version_key);
+                    Err(err) => {
+                        tracing::warn!("Failed to parse version key: {}, {}", version_key, err);
                         continue; // Skip this release
                     }
                 }

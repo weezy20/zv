@@ -29,7 +29,7 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
     // Create a version string for installation checking
     let (version_string, nesting) = match &resolved_version {
         ResolvedZigVersion::Semver(v) => (v.to_string(), None),
-        ResolvedZigVersion::Master(v) => (v.to_string(), None),
+        ResolvedZigVersion::Master(v) => (v.to_string(), Some(&"master"[..])),
     };
 
     let set_result = if app.check_installed(&version_string, nesting) {
@@ -48,97 +48,6 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
 
     println!("✅ Active zig version set: {}", Paint::blue(&set_result));
     Ok(())
-}
-
-/// Performs local-only resolution of ZigVersion against the current index
-///
-/// It handles all ZigVersion variants and converts them to ResolvedZigVersion if they exist
-/// in the index.
-///
-/// # Arguments
-///
-/// * `version` - The ZigVersion to resolve
-/// * `index` - The ZigIndex to resolve against
-///
-/// # Returns
-///
-/// * `Some(ResolvedZigVersion)` - If the version exists in the index
-/// * `None` - If the version cannot be resolved against the index
-///
-/// # Examples
-///
-/// ```rust
-/// use crate::app::version_resolution::normalize_zig_version;
-/// use crate::types::{ZigVersion, ResolvedZigVersion};
-/// use semver::Version;
-///
-/// let version = ZigVersion::Semver(Version::parse("0.11.0").unwrap());
-/// let resolved = normalize_zig_version(&version, &index);
-/// ```
-pub fn normalize_zig_version(version: &ZigVersion, index: &ZigIndex) -> Option<ResolvedZigVersion> {
-    match version {
-        // Direct semver - check if it exists in the index
-        ZigVersion::Semver(v) => {
-            let resolved = ResolvedZigVersion::Semver(v.clone());
-            if index.has_version(&resolved) {
-                Some(resolved)
-            } else {
-                None
-            }
-        }
-
-        // Master with specific version - verify it matches the index
-        ZigVersion::Master(Some(v)) => {
-            let resolved = ResolvedZigVersion::Master(v.clone());
-            if index.has_version(&resolved) {
-                Some(resolved)
-            } else {
-                None
-            }
-        }
-
-        // Master without version - look for any master version in index
-        ZigVersion::Master(None) => {
-            // Find any master version in the index
-            index.releases().keys().find_map(|version| {
-                match version {
-                    ResolvedZigVersion::Master(_) => Some(version.clone()),
-                    _ => None,
-                }
-            })
-        }
-
-        // Stable with specific version - verify it's stable and exists
-        ZigVersion::Stable(Some(v)) => {
-            // Verify the version is actually stable (no pre-release or build metadata)
-            if !v.pre.is_empty() || !v.build.is_empty() {
-                return None;
-            }
-
-            let resolved = ResolvedZigVersion::Semver(v.clone());
-            if index.has_version(&resolved) {
-                Some(resolved)
-            } else {
-                None
-            }
-        }
-
-        // Stable without version - find highest stable version in index
-        ZigVersion::Stable(None) => find_highest_stable_version(index),
-
-        // Latest with specific version - verify it exists (no stability check)
-        ZigVersion::Latest(Some(v)) => {
-            let resolved = ResolvedZigVersion::Semver(v.clone());
-            if index.has_version(&resolved) {
-                Some(resolved)
-            } else {
-                None
-            }
-        }
-
-        // Latest without version - find highest stable version in index
-        ZigVersion::Latest(None) => find_highest_stable_version(index),
-    }
 }
 
 /// Resolves a ZigVersion against the app's index using network operations when needed
@@ -281,39 +190,4 @@ pub async fn resolve_zig_version(
             }
         }
     }
-}
-
-/// Helper function to find the highest stable version in the index
-///
-/// A stable version is defined as a semantic version without pre-release identifiers
-/// or build metadata. This function iterates through all ResolvedZigVersion::Semver
-/// variants in the index and returns the highest stable one.
-///
-/// # Arguments
-///
-/// * `index` - The ZigIndex to search
-///
-/// # Returns
-///
-/// * `Some(ResolvedZigVersion::Semver)` - The highest stable version found
-/// * `None` - If no stable versions exist in the index
-fn find_highest_stable_version(index: &ZigIndex) -> Option<ResolvedZigVersion> {
-    index
-        .releases()
-        .keys()
-        .filter_map(|resolved_version| {
-            match resolved_version {
-                ResolvedZigVersion::Semver(v) => {
-                    // Only consider stable releases (no pre-release or build metadata)
-                    if v.pre.is_empty() && v.build.is_empty() {
-                        Some(resolved_version.clone())
-                    } else {
-                        None
-                    }
-                }
-                // Master variants are not considered stable
-                _ => None,
-            }
-        })
-        .max() // BTreeMap keys are ordered, so max() gives us the highest version
 }
