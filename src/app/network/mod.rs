@@ -16,8 +16,7 @@ use yansi::Paint;
 mod mirror;
 use mirror::*;
 mod zig_index;
-use zig_index::*;
-pub use zig_index::{DownloadArtifact, ZigRelease};
+pub use zig_index::*;
 
 /// Cache strategy for index loading
 #[derive(Debug, Clone, Copy)]
@@ -112,7 +111,7 @@ impl ZvNetwork {
     pub async fn download_version(
         &mut self,
         zig_tarball: &str,
-        download_artifact: &DownloadArtifact,
+        download_artifact: &ArtifactInfo,
     ) -> Result<PathBuf, ZvError> {
         Err(ZvError::General(eyre!(
             "Direct download of {} not implemented yet, use mirrors",
@@ -187,7 +186,7 @@ impl ZvNetwork {
                 {
                     if let Some(cached_master) =
                         index.get_master_version().and_then(|cached_master| {
-                            semver::Version::parse(&cached_master.version())
+                            semver::Version::parse(&cached_master.version_string())
                                 .ok()
                                 .filter(|cached_version| *cached_version == partial_master_version)
                                 .map(|_| cached_master.clone())
@@ -263,7 +262,7 @@ impl ZvNetwork {
             CacheStrategy::AlwaysRefresh | CacheStrategy::RespectTtl => {
                 // Try the requested strategy first, fallback to cache on network failure
                 match self.index_manager.ensure_loaded(cache_strategy).await {
-                    Ok(index) => index.get_latest_stable().cloned().ok_or_else(|| {
+                    Ok(index) => index.get_latest_stable_release().cloned().ok_or_else(|| {
                         ZvError::ZigVersionResolveError(eyre!(
                             "No stable version found in Zig download index"
                         ))
@@ -280,7 +279,7 @@ impl ZvNetwork {
                             .ensure_loaded(CacheStrategy::OnlyCache)
                             .await
                         {
-                            Ok(index) => index.get_latest_stable().cloned().ok_or_else(|| {
+                            Ok(index) => index.get_latest_stable_release().cloned().ok_or_else(|| {
                                 ZvError::ZigVersionResolveError(eyre!(
                                     "No stable version found in cached index"
                                 ))
@@ -299,7 +298,7 @@ impl ZvNetwork {
             CacheStrategy::PreferCache | CacheStrategy::OnlyCache => {
                 let index = self.index_manager.ensure_loaded(cache_strategy).await?;
 
-                index.get_latest_stable().cloned().ok_or_else(|| {
+                index.get_latest_stable_release().cloned().ok_or_else(|| {
                     ZvError::ZigVersionResolveError(eyre!(
                         "No stable version found in Zig download index"
                     ))
@@ -451,9 +450,47 @@ fn try_extract_complete_master(json_text: &str) -> Result<ZigRelease> {
     })?;
     let master_json = &after_colon[..end_pos];
 
-    // Try to parse the extracted JSON as a ZigRelease
-    let master_release: ZigRelease = serde_json::from_str(master_json)
+    // Try to parse the extracted JSON as a NetworkZigRelease and convert to ZigRelease
+    use crate::app::network::zig_index::models::{NetworkZigRelease, ZigRelease, ZigIndex, ArtifactInfo};
+    use crate::types::{TargetTriple, ResolvedZigVersion};
+    use std::collections::{HashMap, BTreeMap};
+    
+    let network_release: NetworkZigRelease = serde_json::from_str(master_json)
         .map_err(|e| eyre!("Failed to parse extracted master JSON (length: {}): {e}", master_json.len()))?;
+    
+    // Convert to ZigRelease
+    let resolved_version = if let Some(version_str) = &network_release.version {
+        match semver::Version::parse(version_str) {
+            Ok(version) => ResolvedZigVersion::MasterVersion(version),
+            Err(_) => {
+                tracing::warn!("Failed to parse master version: {}", version_str);
+                ResolvedZigVersion::Master
+            }
+        }
+    } else {
+        ResolvedZigVersion::Master
+    };
+
+    // Convert network artifacts to runtime artifacts
+    let mut runtime_artifacts = HashMap::new();
+    for (target_key, network_artifact) in network_release.targets.into_iter() {
+        if let Some(target_triple) = TargetTriple::from_key(&target_key) {
+            let artifact_info = ArtifactInfo {
+                ziglang_org_tarball: network_artifact.ziglang_org_tarball,
+                shasum: network_artifact.shasum,
+                size: network_artifact.size,
+            };
+            runtime_artifacts.insert(target_triple, artifact_info);
+        } else {
+            tracing::warn!("Failed to parse target key: {}", target_key);
+        }
+    }
+
+    let master_release = ZigRelease::new(
+        resolved_version,
+        network_release.date,
+        runtime_artifacts,
+    );
 
     Ok(master_release)
 }

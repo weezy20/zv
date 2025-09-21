@@ -66,6 +66,8 @@ pub struct App {
     pub(crate) source_set: bool,
     /// Current detected shell
     pub(crate) shell: Option<crate::Shell>,
+    /// ZigRelease to install - set during resolution phase
+    pub(crate) to_install: Option<ZigRelease>,
 }
 
 impl App {
@@ -127,6 +129,7 @@ impl App {
             toolchain_manager: Arc::new(ToolchainManager::new(versions_path.as_path())),
             versions_path,
             shell: shell,
+            to_install: None,
         };
         Ok(app)
     }
@@ -134,8 +137,8 @@ impl App {
     /// Set the active Zig version
     pub async fn set_active_version<'b>(
         &mut self,
-        version: &'b ZigVersion,
-    ) -> Result<&'b ZigVersion, ZvError> {
+        version: &'b ResolvedZigVersion,
+    ) -> Result<&'b ResolvedZigVersion, ZvError> {
         println!("App::set_active_version called with version: {:?}", version);
         println!("This is a placeholder implementation");
 
@@ -314,28 +317,37 @@ impl App {
         self.toolchain_manager.is_version_installed(version, nested)
     }
 
-    /// Install a Zig version and returns the install path
-    pub async fn install_release(&mut self, zig_release: &ZigRelease) -> Result<PathBuf, ZvError> {
-        let semver_version = semver::Version::parse(zig_release.version())
-            .wrap_err_with(|| "Failed to parse ZigRelease version as semver")?;
+    /// Install the current loaded `to_install` ZigRelease
+    pub async fn install_release(&mut self) -> Result<PathBuf, ZvError> {
+        let zig_release = self.to_install.take().ok_or_else(|| {
+            ZvError::ZigVersionResolveError(eyre!(
+                "No ZigRelease is currently loaded for installation"
+            ))
+        })?;
+        let semver_version = zig_release.resolved_version().version().ok_or_else(|| {
+            eyre!(
+                "Cannot install non-semver version: {}",
+                zig_release.version_string()
+            )
+        })?;
         self.ensure_network_with_mirrors().await?;
         let host_target = utils::host_target().ok_or_else(|| {
             eyre!(
                 "Could not determine host target for Zig version {}",
-                zig_release.version()
+                zig_release.version_string()
             )
         })?;
         let download_artifact = zig_release.target_artifact(&host_target).ok_or_else(|| {
             eyre!(
                 "No download artifact found for target <{}> in release {}",
                 host_target,
-                zig_release.version()
+                zig_release.version_string()
             )
         })?;
         let tarball = zig_tarball(&semver_version, None).ok_or_else(|| {
             eyre!(
                 "Could not determine tarball name for Zig version {}",
-                zig_release.version()
+                zig_release.version_string()
             )
         })?;
         let download_path = self
