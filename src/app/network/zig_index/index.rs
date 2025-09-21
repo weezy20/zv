@@ -22,7 +22,6 @@ impl ZigRelease {
         match self.resolved_version() {
             ResolvedZigVersion::Semver(v) => v.to_string(),
             ResolvedZigVersion::MasterVersion(v) => v.to_string(),
-            ResolvedZigVersion::Master => "master".to_string(),
         }
     }
 
@@ -92,16 +91,7 @@ impl ZigIndex {
 
     /// Get master version info (backward compatibility)
     pub fn get_master_version(&self) -> Option<&ZigRelease> {
-        // Try different master variants
-        let master_variants = [ResolvedZigVersion::Master];
-
-        for variant in &master_variants {
-            if let Some(release) = self.releases().get(variant) {
-                return Some(release);
-            }
-        }
-
-        // Also check for master with any version
+        // Look for any master version in the index
         for (version, release) in self.releases() {
             if version.is_master() {
                 return Some(release);
@@ -117,7 +107,6 @@ impl ZigIndex {
         for (resolved_version, _) in self.releases() {
             let version_string = match resolved_version {
                 ResolvedZigVersion::Semver(v) => v.to_string(),
-                ResolvedZigVersion::Master => "master".to_string(),
                 ResolvedZigVersion::MasterVersion(v) => v.to_string(),
             };
             
@@ -156,7 +145,6 @@ impl ZigIndex {
         for (version, release) in self.releases() {
             let key = match version {
                 ResolvedZigVersion::Semver(v) => v.to_string(),
-                ResolvedZigVersion::Master => "master".to_string(),
                 ResolvedZigVersion::MasterVersion(v) => v.to_string(),
             };
             result.insert(key, release);

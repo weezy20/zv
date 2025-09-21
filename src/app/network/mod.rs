@@ -464,11 +464,16 @@ fn try_extract_complete_master(json_text: &str) -> Result<ZigRelease> {
             Ok(version) => ResolvedZigVersion::MasterVersion(version),
             Err(_) => {
                 tracing::warn!("Failed to parse master version: {}", version_str);
-                ResolvedZigVersion::Master
+                return Err(eyre!(
+                    "Master version without valid semver: {}", version_str
+                ));
             }
         }
     } else {
-        ResolvedZigVersion::Master
+        tracing::warn!("Master release found without version information");
+        return Err(eyre!(
+            "Master release missing version information"
+        ));
     };
 
     // Convert network artifacts to runtime artifacts

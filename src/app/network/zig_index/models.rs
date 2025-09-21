@@ -221,7 +221,6 @@ impl ZigRelease {
         let semver_version = match &self.version {
             ResolvedZigVersion::Semver(v) => v,
             ResolvedZigVersion::MasterVersion(v) => v,
-            ResolvedZigVersion::Master => return None, // Can't generate tarball for unresolved master
         };
 
         // Generate tarball name for the specific target
@@ -362,7 +361,8 @@ impl From<NetworkZigIndex> for ZigIndex {
                         }
                     }
                 } else {
-                    ResolvedZigVersion::Master
+                    tracing::warn!("Master release found without concrete version, skipping");
+                    continue; // Skip master releases without concrete versions
                 }
             } else {
                 // Try to parse as semver version
@@ -409,7 +409,6 @@ impl From<ZigIndex> for CacheZigIndex {
             let version_string = match &resolved_version {
                 ResolvedZigVersion::Semver(v) => v.to_string(),
                 ResolvedZigVersion::MasterVersion(v) => format!("master@{}", v),
-                ResolvedZigVersion::Master => "master".to_string(),
             };
 
             // Convert runtime artifacts to cache artifacts
@@ -452,9 +451,7 @@ impl From<CacheZigIndex> for ZigIndex {
 
         for cache_release in cache_index.releases {
             // Parse the version string back to ResolvedZigVersion
-            let resolved_version = if cache_release.version == "master" {
-                ResolvedZigVersion::Master
-            } else if let Some(version_str) = cache_release.version.strip_prefix("master@") {
+            let resolved_version = if let Some(version_str) = cache_release.version.strip_prefix("master@") {
                 match semver::Version::parse(version_str) {
                     Ok(version) => ResolvedZigVersion::MasterVersion(version),
                     Err(e) => {

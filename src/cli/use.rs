@@ -29,7 +29,6 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
     // Create a version string for installation checking
     let (version_string, nesting) = match &resolved_version {
         ResolvedZigVersion::Semver(v) => (v.to_string(), None),
-        ResolvedZigVersion::Master => ("master".to_string(), None),
         ResolvedZigVersion::MasterVersion(v) => (v.to_string(), None),
     };
 
@@ -98,14 +97,15 @@ pub fn normalize_zig_version(version: &ZigVersion, index: &ZigIndex) -> Option<R
             }
         }
 
-        // Master without version - check if master exists in index
+        // Master without version - look for any master version in index
         ZigVersion::Master(None) => {
-            let resolved = ResolvedZigVersion::Master;
-            if index.has_version(&resolved) {
-                Some(resolved)
-            } else {
-                None
-            }
+            // Find any master version in the index
+            index.releases().keys().find_map(|version| {
+                match version {
+                    ResolvedZigVersion::MasterVersion(_) => Some(version.clone()),
+                    _ => None,
+                }
+            })
         }
 
         // Stable with specific version - verify it's stable and exists
@@ -190,11 +190,6 @@ pub async fn resolve_zig_version(
             let index_master_version = match master_version {
                 ResolvedZigVersion::Semver(semver) => semver,
                 ResolvedZigVersion::MasterVersion(semver) => semver,
-                ResolvedZigVersion::Master => {
-                    return Err(ZvError::ZigVersionResolveError(eyre!(
-                        "Invalid ZigIndex. Master version does not have a specific semver version"
-                    )));
-                }
             };
 
             // Verify the requested version matches the actual master version
@@ -213,8 +208,20 @@ pub async fn resolve_zig_version(
         // Master without version - fetch current master
         ZigVersion::Master(None) => {
             let master_release = app.fetch_master_version().await?;
-            app.to_install = Some(master_release);
-            Ok(ResolvedZigVersion::Master)
+            let master_version = master_release.resolved_version().clone();
+            
+            // Extract the concrete version from the master release
+            match master_version {
+                ResolvedZigVersion::MasterVersion(v) => {
+                    app.to_install = Some(master_release);
+                    Ok(ResolvedZigVersion::MasterVersion(v))
+                }
+                ResolvedZigVersion::Semver(v) => {
+                    // If master is returned as a semver, convert it to MasterVersion
+                    app.to_install = Some(master_release);
+                    Ok(ResolvedZigVersion::MasterVersion(v))
+                }
+            }
         }
 
         // Stable with specific version - validate it's stable and exists
