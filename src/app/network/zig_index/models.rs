@@ -3,8 +3,9 @@
 //! 2. Runtime Layer (ZigIndex, ZigRelease, ArtifactInfo) - for in-memory operations
 //! 3. Cache Layer (CacheZigIndex, CacheZigRelease, CacheArtifact) - for TOML serialization
 
+use crate::app::INDEX_TTL_DAYS;
 use crate::app::utils::{host_target, zig_tarball};
-use crate::types::{TargetTriple, ZigVersion, ResolvedZigVersion};
+use crate::types::{ResolvedZigVersion, TargetTriple, ZigVersion};
 use chrono::{DateTime, Utc};
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -334,6 +335,88 @@ impl ZigIndex {
     }
 }
 
+// Backward compatibility wrapper for ZigIndex
+impl ZigIndex {
+    /// Check if a semver is in index (backward compatibility)
+    pub fn contains_version(&self, version: &semver::Version) -> Option<&ZigRelease> {
+        let resolved_version = ResolvedZigVersion::Semver(version.clone());
+        self.releases().get(&resolved_version)
+    }
+
+    /// Get the latest stable release version (backward compatibility)
+    pub fn get_latest_stable_release(&self) -> Option<&ZigRelease> {
+        if let Some(latest_version) = self.get_latest_stable() {
+            self.releases().get(latest_version)
+        } else {
+            None
+        }
+    }
+
+    /// Get master version info (backward compatibility)
+    pub fn get_master_version(&self) -> Option<&ZigRelease> {
+        // Look for any master version in the index
+        for (version, release) in self.releases() {
+            if version.is_master() {
+                return Some(release);
+            }
+        }
+
+        None
+    }
+
+    /// Get all available target platforms for a specific version (backward compatibility)
+    pub fn get_targets_for_version(&self, version: &str) -> Vec<String> {
+        // Try to find the version in the index by string matching
+        for (resolved_version, _) in self.releases() {
+            let version_string = match resolved_version {
+                ResolvedZigVersion::Semver(v) => v.to_string(),
+                ResolvedZigVersion::Master(v) => v.to_string(),
+            };
+
+            if version_string == version || (version == "master" && resolved_version.is_master()) {
+                return self
+                    .get_available_targets(resolved_version)
+                    .into_iter()
+                    .map(|t| t.to_key())
+                    .collect();
+            }
+        }
+        Vec::new()
+    }
+
+    /// Cache expired? (backward compatibility)
+    pub fn is_expired(&self) -> bool {
+        if let Some(last_synced) = self.last_synced() {
+            let age = Utc::now() - last_synced;
+            age.num_days() >= *INDEX_TTL_DAYS
+        } else {
+            true // If never synced, consider it expired
+        }
+    }
+
+    /// Update the last_synced timestamp (backward compatibility)
+    pub fn update_sync_time(&mut self) {
+        // This method can't be implemented on the immutable ZigIndex
+        // The sync time is set during conversion from NetworkZigIndex
+        tracing::warn!(
+            "update_sync_time called on ZigIndex - this is a no-op. Sync time is set during network conversion."
+        );
+    }
+
+    /// Access to releases as string keys (backward compatibility)
+    pub fn releases_by_string(&self) -> std::collections::BTreeMap<String, &ZigRelease> {
+        let mut result = std::collections::BTreeMap::new();
+        for (version, release) in self.releases() {
+            let key = match version {
+                ResolvedZigVersion::Semver(v) => v.to_string(),
+                ResolvedZigVersion::Master(v) => v.to_string(),
+            };
+            result.insert(key, release);
+        }
+        result
+    }
+}
+
 impl Default for ZigIndex {
     fn default() -> Self {
         Self::new()
@@ -390,8 +473,11 @@ impl From<NetworkZigIndex> for ZigIndex {
                 }
             }
 
-            let runtime_release =
-                ZigRelease::new(resolved_version.clone(), network_release.date, runtime_artifacts);
+            let runtime_release = ZigRelease::new(
+                resolved_version.clone(),
+                network_release.date,
+                runtime_artifacts,
+            );
 
             releases.insert(resolved_version, runtime_release);
         }
@@ -451,32 +537,33 @@ impl From<CacheZigIndex> for ZigIndex {
 
         for cache_release in cache_index.releases {
             // Parse the version string back to ResolvedZigVersion
-            let resolved_version = if let Some(version_str) = cache_release.version.strip_prefix("master@") {
-                match semver::Version::parse(version_str) {
-                    Ok(version) => ResolvedZigVersion::Master(version),
-                    Err(e) => {
-                        tracing::warn!(
-                            "Failed to parse cached master version '{}': {}",
-                            version_str,
-                            e
-                        );
-                        continue; // Skip this release
+            let resolved_version =
+                if let Some(version_str) = cache_release.version.strip_prefix("master@") {
+                    match semver::Version::parse(version_str) {
+                        Ok(version) => ResolvedZigVersion::Master(version),
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to parse cached master version '{}': {}",
+                                version_str,
+                                e
+                            );
+                            continue; // Skip this release
+                        }
                     }
-                }
-            } else {
-                // Try to parse as semver version
-                match semver::Version::parse(&cache_release.version) {
-                    Ok(version) => ResolvedZigVersion::Semver(version),
-                    Err(e) => {
-                        tracing::warn!(
-                            "Failed to parse cached version '{}': {}",
-                            cache_release.version,
-                            e
-                        );
-                        continue; // Skip this release
+                } else {
+                    // Try to parse as semver version
+                    match semver::Version::parse(&cache_release.version) {
+                        Ok(version) => ResolvedZigVersion::Semver(version),
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to parse cached version '{}': {}",
+                                cache_release.version,
+                                e
+                            );
+                            continue; // Skip this release
+                        }
                     }
-                }
-            };
+                };
 
             // Convert cache artifacts to runtime artifacts
             let mut runtime_artifacts = HashMap::new();
@@ -496,8 +583,11 @@ impl From<CacheZigIndex> for ZigIndex {
                 }
             }
 
-            let runtime_release =
-                ZigRelease::new(resolved_version.clone(), cache_release.date, runtime_artifacts);
+            let runtime_release = ZigRelease::new(
+                resolved_version.clone(),
+                cache_release.date,
+                runtime_artifacts,
+            );
 
             releases.insert(resolved_version, runtime_release);
         }
