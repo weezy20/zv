@@ -110,13 +110,25 @@ impl ZvNetwork {
     /// Download a given zig_tarball to the download cache, returns the path to the downloaded file after shasum verification
     pub async fn download_version(
         &mut self,
+        semver_version: &semver::Version,
         zig_tarball: &str,
         download_artifact: &ArtifactInfo,
     ) -> Result<PathBuf, ZvError> {
-        Err(ZvError::General(eyre!(
-            "Direct download of {} not implemented yet, use mirrors",
-            zig_tarball
-        )))
+        let progress_handle = ProgressHandle::spawn();
+        let (shasum, size) = (&download_artifact.shasum, download_artifact.size);
+        let manager = self.ensure_mirror_manager().await?;
+        let mut success = false;
+        while !success {
+            let mirror = manager.get_random_mirror().await;
+            if let Err(err) = mirror {
+                tracing::warn!(target: TARGET, "Failed to get mirror: {err}, selecting another");
+                continue;
+            }
+            let mirror = mirror.unwrap();
+            let url = Url::parse(&mirror.get_download_url(semver_version, zig_tarball))
+                .map_err(|e| eyre!("Failed to parse url: {e}"))?;
+        }
+        todo!()
     }
 
     /// Checks if the given version is valid by checking it against the index

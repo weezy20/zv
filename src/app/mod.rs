@@ -352,7 +352,7 @@ impl App {
             .network
             .as_mut()
             .unwrap()
-            .download_version(&tarball, download_artifact)
+            .download_version(&semver_version, &tarball, download_artifact)
             .await?;
         // self.toolchain_manager
         //     .install_version(&download_path, &semver_version, None)
