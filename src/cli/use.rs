@@ -54,7 +54,7 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
 ///
 /// This function validates user input by using existing app methods to fetch and validate
 /// versions. It applies appropriate cache strategies based on the version type and integrates
-/// with the app's network layer for validation.
+/// with the app's network layer for validation. If a ZigRelease is found it is set into app's to_install field
 ///
 /// # Arguments
 ///
