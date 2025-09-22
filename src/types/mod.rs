@@ -4,8 +4,10 @@ pub mod error;
 pub use error::*;
 
 mod zigversion;
+mod target_triple;
 
 pub use zigversion::*;
+pub use target_triple::*;
 
 use color_eyre::eyre::eyre;
 
