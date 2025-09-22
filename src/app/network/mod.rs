@@ -1,4 +1,4 @@
-use crate::app::NETWORK_TIMEOUT_SECS;
+use crate::app::FETCH_TIMEOUT_SECS;
 use crate::app::constants::ZIG_DOWNLOAD_INDEX_JSON;
 use crate::app::toolchain::ToolchainManager;
 use crate::app::utils::{ProgressHandle, zv_agent};
@@ -107,7 +107,7 @@ impl ZvNetwork {
 
 // === Usage ===
 impl ZvNetwork {
-    /// Download a given zig_tarball URL to the download cache, returns the path to the downloaded file
+    /// Download a given zig_tarball to the download cache, returns the path to the downloaded file after shasum verification
     pub async fn download_version(
         &mut self,
         zig_tarball: &str,
@@ -313,7 +313,7 @@ pub(crate) fn create_client() -> Result<reqwest::Client> {
         .user_agent(zv_agent())
         .pool_max_idle_per_host(0) // Don't keep idle connections
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(*NETWORK_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(*FETCH_TIMEOUT_SECS))
         .build()
         .map_err(|e| ZvError::NetworkError(NetErr::Reqwest(e)))
         .wrap_err("Failed to build HTTP client")
@@ -346,7 +346,7 @@ pub(crate) async fn try_partial_fetch_master(
     let response = client
         .get(ZIG_DOWNLOAD_INDEX_JSON)
         .header("Range", "bytes=0-8191") // 8KB should be enough for most master objects
-        .timeout(Duration::from_secs(*NETWORK_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(*FETCH_TIMEOUT_SECS))
         .send()
         .await
         .map_err(|err| {

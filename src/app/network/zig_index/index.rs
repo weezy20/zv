@@ -4,7 +4,7 @@ use super::models::{ArtifactInfo, CacheZigIndex, NetworkZigIndex, ZigIndex, ZigR
 use crate::{
     CfgErr, NetErr, ZigVersion, ZvError,
     app::{
-        INDEX_TTL_DAYS, NETWORK_TIMEOUT_SECS,
+        INDEX_TTL_DAYS, FETCH_TIMEOUT_SECS,
         constants::ZIG_DOWNLOAD_INDEX_JSON,
         network::{CacheStrategy, TARGET},
     },
@@ -35,14 +35,9 @@ impl ZigRelease {
         }
     }
 
-    /// Borrow the artifact for a target (backward compatibility)
+    /// Borrow the artifact for a target
     pub fn target_artifact(&self, triple: &str) -> Option<&ArtifactInfo> {
         use crate::types::TargetTriple;
-        tracing::debug!(target: TARGET, "Length of targets: {}", self.artifacts().len());
-        for k in self.artifacts().keys() {
-            tracing::debug!(target: TARGET, "Available target: {}", k.to_key());
-        }
-
         if let Some(target_triple) = TargetTriple::from_key(triple) {
             self.artifacts().get(&target_triple)
         } else {
@@ -247,7 +242,7 @@ impl IndexManager {
         let response = self
             .client
             .get(ZIG_DOWNLOAD_INDEX_JSON)
-            .timeout(std::time::Duration::from_secs(*NETWORK_TIMEOUT_SECS))
+            .timeout(std::time::Duration::from_secs(*FETCH_TIMEOUT_SECS))
             .send()
             .await
             .map_err(NetErr::Reqwest)

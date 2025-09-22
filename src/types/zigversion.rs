@@ -300,10 +300,10 @@ impl From<&Version> for ResolvedZigVersion {
 
 impl ResolvedZigVersion {
     /// Extracts the version from ResolvedZigVersion variants that contain a Version
-    pub fn version(&self) -> Option<&Version> {
+    pub fn version(&self) -> &Version {
         match self {
-            ResolvedZigVersion::Semver(v) => Some(v),
-            ResolvedZigVersion::Master(v) => Some(v),
+            ResolvedZigVersion::Semver(v) => v,
+            ResolvedZigVersion::Master(v) => v,
         }
     }
 

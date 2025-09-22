@@ -32,8 +32,8 @@ pub static MIRRORS_TTL_DAYS: LazyLock<i64> = LazyLock::new(|| {
         .unwrap_or(21)
 });
 /// Network timeout in seconds for operations
-pub static NETWORK_TIMEOUT_SECS: LazyLock<u64> = LazyLock::new(|| {
-    std::env::var("ZV_NETWORK_TIMEOUT")
+pub static FETCH_TIMEOUT_SECS: LazyLock<u64> = LazyLock::new(|| {
+    std::env::var("ZV_FETCH_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(15)
@@ -324,12 +324,7 @@ impl App {
                 "No ZigRelease is currently loaded for installation"
             ))
         })?;
-        let semver_version = zig_release.resolved_version().version().ok_or_else(|| {
-            eyre!(
-                "Cannot install non-semver version: {}",
-                zig_release.version_string()
-            )
-        })?;
+        let semver_version = zig_release.resolved_version().version();
         self.ensure_network_with_mirrors().await?;
         let host_target = utils::host_target().ok_or_else(|| {
             eyre!(
@@ -337,13 +332,16 @@ impl App {
                 zig_release.version_string()
             )
         })?;
-        let download_artifact = zig_release.target_artifact(&host_target).ok_or_else(|| {
-            eyre!(
-                "No download artifact found for target <{}> in release {}",
-                host_target,
-                zig_release.version_string()
-            )
-        })?;
+        let download_artifact = zig_release
+            .target_artifact(&host_target)
+            .ok_or_else(|| {
+                eyre!(
+                    "No download artifact found for target <{}> in release {}",
+                    host_target,
+                    zig_release.version_string()
+                )
+            })
+            .map_err(ZvError::ZigNotFound)?;
         let tarball = zig_tarball(&semver_version, None).ok_or_else(|| {
             eyre!(
                 "Could not determine tarball name for Zig version {}",
