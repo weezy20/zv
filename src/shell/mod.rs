@@ -1,4 +1,5 @@
-use crate::ZvError;
+#![allow(unused)]
+
 use std::path::{Path, PathBuf};
 
 mod detection;
@@ -8,7 +9,6 @@ pub mod path_utils;
 pub mod setup;
 
 pub use detection::detect_shell_from_parent;
-pub use env_export::*;
 pub use generators::*;
 pub use path_utils::*;
 pub use setup::*;

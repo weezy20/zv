@@ -208,6 +208,16 @@ impl ShellErr {
 #[derive(thiserror::Error, Debug)]
 /// ZV error type
 pub enum ZvError {
+    /// Cannot Set Active Version
+    #[error("Cannot set active version to {version}: {reason}")]
+    CannotSetActiveVersion {
+        version: semver::Version,
+        reason: String,
+    },
+    /// Cache not found at location
+    #[error("File not found at: {0}")]
+    CacheNotFound(String),
+
     /// Failure type for parse Zig version
     #[error("failed to parse semantic version")]
     ZigVersionError(#[from] semver::Error),
@@ -252,13 +262,9 @@ pub enum ZvError {
     #[error("Network error")]
     NetworkError(#[source] NetErr),
 
-    /// SystemZig Error
-    #[error("SystemZig error")]
-    SystemZigError(#[source] Report),
-
     /// Zig Error
-    #[error("Zig error")]
-    ZigError(#[source] Report),
+    #[error("Zig not found")]
+    ZigNotFound(#[source] Report),
 
     /// Shell setup and environment errors
     #[error("Shell error")]
@@ -360,14 +366,32 @@ impl ZvError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum NetErr {
+    #[error("Invalid Mirror: {0}")]
+    InvalidMirror(#[source] Report),
+
+    #[error("No valid mirrors found")]
+    EmptyMirrors,
+
     #[error("Network IO error: {0}")]
     FileIo(#[source] std::io::Error),
 
-    #[error("Reqwest error: {0}")]
-    Network(#[source] reqwest::Error),
+    #[error("Reqwest error")]
+    Reqwest(#[source] reqwest::Error),
+
+    #[error("Reqwest middleware error: {0}")]
+    ReqwestMiddleware(#[source] reqwest_middleware::Error),
+
+    #[error("Download timeout: {0}")]
+    Timeout(String),
+
+    #[error("Download stalled: no progress for {duration:?}")]
+    Stalled { duration: std::time::Duration },
+
+    #[error("Too many retries: {attempts} attempts failed")]
+    TooManyRetries { attempts: usize },
 
     #[error("HTTP request failed with status: {0}")]
-    HttpStatus(reqwest::StatusCode),
+    HTTP(reqwest::StatusCode),
 
     #[error("JSON parse error: {0}")]
     JsonParse(#[source] serde_json::Error),
@@ -401,6 +425,10 @@ pub enum CfgErr {
     SerializeFail(#[source] toml::ser::Error),
 
     /// Write failed
-    #[error("Config flush failed")]
-    WriteFail(#[source] Report),
+    #[error("Config flush failed for file: {1}")]
+    WriteFail(#[source] Report, String),
+
+    /// Cache expired
+    #[error("Cache expired for {0}")]
+    CacheExpired(String),
 }

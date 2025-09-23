@@ -1,27 +1,22 @@
-use crate::{App, Shell, UserConfig, ZigVersion, tools};
+use crate::{App, UserConfig, ZigVersion, tools};
 use color_eyre::eyre::{bail, eyre};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-const MAX_RECURSION: u32 = 10;
-
 pub fn zig_main() -> crate::Result<()> {
-    // Recursion guard
-    let recursion_count: u32 = std::env::var("ZV_RECURSION_COUNT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
+    // Recursion guard - check early to prevent infinite loops
+    crate::check_recursion_with_context("zig proxy")?;
 
     // Collect command line arguments
     let mut args: Vec<String> = std::env::args().collect();
     args.remove(0); // drop program name
 
-    // Check for +version override
-    let version_override = args
-        .iter()
-        .position(|arg| arg.starts_with('+'))
-        .map(|pos| args.remove(pos))
-        .map(|arg| arg.strip_prefix('+').unwrap().to_string());
+    // Check for +version override (only if it's the first argument)
+    let version_override = if args.first().map_or(false, |arg| arg.starts_with('+')) {
+        Some(args.remove(0).strip_prefix('+').unwrap().to_string())
+    } else {
+        None
+    };
 
     let zig_path = if let Some(version_str) = version_override {
         // Parse the version override
@@ -34,6 +29,12 @@ pub fn zig_main() -> crate::Result<()> {
         // Default to system zig or zv-managed zig
         find_default_zig()?
     };
+
+    // Get current recursion count for incrementing
+    let recursion_count: u32 = std::env::var("ZV_RECURSION_COUNT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
 
     let mut child = Command::new(zig_path)
         .args(args)
@@ -48,19 +49,13 @@ pub fn zig_main() -> crate::Result<()> {
         .wait()
         .map_err(|e| eyre!("Failed to wait for zig: {}", e))?;
 
-    std::process::exit(status.code().unwrap_or(1));
+    std::process::exit(status.code().unwrap_or(3));
 }
 
 /// Find the Zig executable for a specific version
 fn find_zig_for_version(version: &ZigVersion) -> crate::Result<PathBuf> {
-    // Initialize app to access zv directory structure
+    // Get zv directory structure
     let (zv_base_path, _) = tools::fetch_zv_dir()?;
-
-    let app = App::init(UserConfig {
-        zv_base_path: zv_base_path.clone(),
-        shell: None,
-    })
-    .map_err(|e| eyre!("Failed to initialize app: {}", e))?;
 
     match version {
         ZigVersion::Semver(v) => {
@@ -106,7 +101,6 @@ fn find_zig_for_version(version: &ZigVersion) -> crate::Result<PathBuf> {
                 "Stable/latest version resolution not yet implemented. Use specific version."
             ))
         }
-        ZigVersion::Unknown => Err(eyre!("Cannot use unknown version")),
     }
 }
 

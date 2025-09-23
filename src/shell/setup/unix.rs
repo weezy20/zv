@@ -2,6 +2,8 @@ use crate::shell::{Shell, ShellType};
 use std::path::{Path, PathBuf};
 use yansi::Paint;
 
+const TARGET: &str = "zv::shell::setup::unix";
+
 /// Select the appropriate RC file for the shell with shell-specific preferences
 pub fn select_rc_file(shell: &Shell) -> PathBuf {
     let home_dir = match dirs::home_dir() {
@@ -110,7 +112,7 @@ pub async fn generate_unix_env_file(
 
     // Create parent directories if they don't exist
     if let Some(parent) = env_file_path.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|e| {
+        tokio::fs::create_dir_all(parent).await.map_err(|_| {
             crate::ZvError::shell_environment_file_failed(
                 "create_directory",
                 &env_file_path.display().to_string(),
@@ -122,6 +124,11 @@ pub async fn generate_unix_env_file(
     tokio::fs::write(env_file_path, content)
         .await
         .map_err(|e| {
+            tracing::error!(target: TARGET,
+                "Failed to write environment file {}: {}",
+                env_file_path.display(),
+                e
+            );
             crate::ZvError::shell_environment_file_failed(
                 "write",
                 &env_file_path.display().to_string(),

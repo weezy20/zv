@@ -1,6 +1,6 @@
 [package]
 name = "zv"
-version = "1.0.0"
+version = "0.1.0"
 edition = "2024"
 description = "Ziglang Version Manager and Project Starter"
 license = "MIT"
@@ -21,9 +21,7 @@ name = "zv"
 [dependencies]
 clap = { version = "4.5.45", features = ["derive"] }
 dotenv = { version = "0.15", optional = true }
-tracing-subscriber = { version = "0.3.19", optional = true, features = [
-    "env-filter",
-] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 tokio = { version = "1.47.1", features = ["fs", "macros", "rt-multi-thread"] }
 serde = { version = "1.0.219", features = ["derive"] }
 semver = "1.0.26"
@@ -32,9 +30,9 @@ dirs = "6.0.0"
 tracing = "0.1.41"
 chrono = { version = "0.4.41", features = ["serde"] }
 yansi = { version = "1.0.1", features = ["detect-tty", "detect-env"] }
-target-lexicon = "0.13.2"
+target-lexicon = "0.13.3"
 serde_json = "1.0.143"
-reqwest = "0.12.23"
+reqwest = { version = "0.12.23", features = ["stream"] }
 toml = "0.9.5"
 toml_edit = "0.23.4"
 thiserror = "2.0.16"
@@ -47,6 +45,12 @@ dunce = "1.0.5"
 crc32fast = "1.5.0"
 rda = { package = "remove_dir_all", version = "1.0.0", features = ["parallel"] }
 cfg-if = "1.0.3"
+indicatif = "0.18.0"
+futures = "0.3.31"
+rand = "0.9.2"
+url = "2.5.7"
+reqwest-middleware = "0.4.2"
+reqwest-retry = "0.7.0"
 
 [target."cfg(windows)".dependencies]
 windows-registry = "0.6.0"
@@ -63,19 +67,37 @@ features = [
 ]
 
 [features]
-default = ["log"]
-log = ["dep:tracing-subscriber", "rda/log"]
+default = []
 dotenv = ["dep:dotenv"]
 full = ["dotenv"]
 
 
 [profile.dev]
+opt-level = 0
 panic = "unwind"
+lto = "off"
+strip = "none"
+codegen-units = 256
+incremental = true
+debug = true
+
+[profile.dev.package."*"]
+opt-level = 3
+debug = false
+codegen-units = 256
+
 
 [profile.release]
+opt-level = 3
 panic = "abort"
 lto = true
+strip = true
+
+[profile.release-max]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
 
 [dev-dependencies]
 serde_test = "1.0.177"
-tempfile = "3.8.1"
+tempfile = "3.22.0"

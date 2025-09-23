@@ -1,26 +1,23 @@
-use crate::{App, Shell, UserConfig, ZigVersion, tools};
+use crate::{App, UserConfig, ZigVersion, tools};
 use color_eyre::eyre::{bail, eyre};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-const MAX_RECURSION: u32 = 10;
-
 pub fn zls_main() -> crate::Result<()> {
-    // Recursion guard
-    let recursion_count: u32 = std::env::var("ZV_RECURSION_COUNT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-
-    if recursion_count >= MAX_RECURSION {
-        bail!("Maximum recursion depth reached for ZLS shim");
-    }
+    // Recursion guard - check early to prevent infinite loops
+    crate::check_recursion_with_context("zls proxy")?;
 
     // Collect command line arguments
     let mut args: Vec<String> = std::env::args().collect();
     args.remove(0); // drop program name
 
     let zls_path = find_compatible_zls()?;
+
+    // Get current recursion count for incrementing
+    let recursion_count: u32 = std::env::var("ZV_RECURSION_COUNT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
 
     let mut child = Command::new(zls_path)
         .args(args)

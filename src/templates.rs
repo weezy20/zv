@@ -6,7 +6,6 @@ use std::{
 
 use crate::ZvError;
 use color_eyre::eyre::eyre;
-use reqwest::Url;
 
 #[derive(Debug, Clone)]
 pub enum FileStatus {
@@ -233,7 +232,7 @@ impl Template {
             .ok_or_else(|| ZvError::TemplateError(eyre!("No zig executable found")))?;
 
         let output = app
-            .spawn_with_guard(&zig_path, &["init"], Some(target_dir))
+            .spawn_zig_with_guard(&zig_path, &["init"], Some(target_dir))
             .map_err(|e| {
                 if self.context.as_ref().unwrap().created_new_dir {
                     let _ = rda::remove_dir_all(target_dir);

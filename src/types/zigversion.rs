@@ -1,14 +1,21 @@
 use crate::ZvError;
 use color_eyre::eyre::eyre;
-const TARGET: &'static str = "zv::zig_version";
 use semver::Version;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::{
     fmt,
     hash::{Hash, Hasher},
-    path::PathBuf,
     str::FromStr,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// A validated Zig version that exists in the index
+pub enum ResolvedZigVersion {
+    /// A semantic version that exists in the index
+    Semver(Version),
+    /// Specific master version that matches the index
+    Master(Version),
+}
 
 #[derive(Debug, Clone)]
 /// A type denoting a valid zig version
@@ -16,63 +23,77 @@ pub enum ZigVersion {
     /// Semantic version
     Semver(Version),
     /// Master branch build
-    Master(Version),
+    Master(Option<Version>),
     /// Latest stable (cached)
-    Stable(Version),
+    Stable(Option<Version>),
     /// Latest stable (always refresh)
-    Latest(Version),
-    /// Unknown - Detected but failed to execute `zig version`
-    Unknown,
+    Latest(Option<Version>),
 }
 
 impl ZigVersion {
-    /// Creates a placeholder version (0.0.0) for the given variant type
+    /// Creates a placeholder version (None) for the given variant type
     pub fn placeholder_for_variant(variant: &str) -> Result<Self, ZvError> {
-        let placeholder = Version::parse("0.0.0").unwrap();
         match variant {
-            "master" => Ok(ZigVersion::Master(placeholder)),
-            "stable" => Ok(ZigVersion::Stable(placeholder)),
-            "latest" => Ok(ZigVersion::Latest(placeholder)),
+            "master" => Ok(ZigVersion::Master(None)),
+            "stable" => Ok(ZigVersion::Stable(None)),
+            "latest" => Ok(ZigVersion::Latest(None)),
             _ => Err(ZvError::General(eyre!("Invalid variant: {}", variant))),
         }
     }
 
     /// Normalizes a version string to semver format (e.g., "1" -> "1.0.0", "1.2" -> "1.2.0")
-    /// Returns parsed version after normalization
     fn parse_normalized_version(version_str: &str) -> Result<Version, ZvError> {
-        let normalized = match version_str.chars().filter(|&c| c == '.').count() {
-            0 => format!("{}.0.0", version_str),
-            1 => format!("{}.0", version_str),
-            _ => version_str.to_string(),
+        // First, separate the core version from pre-release and build metadata
+        let (core_version, suffix) = if let Some(hyphen_pos) = version_str.find('-') {
+            (&version_str[..hyphen_pos], &version_str[hyphen_pos..])
+        } else if let Some(plus_pos) = version_str.find('+') {
+            (&version_str[..plus_pos], &version_str[plus_pos..])
+        } else {
+            (version_str, "")
         };
+
+        // Normalize only the core version part (before any - or +)
+        let normalized_core = match core_version.chars().filter(|&c| c == '.').count() {
+            0 => format!("{}.0.0", core_version),
+            1 => format!("{}.0", core_version),
+            _ => core_version.to_string(),
+        };
+
+        // Combine normalized core with original suffix
+        let normalized = format!("{}{}", normalized_core, suffix);
+
         Version::parse(&normalized).map_err(ZvError::ZigVersionError)
     }
 
     /// Extracts the version from any ZigVersion variant, if available
     pub fn version(&self) -> Option<&Version> {
         match self {
-            ZigVersion::Semver(v)
-            | ZigVersion::Master(v)
-            | ZigVersion::Stable(v)
-            | ZigVersion::Latest(v) => Some(v),
-            ZigVersion::Unknown => None,
+            ZigVersion::Semver(v) => Some(v),
+            ZigVersion::Master(Some(v))
+            | ZigVersion::Stable(Some(v))
+            | ZigVersion::Latest(Some(v)) => Some(v),
+            ZigVersion::Master(None) | ZigVersion::Stable(None) | ZigVersion::Latest(None) => None,
         }
     }
 
-    /// Returns true if embedded version is a placeholder (0.0.0)
-    /// Returns false in all other cases
-    pub fn is_placeholder_version(&self) -> bool {
-        self.version()
-            .map_or(false, |v| *v == Version::from_str("0.0.0").unwrap())
+    /// Returns true if the version has a concrete version
+    pub fn contains_semver(&self) -> bool {
+        match self {
+            ZigVersion::Semver(_) => true,
+            ZigVersion::Master(Some(_))
+            | ZigVersion::Stable(Some(_))
+            | ZigVersion::Latest(Some(_)) => true,
+            ZigVersion::Master(None) | ZigVersion::Stable(None) | ZigVersion::Latest(None) => false,
+        }
     }
 
-    /// Returns true if the versions match, ignoring variant differences and paths for System variants.
-    /// This provides version-only comparison logic that was used in the old PartialEq implementation.
-    pub fn version_matches(&self, other: &Self) -> bool {
-        match (self.version(), other.version()) {
-            (Some(v1), Some(v2)) => v1 == v2,
-            (None, None) => matches!((self, other), (ZigVersion::Unknown, ZigVersion::Unknown)),
-            _ => false,
+    /// Returns the variant type as a string
+    pub fn variant_type(&self) -> &'static str {
+        match self {
+            ZigVersion::Semver(_) => "semver",
+            ZigVersion::Master(_) => "master",
+            ZigVersion::Stable(_) => "stable",
+            ZigVersion::Latest(_) => "latest",
         }
     }
 }
@@ -82,20 +103,29 @@ impl FromStr for ZigVersion {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "unknown" => Err(ZvError::General(eyre!(
-                "`unknown` is not a valid user input"
-            ))),
             "master" => Self::placeholder_for_variant("master"),
             "stable" => Self::placeholder_for_variant("stable"),
             "latest" => Self::placeholder_for_variant("latest"),
             _ => {
-                // Handle prefixed variants (system@version, stable@version)
+                // Handle prefixed variants (stable@version)
                 if let Some((prefix, version_str)) = s.split_once('@') {
                     let version = Self::parse_normalized_version(version_str)?;
                     return match prefix {
-                        "stable" => Ok(ZigVersion::Semver(version)),
+                        "stable" => {
+                            // Validate that the version is stable (no pre-release or dev builds)
+                            if version.pre.is_empty() && version.build.is_empty() {
+                                Ok(ZigVersion::Stable(Some(version)))
+                            } else {
+                                Err(ZvError::General(eyre!(
+                                    "stable@<version> only accepts stable versions. '{}' appears to be a pre-release or dev build",
+                                    version_str
+                                )))
+                            }
+                        }
+                        "master" => Ok(ZigVersion::Master(Some(version))),
+                        "latest" => Ok(ZigVersion::Latest(Some(version))),
                         _ => Err(ZvError::General(eyre!(
-                            "Invalid version prefix: {}",
+                            "Invalid version prefix: {}. Supported: stable@<version>",
                             prefix
                         ))),
                     };
@@ -117,16 +147,21 @@ impl FromStr for ZigVersion {
 impl Hash for ZigVersion {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
-            // Use same discriminant for variants that should hash equally when versions match
-            ZigVersion::Semver(v)
-            | ZigVersion::Master(v)
-            | ZigVersion::Stable(v)
-            | ZigVersion::Latest(v) => {
+            ZigVersion::Semver(v) => {
                 state.write_u8(0);
                 v.hash(state);
             }
-            ZigVersion::Unknown => {
+            ZigVersion::Master(v) => {
                 state.write_u8(1);
+                v.hash(state);
+            }
+            ZigVersion::Stable(v) => {
+                state.write_u8(2);
+                v.hash(state);
+            }
+            ZigVersion::Latest(v) => {
+                state.write_u8(3);
+                v.hash(state);
             }
         }
     }
@@ -135,51 +170,74 @@ impl Hash for ZigVersion {
 impl PartialEq for ZigVersion {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            // Unknown only equals Unknown
-            (Self::Unknown, Self::Unknown) => true,
-            (Self::Unknown, _) | (_, Self::Unknown) => false,
-
-            // All other variants: compare versions only
-            (l, r) => match (l.version(), r.version()) {
-                (Some(lv), Some(rv)) => *lv == *rv,
-                _ => false,
-            },
+            (ZigVersion::Semver(a), ZigVersion::Semver(b)) => a == b,
+            (ZigVersion::Master(a), ZigVersion::Master(b)) => a == b,
+            (ZigVersion::Stable(a), ZigVersion::Stable(b)) => a == b,
+            (ZigVersion::Latest(a), ZigVersion::Latest(b)) => a == b,
+            // Different variant types are never equal
+            _ => false,
         }
     }
 }
 
 impl Eq for ZigVersion {}
 
+impl PartialOrd for ZigVersion {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ZigVersion {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        
+        match (self, other) {
+            // Same variant types - compare by version
+            (ZigVersion::Semver(a), ZigVersion::Semver(b)) => a.cmp(b),
+            (ZigVersion::Master(a), ZigVersion::Master(b)) => a.cmp(b),
+            (ZigVersion::Stable(a), ZigVersion::Stable(b)) => a.cmp(b),
+            (ZigVersion::Latest(a), ZigVersion::Latest(b)) => a.cmp(b),
+            
+            // Different variant types - establish ordering
+            // Order: Semver < Stable < Latest < Master
+            (ZigVersion::Semver(_), ZigVersion::Stable(_)) => Ordering::Less,
+            (ZigVersion::Semver(_), ZigVersion::Latest(_)) => Ordering::Less,
+            (ZigVersion::Semver(_), ZigVersion::Master(_)) => Ordering::Less,
+            
+            (ZigVersion::Stable(_), ZigVersion::Semver(_)) => Ordering::Greater,
+            (ZigVersion::Stable(_), ZigVersion::Latest(_)) => Ordering::Less,
+            (ZigVersion::Stable(_), ZigVersion::Master(_)) => Ordering::Less,
+            
+            (ZigVersion::Latest(_), ZigVersion::Semver(_)) => Ordering::Greater,
+            (ZigVersion::Latest(_), ZigVersion::Stable(_)) => Ordering::Greater,
+            (ZigVersion::Latest(_), ZigVersion::Master(_)) => Ordering::Less,
+            
+            (ZigVersion::Master(_), ZigVersion::Semver(_)) => Ordering::Greater,
+            (ZigVersion::Master(_), ZigVersion::Stable(_)) => Ordering::Greater,
+            (ZigVersion::Master(_), ZigVersion::Latest(_)) => Ordering::Greater,
+        }
+    }
+}
+
 impl Serialize for ZigVersion {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        use std::collections::BTreeMap;
+        let version_str = match self {
+            ZigVersion::Semver(version) => version.to_string(),
+            ZigVersion::Master(Some(version))
+            | ZigVersion::Stable(Some(version))
+            | ZigVersion::Latest(Some(version)) => version.to_string(),
+            ZigVersion::Master(None) | ZigVersion::Stable(None) | ZigVersion::Latest(None) => {
+                return Err(serde::ser::Error::custom(
+                    "Cannot serialize unresolved version",
+                ));
+            }
+        };
 
-        match self {
-            ZigVersion::Semver(version) => {
-                let mut map = BTreeMap::new();
-                map.insert("version", version.to_string());
-                map.serialize(serializer)
-            }
-            ZigVersion::Master(version) => {
-                let mut map = BTreeMap::new();
-                map.insert("master", version.to_string());
-                map.serialize(serializer)
-            }
-            ZigVersion::Stable(version) => {
-                let mut map = BTreeMap::new();
-                map.insert("version", version.to_string());
-                map.serialize(serializer)
-            }
-            ZigVersion::Latest(version) => {
-                let mut map = BTreeMap::new();
-                map.insert("version", version.to_string());
-                map.serialize(serializer)
-            }
-            ZigVersion::Unknown => serializer.serialize_str("unknown"),
-        }
+        serializer.serialize_str(&version_str)
     }
 }
 
@@ -188,55 +246,134 @@ impl<'de> Deserialize<'de> for ZigVersion {
     where
         D: Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum ZigVersionHelper {
-            String(String),
-            Map(std::collections::BTreeMap<String, String>),
-        }
-
-        let helper = ZigVersionHelper::deserialize(deserializer)?;
-
-        match helper {
-            ZigVersionHelper::String(s) => {
-                if s == "unknown" {
-                    Ok(ZigVersion::Unknown)
-                } else {
-                    ZigVersion::from_str(&s).map_err(de::Error::custom)
-                }
-            }
-            ZigVersionHelper::Map(map) => {
-                // Handle master variant
-                if let Some(master_str) = map.get("master") {
-                    let version = Version::parse(master_str).map_err(de::Error::custom)?;
-                    return Ok(ZigVersion::Master(version));
-                }
-
-                // Handle generic "version" key - treat as Semver
-                // (Stable and Latest variants are also serialized with "version" key)
-                if let Some(version_str) = map.get("version") {
-                    let version = Version::parse(version_str).map_err(de::Error::custom)?;
-                    return Ok(ZigVersion::Semver(version));
-                }
-
-                Err(de::Error::custom(
-                    "Invalid version structure: no recognized keys found",
-                ))
-            }
-        }
+        let version_str = String::deserialize(deserializer)?;
+        ZigVersion::from_str(&version_str).map_err(de::Error::custom)
     }
 }
-
-impl ZigVersion {}
 
 impl fmt::Display for ZigVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ZigVersion::Semver(v) => write!(f, "{}", v),
-            ZigVersion::Master(v) => write!(f, "master <{}>", v),
-            ZigVersion::Stable(v) => write!(f, "stable <{}>", v),
-            ZigVersion::Latest(v) => write!(f, "latest <{}>", v),
-            ZigVersion::Unknown => write!(f, "unknown"),
+            ZigVersion::Master(Some(v)) => write!(f, "master <{}>", v),
+            ZigVersion::Master(None) => write!(f, "master <version: unknown>"),
+            ZigVersion::Stable(Some(v)) => write!(f, "stable <{}>", v),
+            ZigVersion::Stable(None) => write!(f, "stable <version: unknown>"),
+            ZigVersion::Latest(Some(v)) => write!(f, "latest <{}>", v),
+            ZigVersion::Latest(None) => write!(f, "latest <version: unknown>"),
         }
+    }
+}
+
+impl From<semver::Version> for ZigVersion {
+    fn from(version: semver::Version) -> Self {
+        ZigVersion::Semver(version)
+    }
+}
+
+impl From<&semver::Version> for ZigVersion {
+    fn from(version: &semver::Version) -> Self {
+        ZigVersion::Semver(version.clone())
+    }
+}
+
+impl fmt::Display for ResolvedZigVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResolvedZigVersion::Semver(v) => write!(f, "{}", v),
+            ResolvedZigVersion::Master(v) => write!(f, "master <{}>", v),
+        }
+    }
+}
+
+impl From<Version> for ResolvedZigVersion {
+    fn from(version: Version) -> Self {
+        ResolvedZigVersion::Semver(version)
+    }
+}
+
+impl From<&Version> for ResolvedZigVersion {
+    fn from(version: &Version) -> Self {
+        ResolvedZigVersion::Semver(version.clone())
+    }
+}
+
+impl ResolvedZigVersion {
+    /// Extracts the version from ResolvedZigVersion variants that contain a Version
+    pub fn version(&self) -> &Version {
+        match self {
+            ResolvedZigVersion::Semver(v) => v,
+            ResolvedZigVersion::Master(v) => v,
+        }
+    }
+
+    /// Returns true if this is a master variant (MasterVersion)
+    pub fn is_master(&self) -> bool {
+        matches!(self, ResolvedZigVersion::Master(_))
+    }
+
+    /// Returns true if this is a semver variant
+    pub fn is_semver(&self) -> bool {
+        matches!(self, ResolvedZigVersion::Semver(_))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolved_zig_version_traits() {
+        let v1 = ResolvedZigVersion::Semver(Version::parse("1.0.0").unwrap());
+        let v2 = ResolvedZigVersion::Semver(Version::parse("1.0.0").unwrap());
+        let v3 = ResolvedZigVersion::Semver(Version::parse("2.0.0").unwrap());
+        let master_version = ResolvedZigVersion::Master(Version::parse("1.5.0").unwrap());
+
+        // Test PartialEq and Eq
+        assert_eq!(v1, v2);
+        assert_ne!(v1, v3);
+        assert_ne!(v1, master_version);
+
+        // Test PartialOrd and Ord
+        assert!(v1 < v3);
+        assert!(v1 < master_version);
+
+        // Test Clone
+        let v1_clone = v1.clone();
+        assert_eq!(v1, v1_clone);
+
+        // Test Hash (by using in a HashSet)
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(v1.clone());
+        set.insert(v2.clone());
+        assert_eq!(set.len(), 1); // v1 and v2 are equal, so only one entry
+    }
+
+    #[test]
+    fn test_resolved_zig_version_display() {
+        let semver = ResolvedZigVersion::Semver(Version::parse("1.0.0").unwrap());
+        let master_version = ResolvedZigVersion::Master(Version::parse("1.5.0").unwrap());
+
+        assert_eq!(format!("{}", semver), "1.0.0");
+        assert_eq!(format!("{}", master_version), "master <1.5.0>");
+    }
+
+    #[test]
+    fn test_resolved_zig_version_methods() {
+        let semver = ResolvedZigVersion::Semver(Version::parse("1.0.0").unwrap());
+        let master_version = ResolvedZigVersion::Master(Version::parse("1.5.0").unwrap());
+
+        // Test version() method
+        assert!(semver.version().is_some());
+        assert!(master_version.version().is_some());
+
+        // Test is_master() method
+        assert!(!semver.is_master());
+        assert!(master_version.is_master());
+
+        // Test is_semver() method
+        assert!(semver.is_semver());
+        assert!(!master_version.is_semver());
     }
 }

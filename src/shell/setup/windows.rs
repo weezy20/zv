@@ -1,6 +1,5 @@
 use std::path::Path;
 use yansi::Paint;
-
 /// Windows PATH Manager for registry-based PATH management
 #[cfg(windows)]
 pub struct WindowsPathManager {
@@ -238,26 +237,6 @@ impl WindowsPathManager {
     pub fn new() -> crate::Result<Self> {
         unreachable!("WindowsPathManager should not be used on non-Windows platforms")
     }
-}
-
-#[cfg(not(windows))]
-pub fn broadcast_environment_change() -> crate::Result<()> {
-    unreachable!("Windows environment broadcast should not be called on non-Windows platforms")
-}
-
-#[cfg(not(windows))]
-pub async fn execute_path_setup_windows(_bin_path: &Path) -> crate::Result<()> {
-    unreachable!("Windows PATH setup should not be called on non-Windows platforms")
-}
-
-#[cfg(not(windows))]
-pub async fn execute_zv_dir_setup_windows(_zv_dir: &Path) -> crate::Result<()> {
-    unreachable!("Windows ZV_DIR setup should not be called on non-Windows platforms")
-}
-
-#[cfg(not(windows))]
-pub async fn check_zv_dir_permanent_windows(_zv_dir: &Path) -> crate::Result<bool> {
-    unreachable!("Windows ZV_DIR check should not be called on non-Windows platforms")
 }
 
 #[cfg(not(windows))]

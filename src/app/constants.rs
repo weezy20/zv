@@ -1,5 +1,5 @@
 pub const ZIG_BASE_DOWNLOAD_URL: &'static str = "https://ziglang.org/download/";
-pub const ZIG_BASE_DOWNLOAD_INDEX: &'static str = "https://ziglang.org/download/index.json";
+pub const ZIG_DOWNLOAD_INDEX_JSON: &'static str = "https://ziglang.org/download/index.json";
 
 pub const ZIG_COMMUNITY_MIRRORS: &'static str =
     "https://ziglang.org/download/community-mirrors.txt";

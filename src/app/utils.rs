@@ -1,35 +1,13 @@
-use crate::tools::canonicalize;
+use crate::{
+    ZigVersion, ZvError,
+    tools::canonicalize,
+    types::{ArchiveExt, Shim},
+};
+use color_eyre::eyre::eyre;
+use indicatif::{ProgressBar, ProgressStyle};
 use same_file::Handle;
 use std::path::{Path, PathBuf};
-
-/// Enum representing the type of shim to detect
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Shim {
-    Zig,
-    Zls,
-}
-
-impl Shim {
-    /// Returns the executable name for this shim
-    fn executable_name(&self) -> &'static str {
-        match self {
-            Shim::Zig => {
-                if cfg!(target_os = "windows") {
-                    "zig.exe"
-                } else {
-                    "zig"
-                }
-            }
-            Shim::Zls => {
-                if cfg!(target_os = "windows") {
-                    "zls.exe"
-                } else {
-                    "zls"
-                }
-            }
-        }
-    }
-}
+use std::time::Duration;
 
 /// Checks if a file is a valid zv shim by comparing it with the current executable
 fn is_zv_shim(shim_path: &Path, current_exe_handle: &Handle) -> bool {
@@ -77,7 +55,7 @@ pub fn detect_shim(bin_path: &Path, shim: Shim) -> Option<PathBuf> {
     let shim_file = bin_path.join(shim.executable_name());
 
     // Basic existence and file type check
-    if !shim_file.exists() || !shim_file.is_file() {
+    if !shim_file.is_file() {
         return None;
     }
 
@@ -123,5 +101,240 @@ pub fn detect_shim(bin_path: &Path, shim: Shim) -> Option<PathBuf> {
             shim_file
         );
         None
+    }
+}
+
+/// Construct the zig tarball name based on HOST arch, os. zig 0.14.1 onwards, the naming convention changed
+/// to {arch}-{os}-{version}
+pub fn zig_tarball(
+    semver_version: &semver::Version,
+    extension: Option<ArchiveExt>,
+) -> Option<String> {
+    use target_lexicon::HOST;
+    let arch = match HOST.architecture {
+        target_lexicon::Architecture::X86_64 => "x86_64",
+        target_lexicon::Architecture::Aarch64(_) => "aarch64",
+        target_lexicon::Architecture::X86_32(_) => "x86",
+        target_lexicon::Architecture::Arm(_) => "arm",
+        target_lexicon::Architecture::Riscv64(_) => "riscv64",
+        target_lexicon::Architecture::Powerpc64 => "powerpc64",
+        target_lexicon::Architecture::Powerpc64le => "powerpc64le",
+        target_lexicon::Architecture::S390x => "s390x",
+        target_lexicon::Architecture::LoongArch64 => "loongarch64",
+        _ => return None,
+    };
+
+    let os = match HOST.operating_system {
+        target_lexicon::OperatingSystem::Linux => "linux",
+        target_lexicon::OperatingSystem::Darwin(_) => "macos",
+        target_lexicon::OperatingSystem::Windows => "windows",
+        target_lexicon::OperatingSystem::Freebsd => "freebsd",
+        target_lexicon::OperatingSystem::Netbsd => "netbsd",
+        _ => return None,
+    };
+    let ext = if let Some(ext) = extension {
+        ext
+    } else if HOST.operating_system == target_lexicon::OperatingSystem::Windows {
+        ArchiveExt::Zip
+    } else {
+        ArchiveExt::TarXz
+    };
+    if semver_version.le(&semver::Version::new(0, 14, 0)) {
+        return Some(format!("zig-{os}-{arch}-{semver_version}.{ext}"));
+    } else {
+        return Some(format!("zig-{arch}-{os}-{semver_version}.{ext}"));
+    }
+}
+
+/// Returns the host target string in the format used by Zig releases
+pub fn host_target() -> Option<String> {
+    use target_lexicon::HOST;
+
+    let arch = match HOST.architecture {
+        target_lexicon::Architecture::X86_64 => "x86_64",
+        target_lexicon::Architecture::Aarch64(_) => "aarch64",
+        target_lexicon::Architecture::X86_32(_) => "x86",
+        target_lexicon::Architecture::Arm(_) => "arm",
+        target_lexicon::Architecture::Riscv64(_) => "riscv64",
+        target_lexicon::Architecture::Powerpc64 => "powerpc64",
+        target_lexicon::Architecture::Powerpc64le => "powerpc64le",
+        target_lexicon::Architecture::S390x => "s390x",
+        target_lexicon::Architecture::LoongArch64 => "loongarch64",
+        _ => return None,
+    };
+
+    let os = match HOST.operating_system {
+        target_lexicon::OperatingSystem::Linux => "linux",
+        target_lexicon::OperatingSystem::Darwin(_) => "macos",
+        target_lexicon::OperatingSystem::Windows => "windows",
+        target_lexicon::OperatingSystem::Freebsd => "freebsd",
+        target_lexicon::OperatingSystem::Netbsd => "netbsd",
+        _ => return None,
+    };
+
+    Some(format!("{arch}-{os}"))
+}
+
+/// User-Agent string for network requests
+pub const fn zv_agent() -> &'static str {
+    concat!("zv-cli/", env!("CARGO_PKG_VERSION"))
+}
+
+/// Messages that can be sent to the progress bar actor
+#[derive(Debug, Clone)]
+pub enum ProgressMessage {
+    Start { message: String },
+    Update { message: String },
+    Finish { message: String },
+    FinishWithError { message: String },
+    Shutdown,
+}
+
+/// Progress bar actor that runs in its own thread
+struct ProgressActor {
+    rx: tokio::sync::mpsc::Receiver<ProgressMessage>,
+}
+
+impl ProgressActor {
+    fn run(mut self) {
+        let mut spinner: Option<ProgressBar> = None;
+
+        while let Some(msg) = self.rx.blocking_recv() {
+            match msg {
+                ProgressMessage::Start { message } => {
+                    let pb = ProgressBar::new_spinner();
+                    pb.set_style(
+                        ProgressStyle::default_spinner()
+                            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+                            .template("{spinner:.blue} {msg}")
+                            .unwrap(),
+                    );
+                    pb.set_message(message);
+                    pb.enable_steady_tick(Duration::from_millis(120));
+                    spinner = Some(pb);
+                }
+                ProgressMessage::Update { message } => {
+                    if let Some(ref pb) = spinner {
+                        pb.set_message(message);
+                    }
+                }
+                ProgressMessage::Finish { message } => {
+                    if let Some(pb) = spinner.take() {
+                        pb.finish_with_message(message);
+                    }
+                }
+                ProgressMessage::FinishWithError { message } => {
+                    if let Some(pb) = spinner.take() {
+                        pb.finish_with_message(message);
+                    }
+                }
+                ProgressMessage::Shutdown => {
+                    if let Some(pb) = spinner.take() {
+                        pb.finish_and_clear();
+                    }
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Handle to a progress bar actor with automatic cleanup
+pub struct ProgressHandle {
+    tx: tokio::sync::mpsc::Sender<ProgressMessage>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ProgressHandle {
+    /// Spawn a new progress bar actor in its own thread
+    pub fn spawn() -> Self {
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
+
+        let handle = std::thread::spawn(move || {
+            let actor = ProgressActor { rx };
+            actor.run();
+        });
+
+        Self {
+            tx,
+            handle: Some(handle),
+        }
+    }
+
+    /// Send a message to the progress bar actor
+    pub async fn send(
+        &self,
+        msg: ProgressMessage,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<ProgressMessage>> {
+        self.tx.send(msg).await
+    }
+
+    /// Start the progress bar with a message
+    pub async fn start(
+        &self,
+        message: impl Into<String>,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<ProgressMessage>> {
+        self.send(ProgressMessage::Start {
+            message: message.into(),
+        })
+        .await
+    }
+
+    /// Update the progress bar message
+    pub async fn update(
+        &self,
+        message: impl Into<String>,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<ProgressMessage>> {
+        self.send(ProgressMessage::Update {
+            message: message.into(),
+        })
+        .await
+    }
+
+    /// Finish the progress bar with a success message
+    pub async fn finish(
+        &self,
+        message: impl Into<String>,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<ProgressMessage>> {
+        self.send(ProgressMessage::Finish {
+            message: message.into(),
+        })
+        .await
+    }
+
+    /// Finish the progress bar with an error message
+    pub async fn finish_with_error(
+        &self,
+        message: impl Into<String>,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<ProgressMessage>> {
+        self.send(ProgressMessage::FinishWithError {
+            message: message.into(),
+        })
+        .await
+    }
+
+    /// Manually shutdown the progress bar (usually not needed due to Drop)
+    pub async fn shutdown(mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.tx.send(ProgressMessage::Shutdown).await?;
+
+        if let Some(handle) = self.handle.take() {
+            handle
+                .join()
+                .map_err(|_| "Failed to join progress thread")?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Drop for ProgressHandle {
+    fn drop(&mut self) {
+        // Send shutdown message (ignore errors as channel might be closed)
+        let _ = self.tx.try_send(ProgressMessage::Shutdown);
+
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+            tracing::debug!(target: "app::util", "Dropped ProgessHandle");
+        }
     }
 }

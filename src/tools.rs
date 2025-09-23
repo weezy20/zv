@@ -1,11 +1,13 @@
-use crate::{ZigVersion, ZvError};
+use crate::{
+    ZvError,
+};
 use color_eyre::{
-    Context as _, Result,
+    Result,
     eyre::{WrapErr, bail, eyre},
 };
 use std::{
     borrow::Cow,
-    fs, io,
+    io,
     path::{Path, PathBuf},
 };
 use yansi::Paint;
@@ -147,48 +149,6 @@ pub fn error(message: impl Into<Cow<'static, str>>) {
     eprintln!("{}: {}", "Error".red().bold(), msg);
 }
 
-/// Get the zig tarball name based on HOST arch-os
-pub fn zig_tarball(version: ZigVersion) -> Option<String> {
-    use target_lexicon::HOST;
-    // Return None for Unknown variant
-    let semver_version = match version {
-        ZigVersion::Semver(v) => v,
-        ZigVersion::Master(v) => v,
-        ZigVersion::Stable(v) => v,
-        ZigVersion::Latest(v) => v,
-        ZigVersion::Unknown => return None,
-    };
-
-    let arch = match HOST.architecture {
-        target_lexicon::Architecture::X86_64 => "x86_64",
-        target_lexicon::Architecture::Aarch64(_) => "aarch64",
-        target_lexicon::Architecture::X86_32(_) => "x86",
-        target_lexicon::Architecture::Arm(_) => "arm",
-        target_lexicon::Architecture::Riscv64(_) => "riscv64",
-        target_lexicon::Architecture::Powerpc64 => "powerpc64",
-        target_lexicon::Architecture::Powerpc64le => "powerpc64le",
-        target_lexicon::Architecture::S390x => "s390x",
-        target_lexicon::Architecture::LoongArch64 => "loongarch64",
-        _ => return None,
-    };
-
-    let os = match HOST.operating_system {
-        target_lexicon::OperatingSystem::Linux => "linux",
-        target_lexicon::OperatingSystem::Darwin(_) => "macos",
-        target_lexicon::OperatingSystem::Windows => "windows",
-        target_lexicon::OperatingSystem::Freebsd => "freebsd",
-        target_lexicon::OperatingSystem::Netbsd => "netbsd",
-        _ => return None,
-    };
-    let ext = if cfg!(target_os = "windows") {
-        "zip"
-    } else {
-        "tar.xz"
-    };
-
-    Some(format!("zig-{os}-{arch}-{semver_version}.{ext}"))
-}
-
 /// Calculate CRC32 hash of a file
 pub fn calculate_file_hash(path: &Path) -> Result<u32> {
     use crc32fast::Hasher;
@@ -224,25 +184,3 @@ pub fn files_have_same_hash(path1: &Path, path2: &Path) -> Result<bool> {
     Ok(calculate_file_hash(path1)? == calculate_file_hash(path2)?)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_zig_tarball_constructs_expected_filename() {
-        let version =
-            ZigVersion::Semver(semver::Version::parse("0.16.0-dev.65+ca2e17e0a").unwrap());
-        let result = zig_tarball(version);
-
-        // The exact result depends on the host architecture and OS
-        // but should contain the version string and .tar.xz extension
-        if let Some(tarball_name) = result {
-            assert!(tarball_name.contains("0.16.0-dev.65+ca2e17e0a"));
-            #[cfg(not(target_os = "windows"))]
-            assert!(tarball_name.ends_with(".tar.xz"));
-            #[cfg(target_os = "windows")]
-            assert!(tarball_name.ends_with(".zip"));
-            assert!(tarball_name.starts_with("zig-"));
-        }
-    }
-}
