@@ -4,7 +4,7 @@ use super::models::{ArtifactInfo, CacheZigIndex, NetworkZigIndex, ZigIndex, ZigR
 use crate::{
     CfgErr, NetErr, ZigVersion, ZvError,
     app::{
-        INDEX_TTL_DAYS, FETCH_TIMEOUT_SECS,
+        FETCH_TIMEOUT_SECS, INDEX_TTL_DAYS,
         constants::ZIG_DOWNLOAD_INDEX_JSON,
         network::{CacheStrategy, TARGET},
     },

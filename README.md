@@ -105,6 +105,7 @@ I hope you enjoy using it! ♥
 
 
 ---
+### Customizing ZV behaviour:
 
 ### 🔧 Environment Variables for customizing zv
 
@@ -119,3 +120,5 @@ I hope you enjoy using it! ♥
 
 ---
 
+
+If you prefer some mirrors to others, you can put it as `rank = 1` on your preferred mirrors (Default is rank 1 for all mirros) or lower the rank of mirrors that you don't want. `rank` is a range from 1..255, lower is better and more preferred when doing random selection. The mirrors file is generated at `<ZV_DIR>/mirrors.toml`

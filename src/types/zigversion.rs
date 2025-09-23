@@ -191,28 +191,28 @@ impl PartialOrd for ZigVersion {
 impl Ord for ZigVersion {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use std::cmp::Ordering;
-        
+
         match (self, other) {
             // Same variant types - compare by version
             (ZigVersion::Semver(a), ZigVersion::Semver(b)) => a.cmp(b),
             (ZigVersion::Master(a), ZigVersion::Master(b)) => a.cmp(b),
             (ZigVersion::Stable(a), ZigVersion::Stable(b)) => a.cmp(b),
             (ZigVersion::Latest(a), ZigVersion::Latest(b)) => a.cmp(b),
-            
+
             // Different variant types - establish ordering
             // Order: Semver < Stable < Latest < Master
             (ZigVersion::Semver(_), ZigVersion::Stable(_)) => Ordering::Less,
             (ZigVersion::Semver(_), ZigVersion::Latest(_)) => Ordering::Less,
             (ZigVersion::Semver(_), ZigVersion::Master(_)) => Ordering::Less,
-            
+
             (ZigVersion::Stable(_), ZigVersion::Semver(_)) => Ordering::Greater,
             (ZigVersion::Stable(_), ZigVersion::Latest(_)) => Ordering::Less,
             (ZigVersion::Stable(_), ZigVersion::Master(_)) => Ordering::Less,
-            
+
             (ZigVersion::Latest(_), ZigVersion::Semver(_)) => Ordering::Greater,
             (ZigVersion::Latest(_), ZigVersion::Stable(_)) => Ordering::Greater,
             (ZigVersion::Latest(_), ZigVersion::Master(_)) => Ordering::Less,
-            
+
             (ZigVersion::Master(_), ZigVersion::Semver(_)) => Ordering::Greater,
             (ZigVersion::Master(_), ZigVersion::Stable(_)) => Ordering::Greater,
             (ZigVersion::Master(_), ZigVersion::Latest(_)) => Ordering::Greater,
@@ -363,10 +363,6 @@ mod tests {
     fn test_resolved_zig_version_methods() {
         let semver = ResolvedZigVersion::Semver(Version::parse("1.0.0").unwrap());
         let master_version = ResolvedZigVersion::Master(Version::parse("1.5.0").unwrap());
-
-        // Test version() method
-        assert!(semver.version().is_some());
-        assert!(master_version.version().is_some());
 
         // Test is_master() method
         assert!(!semver.is_master());

@@ -378,9 +378,6 @@ pub enum NetErr {
     #[error("Reqwest error")]
     Reqwest(#[source] reqwest::Error),
 
-    #[error("Reqwest middleware error: {0}")]
-    ReqwestMiddleware(#[source] reqwest_middleware::Error),
-
     #[error("Download timeout: {0}")]
     Timeout(String),
 
@@ -404,6 +401,12 @@ pub enum NetErr {
 
     #[error("TOML serialize error: {0}")]
     TomlSerialize(#[source] toml::ser::Error),
+
+    #[error("Failed to save cache: {0}")]
+    CacheSaveFail(String),
+
+    #[error("Mirror not found: {0}")]
+    MirrorNotFound(String),
 
     #[error(transparent)]
     Other(#[from] Report),
