@@ -377,6 +377,7 @@ impl TryFrom<&str> for Mirror {
         let layout = match base_url.as_str() {
             u if u.contains("zig.florent.dev") => Layout::Flat,
             u if u.contains("zig.squirl.dev") => Layout::Flat,
+            u if u.contains("zigmirror.meox.dev") => Layout::Flat,
             _ => Layout::Versioned,
         };
 
