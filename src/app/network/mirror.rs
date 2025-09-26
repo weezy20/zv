@@ -179,17 +179,17 @@ impl Mirror {
                 tracing::info!(target: TARGET, "Proceeding to checksum verification...");
             }
             Err(net_err) => {
-                tracing::error!(target: TARGET, "Tarball download failed from mirror {}: {}", self.base_url, net_err);
+                tracing::trace!(target: TARGET, "Tarball download failed from mirror {}: {}", self.base_url, net_err);
 
                 match net_err {
                     crate::NetErr::HTTP(status) => {
-                        tracing::error!(target: TARGET, "HTTP error {} during tarball download - mirror may be experiencing issues", status);
+                        tracing::trace!(target: TARGET, "HTTP error {} during tarball download - mirror may be experiencing issues", status);
                     }
                     crate::NetErr::Timeout(_) => {
-                        tracing::error!(target: TARGET, "Timeout during tarball download - network or mirror performance issues");
+                        tracing::trace!(target: TARGET, "Timeout during tarball download - network or mirror performance issues");
                     }
                     _ => {
-                        tracing::error!(target: TARGET, "Network error during tarball download: {}", net_err);
+                        tracing::trace!(target: TARGET, "Network error during tarball download: {}", net_err);
                     }
                 }
 

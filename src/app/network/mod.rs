@@ -141,8 +141,8 @@ impl ZvNetwork {
         use crate::app::MAX_RETRIES;
         const TARGET: &str = "zv::network::download_version";
         tracing::info!(target: TARGET,
-            "Starting download: {zig_tarball} (version: {semver_version}, size: {size} MB, checksum: {shasum})",
-            size = (download_artifact.size / 1024 * 1024), shasum = download_artifact.shasum);
+            "Starting download: {zig_tarball} (version: {semver_version}, size: {size} bytes, checksum: {shasum})",shasum = download_artifact.shasum, size = download_artifact.size);
+;
 
         let (shasum, size) = (&download_artifact.shasum, download_artifact.size);
 
@@ -251,10 +251,10 @@ impl ZvNetwork {
                         .await
                     {
                         Ok(()) => {
-                            tracing::debug!(target: TARGET, "Progress handle finished successfully");
+                            tracing::trace!(target: TARGET, "Progress handle finished successfully");
                         }
                         Err(e) => {
-                            tracing::warn!(target: TARGET, "Failed to finish progress handle: {} - This is non-critical", e);
+                            tracing::trace!(target: TARGET, "Failed to finish progress handle: {} - This is non-critical", e);
                         }
                     }
 

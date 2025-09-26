@@ -540,7 +540,7 @@ pub(crate) async fn verify_checksum(
 
     // Compare with expected checksum (case-insensitive)
     if computed_hex.eq_ignore_ascii_case(expected_shasum) {
-        tracing::info!(target: TARGET, "Checksum verification successful for file: {} ({:.1} MB)", 
+        tracing::trace!(target: TARGET, "Checksum verification successful for file: {} ({:.1} MB)", 
                       file_path.display(), total_bytes_read as f64 / 1_048_576.0);
         Ok(())
     } else {
