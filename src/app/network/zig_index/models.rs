@@ -174,6 +174,10 @@ pub struct ZigRelease {
 }
 
 impl ZigRelease {
+    /// Is the version a master variant?
+    pub fn is_master(&self) -> bool {
+        self.version.is_master()
+    }
     /// Create a new ZigRelease
     pub fn new(
         version: ResolvedZigVersion,

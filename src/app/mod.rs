@@ -322,7 +322,6 @@ impl App {
     pub fn check_installed(&self, version: &str, nested: Option<&str>) -> bool {
         self.toolchain_manager.is_version_installed(version, nested)
     }
-
     /// Install the current loaded `to_install` ZigRelease
     pub async fn install_release(&mut self) -> Result<(), ZvError> {
         let zig_release = self.to_install.take().ok_or_else(|| {
@@ -331,6 +330,12 @@ impl App {
             ))
         })?;
         let semver_version = zig_release.resolved_version().version();
+        let zig_tarball = zig_tarball(&semver_version, None).ok_or_else(|| {
+            eyre!(
+                "Could not determine tarball name for Zig version {}",
+                zig_release.version_string()
+            )
+        })?;
         self.ensure_network_with_mirrors().await?;
         let host_target = utils::host_target().ok_or_else(|| {
             eyre!(
@@ -348,17 +353,11 @@ impl App {
                 )
             })
             .map_err(ZvError::ZigNotFound)?;
-        let tarball = zig_tarball(&semver_version, None).ok_or_else(|| {
-            eyre!(
-                "Could not determine tarball name for Zig version {}",
-                zig_release.version_string()
-            )
-        })?;
         let download_result = self
             .network
             .as_mut()
             .unwrap()
-            .download_version(&semver_version, &tarball, download_artifact)
+            .download_version(&semver_version, &zig_tarball, download_artifact)
             .await?;
         // self.toolchain_manager
         //     .install_version(&download_result.tarball_path, &semver_version, None)

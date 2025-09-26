@@ -39,7 +39,8 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
     let set_result = if app.check_installed(&version_string, nesting) {
         // Version is already installed, just set it as active
         app.set_active_version(&resolved_version).await?.to_string()
-    } else {
+    } 
+    else {
         app.install_release().await.wrap_err_with(|| {
             format!(
                 "Failed to download and install Zig version {}",

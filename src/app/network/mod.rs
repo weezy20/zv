@@ -111,14 +111,17 @@ impl ZvNetwork {
         }
         Ok(self.mirror_manager.as_mut().unwrap())
     }
-    fn versions_path(&self) -> PathBuf {
+    pub fn versions_path(&self) -> PathBuf {
         self.base_path.join("versions")
     }
-    fn index_path(&self) -> PathBuf {
+    pub fn index_path(&self) -> PathBuf {
         self.base_path.join("index.toml")
     }
-    fn mirrors_path(&self) -> PathBuf {
+    pub fn mirrors_path(&self) -> PathBuf {
         self.base_path.join("mirrors.toml")
+    }
+    pub fn download_cache_path(&self) -> PathBuf {
+        self.download_cache.clone()
     }
 }
 
