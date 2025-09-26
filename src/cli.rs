@@ -234,7 +234,7 @@ fn print_welcome_message(app: App) {
                     Paint::green("✔ Ready to Use").to_string()
                 } else {
                     format!(
-                        "{}{}",
+                        "{} {}",
                         Paint::red("Not in PATH.").to_string(),
                         "Run ".to_string()
                             + &Paint::blue("zv setup").to_string()
@@ -323,7 +323,11 @@ fn print_welcome_message(app: App) {
     println!();
 
     // Help section
-    println!("{}", Paint::cyan("Usage: zv.exe [COMMAND]"));
+    if cfg!(windows) {
+        println!("{}", Paint::cyan("Usage: zv.exe [COMMAND]"));
+    } else {
+        println!("{}", Paint::cyan("Usage: zv [COMMAND]"));
+    }
     println!();
     println!("{}", Paint::yellow("Commands:").bold());
 

@@ -6,6 +6,7 @@ use crate::{
 use color_eyre::eyre::eyre;
 use indicatif::{ProgressBar, ProgressStyle};
 use same_file::Handle;
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -336,5 +337,231 @@ impl Drop for ProgressHandle {
             let _ = handle.join();
             tracing::debug!(target: "app::util", "Dropped ProgessHandle");
         }
+    }
+}
+
+/// Removes all files in the provided slice of paths.
+/// Skips files that don't exist and logs any deletion errors
+pub async fn remove_files(paths: &[impl AsRef<Path>]) {
+    for path in paths {
+        let path_ref = path.as_ref();
+        const TARGET: &str = "zv::utils::remove_files";
+        // Check if file exists before attempting to remove
+        match tokio::fs::metadata(path_ref).await {
+            Ok(metadata) => {
+                // File exists, attempt to remove it
+                if metadata.is_file() {
+                    if let Err(e) = tokio::fs::remove_file(path_ref).await {
+                        // Only log error if it's not a "file not found" error
+                        // (in case file was deleted between metadata check and removal)
+                        if e.kind() != std::io::ErrorKind::NotFound {
+                            tracing::debug!(
+                                target: TARGET,
+                                "Failed to remove file '{}': {}",
+                                path_ref.display(),
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                // If error is "not found", skip this file
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    // For other metadata errors (permissions, etc.), log the error
+                    tracing::debug!(
+                        target: TARGET,
+                        "Failed to access file '{}': {}",
+                        path_ref.display(),
+                        e
+                    );
+                }
+                // File doesn't exist, skip it
+            }
+        }
+    }
+}
+
+/// Verify SHA-256 checksum of a file
+///
+/// Reads the file and computes its SHA-256 hash, comparing it with the expected checksum.
+/// Returns an error if the checksums don't match or if file reading fails.
+/// Enhanced with comprehensive error handling and detailed logging for debugging.
+pub(crate) async fn verify_checksum(
+    file_path: &Path,
+    expected_shasum: &str,
+) -> Result<(), ZvError> {
+    use tokio::io::AsyncReadExt;
+    const TARGET: &str = "zv::utils::verify_checksum";
+    tracing::debug!(target: TARGET, "Starting checksum verification for file: {}", file_path.display());
+    tracing::debug!(target: TARGET, "Expected SHA-256: {}", expected_shasum);
+
+    // Validate input parameters
+    if expected_shasum.is_empty() {
+        let error_msg = "Expected checksum is empty - cannot verify file integrity";
+        tracing::error!(target: TARGET, "{}", error_msg);
+        return Err(ZvError::General(eyre!(error_msg)));
+    }
+
+    if expected_shasum.len() != 64 {
+        let error_msg = format!(
+            "Expected checksum has invalid length {} (should be 64 hex characters for SHA-256): {}",
+            expected_shasum.len(),
+            expected_shasum
+        );
+        tracing::error!(target: TARGET, "{}", error_msg);
+        return Err(ZvError::General(eyre!(error_msg)));
+    }
+
+    // Validate that expected checksum contains only hex characters
+    if !expected_shasum.chars().all(|c| c.is_ascii_hexdigit()) {
+        let error_msg = format!(
+            "Expected checksum contains non-hexadecimal characters: {}",
+            expected_shasum
+        );
+        tracing::error!(target: TARGET, "{}", error_msg);
+        return Err(ZvError::General(eyre!(error_msg)));
+    }
+
+    // Check if file exists and get metadata
+    let file_metadata = match tokio::fs::metadata(file_path).await {
+        Ok(metadata) => {
+            let file_size = metadata.len();
+            tracing::debug!(target: TARGET, "File size: {} bytes ({:.1} MB)", file_size, file_size as f64 / 1_048_576.0);
+
+            if file_size == 0 {
+                tracing::warn!(target: TARGET, "File is empty - this may indicate a download failure");
+            }
+
+            metadata
+        }
+        Err(e) => {
+            let error_msg = format!(
+                "Failed to read file metadata for checksum verification: {}",
+                file_path.display()
+            );
+            tracing::error!(target: TARGET, "{}: {}", error_msg, e);
+            return Err(ZvError::General(eyre!("{}: {}", error_msg, e)));
+        }
+    };
+
+    // Open the file for reading
+    let mut file = match tokio::fs::File::open(file_path).await {
+        Ok(file) => {
+            tracing::debug!(target: TARGET, "Successfully opened file for checksum verification");
+            file
+        }
+        Err(e) => {
+            let error_msg = format!(
+                "Failed to open file for checksum verification: {}",
+                file_path.display()
+            );
+            tracing::error!(target: TARGET, "{}: {}", error_msg, e);
+
+            // Provide specific error context
+            match e.kind() {
+                std::io::ErrorKind::NotFound => {
+                    tracing::error!(target: TARGET, "File not found - it may have been deleted or moved during verification");
+                }
+                std::io::ErrorKind::PermissionDenied => {
+                    tracing::error!(target: TARGET, "Permission denied - check file read permissions");
+                }
+                _ => {
+                    tracing::error!(target: TARGET, "Unexpected I/O error opening file: {:?}", e.kind());
+                }
+            }
+
+            return Err(ZvError::Io(e));
+        }
+    };
+
+    // Create SHA-256 hasher
+    let mut hasher = <Sha256 as Digest>::new();
+    let mut buffer = [0u8; 8192]; // 8KB buffer for efficient reading
+    let mut total_bytes_read = 0u64;
+    let file_size = file_metadata.len();
+
+    tracing::debug!(target: TARGET, "Starting SHA-256 computation with 8KB buffer");
+
+    // Read file in chunks and update hasher
+    loop {
+        let bytes_read = match file.read(&mut buffer).await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                let error_msg = format!(
+                    "Failed to read file during checksum verification: {}",
+                    file_path.display()
+                );
+                tracing::error!(target: TARGET, "{}: {}", error_msg, e);
+
+                // Provide specific error context
+                match e.kind() {
+                    std::io::ErrorKind::UnexpectedEof => {
+                        tracing::error!(target: TARGET, "Unexpected end of file - file may be truncated or corrupted");
+                    }
+                    std::io::ErrorKind::Interrupted => {
+                        tracing::warn!(target: TARGET, "Read operation interrupted - this is usually recoverable");
+                        continue; // Retry the read operation
+                    }
+                    _ => {
+                        tracing::error!(target: TARGET, "Unexpected I/O error during file read: {:?}", e.kind());
+                    }
+                }
+
+                return Err(ZvError::Io(e));
+            }
+        };
+
+        if bytes_read == 0 {
+            tracing::debug!(target: TARGET, "Reached end of file after reading {} bytes", total_bytes_read);
+            break; // End of file
+        }
+
+        hasher.update(&buffer[..bytes_read]);
+        total_bytes_read += bytes_read as u64;
+    }
+
+    // Verify we read the expected amount of data
+    if total_bytes_read != file_size {
+        let error_msg = format!(
+            "File size mismatch during checksum verification: expected {} bytes, read {} bytes",
+            file_size, total_bytes_read
+        );
+        tracing::error!(target: TARGET, "{}", error_msg);
+        return Err(ZvError::General(eyre!(error_msg)));
+    }
+
+    // Finalize hash and convert to hex string
+    let computed_hash = hasher.finalize();
+    let computed_hex = format!("{:x}", computed_hash);
+
+    tracing::debug!(target: TARGET, "Computed SHA-256: {}", computed_hex);
+    tracing::debug!(target: TARGET, "Checksum computation completed for {} bytes", total_bytes_read);
+
+    // Compare with expected checksum (case-insensitive)
+    if computed_hex.eq_ignore_ascii_case(expected_shasum) {
+        tracing::info!(target: TARGET, "Checksum verification successful for file: {} ({:.1} MB)", 
+                      file_path.display(), total_bytes_read as f64 / 1_048_576.0);
+        Ok(())
+    } else {
+        let error_msg = format!(
+            "Checksum verification failed for file: {}\nFile size: {} bytes ({:.1} MB)\nExpected SHA-256: {}\nComputed SHA-256: {}\nThis indicates file corruption or an incorrect expected checksum",
+            file_path.display(),
+            total_bytes_read,
+            total_bytes_read as f64 / 1_048_576.0,
+            expected_shasum,
+            computed_hex
+        );
+        tracing::error!(target: TARGET, "CHECKSUM MISMATCH: {}", error_msg);
+
+        // Additional debugging information
+        tracing::error!(target: TARGET, "Checksum verification details:");
+        tracing::error!(target: TARGET, "  File: {}", file_path.display());
+        tracing::error!(target: TARGET, "  Size: {} bytes", total_bytes_read);
+        tracing::error!(target: TARGET, "  Expected: {}", expected_shasum);
+        tracing::error!(target: TARGET, "  Computed: {}", computed_hex);
+        tracing::error!(target: TARGET, "  This may indicate network corruption, storage issues, or incorrect metadata");
+
+        Err(ZvError::General(eyre!(error_msg)))
     }
 }

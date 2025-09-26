@@ -3,7 +3,6 @@ use crate::{App, Shell, ZigVersion};
 use color_eyre::eyre::Context as _;
 use yansi::Paint;
 
-
 /// Main setup_shell function that orchestrates the three-phase setup process
 /// This is the public interface that maintains backward compatibility
 

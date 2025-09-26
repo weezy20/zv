@@ -1,8 +1,8 @@
 //! Zig download index representation and management
 
-pub mod models;
 pub mod index;
+pub mod models;
 
 // Re-export types
-pub use models::*;
 pub use index::*;
+pub use models::*;

@@ -5,18 +5,17 @@ pub mod constants;
 pub(crate) mod network;
 pub(crate) mod toolchain;
 pub(crate) mod utils;
+use crate::app::network::ZigRelease;
 use crate::app::utils::zig_tarball;
 use crate::tools::canonicalize;
 use crate::types::*;
 use crate::{Shell, path_utils};
 use color_eyre::eyre::{Context as _, eyre};
 pub use network::CacheStrategy;
-pub use network::ZigRelease;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::{Arc, LazyLock};
 use toolchain::ToolchainManager;
-
 /// 21 days default TTL for index
 pub static INDEX_TTL_DAYS: LazyLock<i64> = LazyLock::new(|| {
     std::env::var("ZV_INDEX_TTL_DAYS")
@@ -37,6 +36,13 @@ pub static FETCH_TIMEOUT_SECS: LazyLock<u64> = LazyLock::new(|| {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(15)
+});
+/// Maximum number of retry attempts for downloads
+pub static MAX_RETRIES: LazyLock<u32> = LazyLock::new(|| {
+    std::env::var("ZV_MAX_RETRIES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3)
 });
 
 /// Zv App State
@@ -318,7 +324,7 @@ impl App {
     }
 
     /// Install the current loaded `to_install` ZigRelease
-    pub async fn install_release(&mut self) -> Result<PathBuf, ZvError> {
+    pub async fn install_release(&mut self) -> Result<(), ZvError> {
         let zig_release = self.to_install.take().ok_or_else(|| {
             ZvError::ZigVersionResolveError(eyre!(
                 "No ZigRelease is currently loaded for installation"
@@ -348,22 +354,22 @@ impl App {
                 zig_release.version_string()
             )
         })?;
-        let download_path = self
+        let download_result = self
             .network
             .as_mut()
             .unwrap()
             .download_version(&semver_version, &tarball, download_artifact)
             .await?;
         // self.toolchain_manager
-        //     .install_version(&download_path, &semver_version, None)
+        //     .install_version(&download_result.tarball_path, &semver_version, None)
         //     .await
         //     .wrap_err_with(|| {
         //         format!(
         //             "Failed to install Zig version {} from archive {:?}",
         //             zig_release.version(),
-        //             download_path
+        //             download_result.tarball_path
         //         )
         //     })?;
-        Ok(download_path)
+        Ok(())
     }
 }

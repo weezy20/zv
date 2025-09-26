@@ -1,7 +1,11 @@
 use crate::{ResolvedZigVersion, ZigVersion, tools};
 use crate::{
     Result, ZvError,
-    app::{App, CacheStrategy, ZigRelease, network::ZigIndex, utils::host_target},
+    app::{
+        App, CacheStrategy,
+        network::{ZigIndex, ZigRelease},
+        utils::host_target,
+    },
 };
 use color_eyre::eyre::{Context, eyre};
 use semver::Version;
@@ -118,7 +122,7 @@ pub async fn resolve_zig_version(
         ZigVersion::Master(None) => {
             let master_release = app.fetch_master_version().await?;
             let master_version = master_release.resolved_version().clone();
-            
+
             // Extract the concrete version from the master release
             match master_version {
                 ResolvedZigVersion::Master(v) => {

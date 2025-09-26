@@ -1,23 +1,29 @@
-use crate::app::FETCH_TIMEOUT_SECS;
 use crate::app::constants::ZIG_DOWNLOAD_INDEX_JSON;
 use crate::app::toolchain::ToolchainManager;
-use crate::app::utils::{ProgressHandle, zv_agent};
+use crate::app::utils::{remove_files, zv_agent, verify_checksum, ProgressHandle};
+use crate::app::{FETCH_TIMEOUT_SECS, MAX_RETRIES};
 use crate::{NetErr, ZigVersion, ZvError, tools};
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use futures::StreamExt;
 use reqwest::Url;
+use sha2::{Digest, Sha256};
 use std::sync::{Arc, LazyLock};
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
+
+use crate::types::{ResolvedZigVersion, TargetTriple};
+use std::collections::{BTreeMap, HashMap};
 use tokio::io::AsyncWriteExt;
 use yansi::Paint;
 mod mirror;
 use mirror::*;
 mod zig_index;
 pub use zig_index::*;
-
+mod download;
+pub use download::*;
+pub use {ZigRelease, ZigIndex, NetworkZigRelease, ArtifactInfo};
 /// Cache strategy for index loading
 #[derive(Debug, Clone, Copy)]
 pub enum CacheStrategy {
@@ -32,6 +38,17 @@ pub enum CacheStrategy {
 }
 
 const TARGET: &str = "zv::network";
+
+/// Result of a successful download operation containing paths to verified files and mirror information
+#[derive(Debug, Clone)]
+pub struct ZigDownload {
+    /// Path to the verified tarball in downloads folder
+    pub tarball_path: PathBuf,
+    /// Path to the minisign signature file
+    pub minisig_path: PathBuf,
+    /// Mirror that was successfully used for the download
+    pub mirror_used: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct ZvNetwork {
@@ -90,7 +107,7 @@ impl ZvNetwork {
                 ZvError::NetworkError(net_err)
             })?;
             self.mirror_manager = Some(mirror_manager);
-            tracing::info!(target: TARGET, "Loaded {} community mirrors", self.mirror_manager.as_mut().unwrap().mirrors().await.unwrap_or(&[]).len());
+            tracing::trace!(target: TARGET, "Loaded {} community mirrors", self.mirror_manager.as_mut().unwrap().all_mirrors_mut().await.unwrap_or(&mut []).len());
         }
         Ok(self.mirror_manager.as_mut().unwrap())
     }
@@ -108,28 +125,219 @@ impl ZvNetwork {
 // === Usage ===
 impl ZvNetwork {
     /// Download a given zig_tarball to the download cache, returns the path to the downloaded file after shasum verification
-    pub async fn download_version(
+    /// alongside minisign file and other relevant details. See [DownloadResult].
+    /// This function implements a comprehensive download system with retry logic, mirror failover,
+    /// integrity verification, and detailed error handling and logging.
+    /// This requires `ensure_mirror_manager()` to have been called first to load mirrors.
+    pub(super) async fn download_version(
         &mut self,
         semver_version: &semver::Version,
         zig_tarball: &str,
         download_artifact: &ArtifactInfo,
-    ) -> Result<PathBuf, ZvError> {
-        let progress_handle = ProgressHandle::spawn();
+    ) -> Result<ZigDownload, ZvError> {
+        use crate::app::MAX_RETRIES;
+        const TARGET: &str = "zv::network::download_version";
+        tracing::info!(target: TARGET,
+            "Starting download: {zig_tarball} (version: {semver_version}, size: {size} MB, checksum: {shasum})",
+            size = (download_artifact.size / 1024 * 1024), shasum = download_artifact.shasum);
+
         let (shasum, size) = (&download_artifact.shasum, download_artifact.size);
-        let manager = self.ensure_mirror_manager().await?;
-        let mut success = false;
-        while !success {
-            let mirror = manager.get_random_mirror().await;
-            if let Err(err) = mirror {
-                tracing::warn!(target: TARGET, "Failed to get mirror: {err}, selecting another");
-                continue;
-            }
-            let mirror = mirror.unwrap();
-            let url = Url::parse(&mirror.get_download_url(semver_version, zig_tarball))
-                .map_err(|e| eyre!("Failed to parse url: {e}"))?;
+
+        // Ensure mirror manager is loaded first. This is already done in app.install_release() so it's an error to not have it loaded
+        // Also, we make sure of this by limiting visibility of this function to app module only
+        if self.mirror_manager.is_none() {
+            Err(NetErr::EmptyMirrors).map_err(ZvError::NetworkError)?;
         }
-        todo!()
+        let mirror_manager = self.mirror_manager.as_mut().unwrap();
+        let temp_dir = self.download_cache.join("tmp");
+        if !temp_dir.exists() {
+            tracing::debug!(target: TARGET, "Creating temporary download directory: {}", temp_dir.display());
+            if let Err(e) = tokio::fs::create_dir_all(&temp_dir).await {
+                tracing::error!(target: TARGET, "Failed to create temporary download directory {}: {}", temp_dir.display(), e);
+                crate::tools::error("Failed to create temporary download directory");
+                return Err(ZvError::Io(e));
+            }
+        }
+
+        let temp_tarball_path = temp_dir.join(format!("{}.tmp", zig_tarball));
+        let temp_minisig_path = temp_dir.join(format!("{}.minisig.tmp", zig_tarball));
+        let final_tarball_path = self.download_cache.join(zig_tarball);
+        let final_minisig_path = self.download_cache.join(format!("{}.minisig", zig_tarball));
+        let progress_handle = ProgressHandle::spawn();
+        let max_retries = *MAX_RETRIES;
+        let mut last_error = None;
+
+        // Clean up any existing temporary files from previous failed attempts
+        remove_files(&[
+            temp_tarball_path.as_path(),
+            temp_minisig_path.as_path()
+        ]).await;
+        let _ = mirror_manager.sort_by_rank().await.map_err(ZvError::NetworkError)?;
+        
+        for attempt in 1..=max_retries {
+            tracing::debug!(target: TARGET, "Download attempt {attempt}/{max_retries} for {zig_tarball} (expected size: {:.1} MB)", size as f64 / 1_048_576.0);
+            // Select mirror based on attempt number
+            let selected_mirror = {
+                    // For subsequent attempts, get ranked mirrors and select the best available
+                    match mirror_manager.get_random_mirror().await
+                    {
+                        Ok(ranked_mirror) => {
+                            ranked_mirror
+                        }
+                        Err(net_err) => {
+                            tracing::error!(target: TARGET, "Failed to get ranked mirror for attempt {attempt}: {net_err}");
+                            last_error = Some(ZvError::NetworkError(net_err));
+                            continue;
+                        }
+                    }
+            }; // end select_mirror
+
+            tracing::debug!(target: TARGET, "Using mirror: {} (rank: {}) for attempt {}/{}", 
+                         selected_mirror.base_url, selected_mirror.rank, attempt, max_retries);
+
+            // Attempt download with this mirror
+            match selected_mirror.download(
+                    &self.client,
+                    semver_version,
+                    zig_tarball,
+                    &temp_tarball_path,
+                    &temp_minisig_path,
+                    shasum,
+                    size,
+                    &progress_handle,
+                )
+                .await {
+                Ok(()) => {
+                    // Download successful, move files to final location
+                    match move_to_final_location(&temp_tarball_path, &final_tarball_path).await {
+                        Ok(()) => {
+                            tracing::trace!(target: TARGET, "Successfully moved tarball to final location: {}", final_tarball_path.display());
+                        }
+                        Err(e) => {
+                            tracing::error!(target: TARGET, "Failed to move tarball from {} to {}: {}", 
+                                          temp_tarball_path.display(), final_tarball_path.display(), e);
+                            let _ = progress_handle
+                                .finish_with_error("Failed to move downloaded files")
+                                .await;
+                            return Err(ZvError::Io(e));
+                        }
+                    }
+
+                    match move_to_final_location(&temp_minisig_path, &final_minisig_path).await {
+                        Ok(()) => {
+                            tracing::trace!(target: TARGET, "Successfully moved minisig to final location: {}", final_minisig_path.display());
+                        }
+                        Err(e) => {
+                            tracing::error!(target: TARGET, "Failed to move minisig from {} to {}: {}", 
+                                          temp_minisig_path.display(), final_minisig_path.display(), e);
+                            let _ = progress_handle
+                                .finish_with_error("Failed to move signature file")
+                                .await;
+                            return Err(ZvError::Io(e));
+                        }
+                    }
+
+                    // Promote the successful mirror and save rankings
+                    let old_rank = selected_mirror.rank;
+                    selected_mirror.promote();
+                    tracing::trace!(target: TARGET, "Promoting successful mirror {} from rank {} to {}", 
+                                 selected_mirror.base_url, old_rank, selected_mirror.rank);
+
+                    match progress_handle
+                        .finish("Download completed successfully")
+                        .await
+                    {
+                        Ok(()) => {
+                            tracing::debug!(target: TARGET, "Progress handle finished successfully");
+                        }
+                        Err(e) => {
+                            tracing::warn!(target: TARGET, "Failed to finish progress handle: {} - This is non-critical", e);
+                        }
+                    }
+
+                    tracing::info!(target: TARGET, "Successfully downloaded {} ({:.1} MB) using mirror {} after {} attempt(s)", 
+                                 zig_tarball, size as f64 / 1_048_576.0, selected_mirror.base_url, attempt);
+
+                    let download_result = ZigDownload {
+                        tarball_path: final_tarball_path,
+                        minisig_path: final_minisig_path,
+                        mirror_used: selected_mirror.base_url.to_string(),
+                    };
+
+                    // Update mirror ranking on disk
+                    if let Err(e) =  mirror_manager.save_index_to_disk().await {
+                        tracing::debug!(target: TARGET, "Failed to update mirror ranking after successful download: {} - Rankings may not persist", e);
+                    } else {
+                        tracing::trace!(target: TARGET, "Successfully updated and persisted mirror rankings");
+                    }
+
+                    return Ok(download_result);
+                }
+                Err(err) => {
+                    tracing::warn!(target: TARGET, "Download attempt {}/{} failed with mirror {} (rank: {}): {}", 
+                                 attempt, max_retries, selected_mirror.base_url, selected_mirror.rank, err);
+                    
+                    // Demote the failed mirror and save rankings
+                    let old_rank = selected_mirror.rank;
+                    selected_mirror.demote();
+                    tracing::debug!(target: TARGET, "Demoting failed mirror {} from rank {} to rank {}", 
+                                 selected_mirror.base_url, old_rank, selected_mirror.rank);
+
+                    // Update mirror ranking
+                    if let Err(e) = mirror_manager.save_index_to_disk().await {
+                        tracing::warn!(target: TARGET, "Failed to update mirror ranking after failure: {} - Mirror performance tracking may be affected", e);
+                    } else {
+                        tracing::debug!(target: TARGET, "Successfully updated mirror rankings after failure");
+                    }
+
+                    // Clean up temporary files after download
+                    remove_files(&[
+                        temp_tarball_path.as_path(),
+                        temp_minisig_path.as_path(),
+                    ]).await;
+
+                    last_error = Some(err.into());
+
+                    // Check if this is the last attempt
+                    if attempt == max_retries {
+                        tracing::error!(target: TARGET, "Final attempt {}/{} failed - no more retries available", attempt, max_retries);
+                        break;
+                    }
+
+                    // Log retry message with context
+                    tracing::info!(target: TARGET, "Will retry download with different mirror (next attempt: {}/{}) after mirror failure", 
+                                 attempt + 1, max_retries);
+                }
+            }
+        }
+
+        // All attempts failed - provide comprehensive error reporting
+        tracing::error!(target: TARGET, "All {} download attempts failed for {} - exhausted all retry options", max_retries, zig_tarball);
+
+        // Ensure progress handle is properly finished with error context
+        match progress_handle.finish_with_error(&format!("Download failed after {} attempts", max_retries)).await {
+            Ok(()) => {
+                tracing::debug!(target: TARGET, "Progress handle finished with error message");
+            }
+            Err(e) => {
+                tracing::warn!(target: TARGET, "Failed to finish progress handle with error: {} - This is non-critical but affects user experience", e);
+            }
+        }
+
+        // Final cleanup attempt for any remaining temporary files
+        remove_files(&[
+            temp_tarball_path.as_path(),
+            temp_minisig_path.as_path(),
+        ]);
+
+        let final_error = last_error.unwrap_or_else(|| {
+            tracing::error!(target: TARGET, "No specific error recorded - this indicates a critical issue with mirror availability");
+            ZvError::NetworkError(crate::NetErr::EmptyMirrors)
+        });
+        Err(final_error)
     }
+
+
 
     /// Checks if the given version is valid by checking it against the index
     pub async fn validate_semver(
@@ -291,11 +499,13 @@ impl ZvNetwork {
                             .ensure_loaded(CacheStrategy::OnlyCache)
                             .await
                         {
-                            Ok(index) => index.get_latest_stable_release().cloned().ok_or_else(|| {
-                                ZvError::ZigVersionResolveError(eyre!(
-                                    "No stable version found in cached index"
-                                ))
-                            }),
+                            Ok(index) => {
+                                index.get_latest_stable_release().cloned().ok_or_else(|| {
+                                    ZvError::ZigVersionResolveError(eyre!(
+                                        "No stable version found in cached index"
+                                    ))
+                                })
+                            }
                             Err(cache_err) => {
                                 tracing::error!(
                                     target: "zv::network::fetch_latest_stable_version",
@@ -325,11 +535,11 @@ pub(crate) fn create_client() -> Result<reqwest::Client> {
         .user_agent(zv_agent())
         .pool_max_idle_per_host(0) // Don't keep idle connections
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(*FETCH_TIMEOUT_SECS))
         .build()
         .map_err(|e| ZvError::NetworkError(NetErr::Reqwest(e)))
         .wrap_err("Failed to build HTTP client")
 }
+
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum PartialFetchError {
@@ -405,9 +615,12 @@ pub(crate) async fn try_partial_fetch_master(
 /// This works by finding the master object boundaries and trying to parse it
 fn try_extract_complete_master(json_text: &str) -> Result<ZigRelease> {
     // Find the start of the master object
-    let master_start = json_text
-        .find(r#""master":"#)
-        .ok_or_else(|| eyre!("Could not find master key in partial JSON (length: {})", json_text.len()))?;
+    let master_start = json_text.find(r#""master":"#).ok_or_else(|| {
+        eyre!(
+            "Could not find master key in partial JSON (length: {})",
+            json_text.len()
+        )
+    })?;
 
     // Find the opening brace after "master":
     let after_master_key = &json_text[master_start + 8..]; // Skip past "master"
@@ -463,13 +676,13 @@ fn try_extract_complete_master(json_text: &str) -> Result<ZigRelease> {
     let master_json = &after_colon[..end_pos];
 
     // Try to parse the extracted JSON as a NetworkZigRelease and convert to ZigRelease
-    use crate::app::network::zig_index::models::{NetworkZigRelease, ZigRelease, ZigIndex, ArtifactInfo};
-    use crate::types::{TargetTriple, ResolvedZigVersion};
-    use std::collections::{HashMap, BTreeMap};
-    
-    let network_release: NetworkZigRelease = serde_json::from_str(master_json)
-        .map_err(|e| eyre!("Failed to parse extracted master JSON (length: {}): {e}", master_json.len()))?;
-    
+    let network_release: NetworkZigRelease = serde_json::from_str(master_json).map_err(|e| {
+        eyre!(
+            "Failed to parse extracted master JSON (length: {}): {e}",
+            master_json.len()
+        )
+    })?;
+
     // Convert to ZigRelease
     let resolved_version = if let Some(version_str) = &network_release.version {
         match semver::Version::parse(version_str) {
@@ -477,15 +690,14 @@ fn try_extract_complete_master(json_text: &str) -> Result<ZigRelease> {
             Err(_) => {
                 tracing::warn!("Failed to parse master version: {}", version_str);
                 return Err(eyre!(
-                    "Master version without valid semver: {}", version_str
+                    "Master version without valid semver: {}",
+                    version_str
                 ));
             }
         }
     } else {
         tracing::warn!("Master release found without version information");
-        return Err(eyre!(
-            "Master release missing version information"
-        ));
+        return Err(eyre!("Master release missing version information"));
     };
 
     // Convert network artifacts to runtime artifacts
@@ -503,11 +715,7 @@ fn try_extract_complete_master(json_text: &str) -> Result<ZigRelease> {
         }
     }
 
-    let master_release = ZigRelease::new(
-        resolved_version,
-        network_release.date,
-        runtime_artifacts,
-    );
+    let master_release = ZigRelease::new(resolved_version, network_release.date, runtime_artifacts);
 
     Ok(master_release)
 }

@@ -52,14 +52,17 @@ use std::{
 use super::{CacheStrategy, TARGET};
 use crate::{
     CfgErr, NetErr, ZvError,
-    app::{MIRRORS_TTL_DAYS, constants::ZIG_COMMUNITY_MIRRORS, utils::zv_agent},
+    app::{
+        MIRRORS_TTL_DAYS,
+        constants::ZIG_COMMUNITY_MIRRORS,
+        network::download_file_with_retries_standalone,
+        utils::{ProgressHandle, verify_checksum, zv_agent},
+    },
 };
 use chrono::{DateTime, Utc};
-use color_eyre::eyre::{Result, WrapErr};
+use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use rand::{Rng, prelude::IndexedRandom};
 use reqwest::Client;
-use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
-use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -103,7 +106,6 @@ impl From<&str> for Layout {
 pub struct Mirror {
     pub base_url: Url,
     pub layout: Layout,
-    #[serde(skip)]
     pub rank: u8,
 }
 
@@ -112,6 +114,207 @@ pub struct Mirror {
 // ============================================================================
 
 impl Mirror {
+    /// Attempt to download both tarball and minisig files using this mirror
+    ///
+    /// # Arguments
+    ///
+    /// * `client` - HTTP client for making requests
+    /// * `semver_version` - Version to download
+    /// * `zig_tarball` - Name of the tarball file
+    /// * `tarball_path` - Path where tarball should be saved
+    /// * `minisig_path` - Path where minisig file should be saved
+    /// * `expected_shasum` - Expected SHA256 checksum for verification
+    /// * `expected_size` - Expected size of the tarball in bytes
+    /// * `progress_handle` - Handle for progress reporting
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if both files are successfully downloaded and verified, otherwise returns
+    /// the appropriate `ZvError` with detailed context about the failure.
+    pub async fn download(
+        &self,
+        client: &reqwest::Client,
+        semver_version: &semver::Version,
+        zig_tarball: &str,
+        tarball_path: &Path,
+        minisig_path: &Path,
+        expected_shasum: &str,
+        expected_size: u64,
+        progress_handle: &ProgressHandle,
+    ) -> Result<()> {
+        const TARGET: &'static str = "zv::network::mirror::download";
+        tracing::info!(target: TARGET, "Starting download with mirror: {} (rank: {})", self.base_url, self.rank);
+
+        // Get download URLs
+        let tarball_url = self.get_download_url(semver_version, zig_tarball);
+        let minisig_filename = format!("{}.minisig", zig_tarball);
+        let minisig_url = self.get_download_url(semver_version, &minisig_filename);
+
+        tracing::trace!(target: TARGET, "Download URLs configured:");
+        tracing::trace!(target: TARGET, "  Tarball: {}", tarball_url);
+        tracing::trace!(target: TARGET, "  Minisig:  {}", minisig_url);
+        tracing::trace!(target: TARGET, "  Expected size: {} bytes ({:.1} MB)", expected_size, expected_size as f64 / 1_048_576.0);
+        tracing::trace!(target: TARGET, "  Expected checksum: {}", expected_shasum);
+
+        // Initialize progress reporting
+        let progress_msg = format!("Downloading {} from {}", zig_tarball, self.base_url);
+        match progress_handle.start(&progress_msg).await {
+            Ok(()) => {}
+            Err(e) => {
+                tracing::debug!(target: TARGET, "Failed to start progress reporting: {} - continuing without progress updates", e);
+            }
+        };
+
+        // Phase 1: Download tarball
+        match download_file_with_retries_standalone(
+            client,
+            &tarball_url,
+            tarball_path,
+            expected_size,
+            progress_handle,
+        )
+        .await
+        {
+            Ok(()) => {
+                tracing::info!(target: TARGET, "Proceeding to checksum verification...");
+            }
+            Err(net_err) => {
+                tracing::error!(target: TARGET, "Tarball download failed from mirror {}: {}", self.base_url, net_err);
+
+                match net_err {
+                    crate::NetErr::HTTP(status) => {
+                        tracing::error!(target: TARGET, "HTTP error {} during tarball download - mirror may be experiencing issues", status);
+                    }
+                    crate::NetErr::Timeout(_) => {
+                        tracing::error!(target: TARGET, "Timeout during tarball download - network or mirror performance issues");
+                    }
+                    _ => {
+                        tracing::error!(target: TARGET, "Network error during tarball download: {}", net_err);
+                    }
+                }
+
+                bail!(net_err);
+            }
+        }
+
+        // Phase 2: Verify checksum
+        tracing::info!(target: TARGET, "Verifying tarball integrity");
+        match verify_checksum(tarball_path, expected_shasum).await {
+            Ok(()) => {
+                tracing::info!(target: TARGET, "Checksum verification successful");
+            }
+            Err(e) => {
+                tracing::error!(target: TARGET, "Checksum verification failed for tarball from mirror {}: {}", self.base_url, e);
+                // Clean up the corrupted file
+                if tarball_path.exists() {
+                    if let Err(cleanup_err) = tokio::fs::remove_file(tarball_path).await {
+                        tracing::warn!(target: TARGET, "Failed to remove corrupted tarball file: {}", cleanup_err);
+                    } else {
+                        tracing::debug!(target: TARGET, "Removed corrupted tarball file");
+                    }
+                }
+                bail!(e);
+            }
+        }
+
+        // Phase 3: Download minisig file
+        tracing::info!(target: TARGET, "Downloading signature file from {}", minisig_url);
+        match progress_handle
+            .update("Downloading signature file...")
+            .await
+        {
+            Ok(()) => {
+                tracing::debug!(target: TARGET, "Progress updated for minisig download");
+            }
+            Err(e) => {
+                tracing::warn!(target: TARGET, "Failed to update progress for minisig download: {} - continuing", e);
+            }
+        }
+
+        // For minisig, we don't have size info, so use 0
+        match download_file_with_retries_standalone(
+            client,
+            &minisig_url,
+            minisig_path,
+            0,
+            progress_handle,
+        )
+        .await
+        {
+            Ok(()) => {
+                tracing::info!(target: TARGET, "Minisig download completed successfully");
+            }
+            Err(net_err) => {
+                tracing::error!(target: TARGET, "Minisig download failed from mirror {}: {}", self.base_url, net_err);
+
+                // Provide context about the failure
+                match net_err {
+                    NetErr::HTTP(status) => {
+                        tracing::error!(target: TARGET, "HTTP error {} during minisig download - signature file may not exist on this mirror", status);
+                    }
+                    NetErr::Timeout(_) => {
+                        tracing::error!(target: TARGET, "Timeout during minisig download - network or mirror performance issues");
+                    }
+                    _ => {
+                        tracing::error!(target: TARGET, "Network error during minisig download: {}", net_err);
+                    }
+                }
+
+                // Clean up the tarball since we couldn't get the signature
+                if tarball_path.exists() {
+                    if let Err(cleanup_err) = tokio::fs::remove_file(tarball_path).await {
+                        tracing::trace!(target: TARGET, "Failed to remove tarball after minisig failure: {}", cleanup_err);
+                    } else {
+                        tracing::trace!(target: TARGET, "Cleaned up tarball after minisig download failure");
+                    }
+                }
+                bail!(net_err);
+            }
+        }
+
+        // Verify both files exist and have reasonable sizes
+        let tarball_size = match tokio::fs::metadata(tarball_path).await {
+            Ok(metadata) => {
+                let size = metadata.len();
+                tracing::debug!(target: TARGET, "Final tarball size: {} bytes ({:.1} MB)", size, size as f64 / 1_048_576.0);
+
+                if size != expected_size {
+                    tracing::warn!(target: TARGET, "Tarball size {} doesn't match expected size {} - this may indicate an issue", size, expected_size);
+                }
+
+                size
+            }
+            Err(e) => {
+                tracing::error!(target: TARGET, "Failed to verify final tarball file: {}", e);
+                bail!(ZvError::Io(e));
+            }
+        };
+
+        let minisig_size = match tokio::fs::metadata(minisig_path).await {
+            Ok(metadata) => {
+                let size = metadata.len();
+                tracing::debug!(target: TARGET, "Final minisig size: {} bytes", size);
+
+                if size == 0 {
+                    tracing::warn!(target: TARGET, "Minisig file is empty - this may indicate a download issue");
+                } else if size > 1024 {
+                    tracing::warn!(target: TARGET, "Minisig file is unusually large ({} bytes) - this may indicate an error page was downloaded", size);
+                }
+
+                size
+            }
+            Err(e) => {
+                tracing::error!(target: TARGET, "Failed to verify final minisig file: {}", e);
+                bail!(ZvError::Io(e));
+            }
+        };
+
+        tracing::info!(target: TARGET, "Download attempt completed successfully with mirror {} - tarball: {:.1} MB, minisig: {} bytes", 
+                     self.base_url, tarball_size as f64 / 1_048_576.0, minisig_size);
+
+        Ok(())
+    }
+
     /// Get the primary download URL based on layout
     pub fn get_download_url(&self, version: &Version, tarball: &str) -> String {
         match self.layout {
@@ -200,7 +403,7 @@ pub struct MirrorsIndex {
 
 impl MirrorsIndex {
     /// Create a new index with current timestamp
-    fn new(mirrors: Vec<Mirror>) -> Self {
+    pub fn new(mirrors: Vec<Mirror>) -> Self {
         Self {
             mirrors,
             last_synced: Utc::now(),
@@ -254,8 +457,6 @@ impl MirrorsIndex {
 pub struct MirrorManager {
     /// HTTP client for network requests
     client: Client,
-    /// Retry client for downloads
-    retry_client: Option<ClientWithMiddleware>,
     /// Currently loaded mirrors
     mirrors: Vec<Mirror>,
     /// Cached mirrors index (lazy loaded)
@@ -272,7 +473,6 @@ impl MirrorManager {
     pub fn new(cache_path: impl AsRef<Path>) -> Result<Self> {
         Ok(Self {
             client: super::create_client()?,
-            retry_client: None,
             mirrors: Vec::with_capacity(7), // 7 mirrors listed as of September 2025
             mirrors_index: None,
             cache_path: cache_path.as_ref().to_path_buf(),
@@ -433,25 +633,23 @@ impl MirrorManager {
     // MIRROR MANAGER - PUBLIC API
     // ============================================================================
     /// Get all available mirrors from MirrorManager.mirrors (loading if needed)
-    pub async fn mirrors(&mut self) -> Result<&[Mirror], NetErr> {
+    pub async fn all_mirrors_mut(&mut self) -> Result<&mut [Mirror], NetErr> {
         if self.mirrors.is_empty() {
             self.ensure_mirrors_loaded().await?;
         }
-        Ok(&self.mirrors)
+        Ok(&mut self.mirrors)
     }
     /// Get a random mirror for load balancing, preferring lower rank
-    pub async fn get_random_mirror(&mut self) -> Result<&Mirror, NetErr> {
+    pub async fn get_random_mirror(&mut self) -> Result<&mut Mirror, NetErr> {
         use rand::Rng;
-
-        let mirrors = self.get_ranked_mirrors().await?;
-
+        let mirrors = self.all_mirrors_mut().await?;
         if mirrors.is_empty() {
             return Err(NetErr::EmptyMirrors);
         }
 
         // If only one mirror, return it
         if mirrors.len() == 1 {
-            return Ok(&mirrors[0]);
+            return Ok(&mut mirrors[0]);
         }
 
         // Calculate weights inversely proportional to rank
@@ -469,22 +667,45 @@ impl MirrorManager {
         for (i, &weight) in weights.iter().enumerate() {
             random_weight -= weight;
             if random_weight <= 0.0 {
-                return Ok(&mirrors[i]);
+                return Ok(&mut mirrors[i]);
             }
         }
 
         // Fallback to first mirror (should not happen with correct weights)
-        Ok(&mirrors[0])
+        Ok(&mut mirrors[0])
     }
-    /// Get mirrors ordered by rank
-    pub async fn get_ranked_mirrors(&mut self) -> Result<Vec<&Mirror>, NetErr> {
-        let mirrors = self.mirrors().await?;
-        let mut ranked: Vec<&Mirror> = mirrors.iter().collect();
-        ranked.sort_by_key(|m| m.rank);
-        Ok(ranked)
+    /// Sort mirrors by rank and return mutable reference to the sorted mirror list
+    pub async fn sort_by_rank(&mut self) -> Result<&mut Vec<Mirror>, NetErr> {
+        let mirrors = self.all_mirrors_mut().await?;
+        mirrors.sort_by_key(|m| m.rank);
+        Ok(&mut self.mirrors)
     }
-    /// Get the cache path
-    pub fn cache_path(&self) -> &Path {
+    /// Get the mirrors.toml path
+    pub fn mirrors_toml(&self) -> &Path {
         &self.cache_path
+    }
+    /// Save the current mirrors to disk (overwriting existing cache)
+    /// If no mirrors are loaded, we return EmptyMirrors error
+    pub async fn save_index_to_disk(&mut self) -> Result<(), NetErr> {
+        // Ensure we have mirrors loaded
+        if self.mirrors.is_empty() {
+            tracing::debug!(target: TARGET, "No mirrors loaded, cannot save index to disk");
+            Err(NetErr::EmptyMirrors)?;
+        }
+
+        // Create a fresh index with current mirrors and timestamp
+        let index = MirrorsIndex::new(self.mirrors.clone());
+
+        // Save to disk
+        index.save(&self.cache_path).await.map_err(|cfg_err| {
+            tracing::error!(target: TARGET, "Failed to save mirrors index to disk: {}", cfg_err);
+            NetErr::Other(cfg_err.into())
+        })?;
+
+        // Update our cached index
+        self.mirrors_index = Some(index);
+
+        tracing::debug!(target: TARGET, "Successfully saved mirrors index to {}", self.cache_path.display());
+        Ok(())
     }
 }

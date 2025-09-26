@@ -3,11 +3,11 @@
 pub mod error;
 pub use error::*;
 
-mod zigversion;
 mod target_triple;
+mod zigversion;
 
-pub use zigversion::*;
 pub use target_triple::*;
+pub use zigversion::*;
 
 use color_eyre::eyre::eyre;
 
