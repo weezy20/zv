@@ -143,7 +143,7 @@ impl Mirror {
         progress_handle: &ProgressHandle,
     ) -> Result<()> {
         const TARGET: &'static str = "zv::network::mirror::download";
-        tracing::info!(target: TARGET, "Starting download with mirror: {} (rank: {})", self.base_url, self.rank);
+        tracing::debug!(target: TARGET, "Starting download with mirror: {} (rank: {})", self.base_url, self.rank);
 
         // Get download URLs
         let tarball_url = self.get_download_url(semver_version, zig_tarball);
@@ -176,7 +176,7 @@ impl Mirror {
         .await
         {
             Ok(()) => {
-                tracing::info!(target: TARGET, "Proceeding to checksum verification...");
+                tracing::debug!(target: TARGET, "Proceeding to checksum verification...");
             }
             Err(net_err) => {
                 tracing::trace!(target: TARGET, "Tarball download failed from mirror {}: {}", self.base_url, net_err);
@@ -198,10 +198,10 @@ impl Mirror {
         }
 
         // Phase 2: Verify checksum
-        tracing::info!(target: TARGET, "Verifying tarball integrity");
+        tracing::debug!(target: TARGET, "Verifying tarball integrity");
         match verify_checksum(tarball_path, expected_shasum).await {
             Ok(()) => {
-                tracing::info!(target: TARGET, "Checksum verification successful");
+                tracing::debug!(target: TARGET, "Checksum verification successful");
             }
             Err(e) => {
                 tracing::error!(target: TARGET, "Checksum verification failed for tarball from mirror {}: {}", self.base_url, e);
@@ -218,7 +218,7 @@ impl Mirror {
         }
 
         // Phase 3: Download minisig file
-        tracing::info!(target: TARGET, "Downloading signature file from {}", minisig_url);
+        tracing::debug!(target: TARGET, "Downloading signature file from {}", minisig_url);
         match progress_handle
             .update("Downloading signature file...")
             .await
@@ -242,7 +242,7 @@ impl Mirror {
         .await
         {
             Ok(()) => {
-                tracing::info!(target: TARGET, "Minisig download completed successfully");
+                tracing::debug!(target: TARGET, "Minisig download completed successfully");
             }
             Err(net_err) => {
                 tracing::error!(target: TARGET, "Minisig download failed from mirror {}: {}", self.base_url, net_err);
@@ -309,7 +309,7 @@ impl Mirror {
             }
         };
 
-        tracing::info!(target: TARGET, "Download attempt completed successfully with mirror {} - tarball: {:.1} MB, minisig: {} bytes", 
+        tracing::debug!(target: TARGET, "Download attempt completed successfully with mirror {} - tarball: {:.1} MB, minisig: {} bytes", 
                      self.base_url, tarball_size as f64 / 1_048_576.0, minisig_size);
 
         Ok(())
@@ -594,7 +594,7 @@ impl MirrorManager {
             return Err(NetErr::EmptyMirrors);
         }
 
-        tracing::info!(target: TARGET, "Successfully fetched {} mirrors", mirrors.len());
+        tracing::debug!(target: TARGET, "Successfully fetched {} mirrors", mirrors.len());
         Ok(mirrors)
     }
     // ============================================================================

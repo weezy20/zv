@@ -72,7 +72,7 @@ fn init_tracing() -> Result<()> {
                     .with_target(true) // Show module paths
                     .with_filter(
                         tracing_subscriber::EnvFilter::try_from_env("ZV_LOG")
-                            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("zv=info")),
+                            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("zv=warn")),
                     ),
             )
             .init();

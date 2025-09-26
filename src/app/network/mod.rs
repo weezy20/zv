@@ -140,7 +140,7 @@ impl ZvNetwork {
     ) -> Result<ZigDownload, ZvError> {
         use crate::app::MAX_RETRIES;
         const TARGET: &str = "zv::network::download_version";
-        tracing::info!(target: TARGET,
+        tracing::debug!(target: TARGET,
             "Starting download: {zig_tarball} (version: {semver_version}, size: {size} bytes, checksum: {shasum})",shasum = download_artifact.shasum, size = download_artifact.size);
 ;
 
@@ -195,7 +195,7 @@ impl ZvNetwork {
                     }
             }; // end select_mirror
 
-            tracing::debug!(target: TARGET, "Using mirror: {} (rank: {}) for attempt {}/{}", 
+            tracing::trace!(target: TARGET, "Using mirror: {} (rank: {}) for attempt {}/{}", 
                          selected_mirror.base_url, selected_mirror.rank, attempt, max_retries);
 
             // Attempt download with this mirror
@@ -258,7 +258,7 @@ impl ZvNetwork {
                         }
                     }
 
-                    tracing::info!(target: TARGET, "Successfully downloaded {} ({:.1} MB) using mirror {} after {} attempt(s)", 
+                    tracing::debug!(target: TARGET, "Successfully downloaded {} ({:.1} MB) using mirror {} after {} attempt(s)", 
                                  zig_tarball, size as f64 / 1_048_576.0, selected_mirror.base_url, attempt);
 
                     let download_result = ZigDownload {
@@ -308,7 +308,7 @@ impl ZvNetwork {
                     }
 
                     // Log retry message with context
-                    tracing::info!(target: TARGET, "Will retry download with different mirror (next attempt: {}/{}) after mirror failure", 
+                    tracing::debug!(target: TARGET, "Will retry download with different mirror (next attempt: {}/{}) after mirror failure", 
                                  attempt + 1, max_retries);
                 }
             }

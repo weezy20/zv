@@ -82,7 +82,7 @@ pub(in crate::app::network) async fn download_file_with_retries_standalone(
     tracing::trace!(target: TARGET, "Initiating streaming download for {} bytes from {}", expected_size, url);
     match stream_download_file(client, url, dest_path, expected_size, progress_handle).await {
         Ok(()) => {
-            tracing::info!(target: TARGET, "Successfully completed download from {}", url);
+            tracing::debug!(target: TARGET, "Successfully completed download from {}", url);
             Ok(())
         }
         Err(e) => {
@@ -298,9 +298,9 @@ pub(in crate::app::network) async fn move_to_final_location(
 
             if let Some(new_size) = file_size {
                 if existing_size == new_size {
-                    tracing::info!(target: TARGET, "File sizes match - this may be a duplicate download");
+                    tracing::debug!(target: TARGET, "File sizes match - this may be a duplicate download");
                 } else {
-                    tracing::info!(target: TARGET, "File sizes differ - replacing with new version");
+                    tracing::debug!(target: TARGET, "File sizes differ - replacing with new version");
                 }
             }
         }
