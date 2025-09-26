@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 pub(crate) mod config;
 pub mod constants;
 pub(crate) mod network;
