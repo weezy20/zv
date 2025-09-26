@@ -361,14 +361,7 @@ impl App {
             .await?;
         // self.toolchain_manager
         //     .install_version(&download_result.tarball_path, &semver_version, None)
-        //     .await
-        //     .wrap_err_with(|| {
-        //         format!(
-        //             "Failed to install Zig version {} from archive {:?}",
-        //             zig_release.version(),
-        //             download_result.tarball_path
-        //         )
-        //     })?;
+        //     .await?;
         Ok(())
     }
 }

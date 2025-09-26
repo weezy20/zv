@@ -97,7 +97,7 @@ zv sync                                # Resync community mirrors list from [zig
 zv help                                # Detailed instructions for zv. Use `--help` for long help or `-h` for short help with a subcommand.
 ```
 
-`minisign` verification is done using [jedisct1/rust-minisign](https://github.com/jedisct1/rust-minisign) — a Minisign library in pure Rust.
+`minisign` verification is done using [jedisct1/rust-minisign-verify](https://github.com/jedisct1/rust-minisign-verify) — a small minisign library in pure Rust.
 
 It also supports `NO_COLOR` for non-TTY environments.
 
