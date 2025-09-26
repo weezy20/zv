@@ -9,6 +9,7 @@ use crate::app::network::ZigRelease;
 use crate::app::utils::zig_tarball;
 use crate::tools::canonicalize;
 use crate::types::*;
+mod minisign;
 use crate::{Shell, path_utils};
 use color_eyre::eyre::{Context as _, eyre};
 pub use network::CacheStrategy;

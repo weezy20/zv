@@ -270,6 +270,10 @@ pub enum ZvError {
     #[error("Shell error")]
     ShellError(#[from] ShellErr),
 
+    /// Minisign signature verification failed
+    #[error("Minisign error")]
+    MinisignError(#[source] Report),
+
     /// Catch-all for general errors
     #[error(transparent)]
     General(#[from] Report),
