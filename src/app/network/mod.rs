@@ -41,7 +41,7 @@ const TARGET: &str = "zv::network";
 
 /// Result of a successful download operation containing paths to verified files and mirror information
 #[derive(Debug, Clone)]
-pub struct DownloadResult {
+pub struct ZigDownload {
     /// Path to the verified tarball in downloads folder
     pub tarball_path: PathBuf,
     /// Path to the minisign signature file
@@ -134,7 +134,7 @@ impl ZvNetwork {
         semver_version: &semver::Version,
         zig_tarball: &str,
         download_artifact: &ArtifactInfo,
-    ) -> Result<DownloadResult, ZvError> {
+    ) -> Result<ZigDownload, ZvError> {
         use crate::app::MAX_RETRIES;
         const TARGET: &str = "zv::network::download_version";
         tracing::info!(target: TARGET,
@@ -258,7 +258,7 @@ impl ZvNetwork {
                     tracing::info!(target: TARGET, "Successfully downloaded {} ({:.1} MB) using mirror {} after {} attempt(s)", 
                                  zig_tarball, size as f64 / 1_048_576.0, selected_mirror.base_url, attempt);
 
-                    let download_result = DownloadResult {
+                    let download_result = ZigDownload {
                         tarball_path: final_tarball_path,
                         minisig_path: final_minisig_path,
                         mirror_used: selected_mirror.base_url.to_string(),
