@@ -17,8 +17,9 @@ pub struct UserConfig {
     pub zv_base_path: std::path::PathBuf,
     pub shell: Option<crate::Shell>,
 }
-
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ArchiveExt {
+    #[default]
     TarXz,
     Zip,
 }

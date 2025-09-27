@@ -153,34 +153,51 @@ impl ToolchainManager {
         &mut self,
         archive_path: &Path,
         version: &semver::Version,
-        nested: Option<&str>,
         ext: ArchiveExt,
         is_master: bool,
     ) -> Result<PathBuf> {
-        let dest = match nested {
-            Some(n) => self.versions_path.join(n).join(version.to_string()),
-            None => self.versions_path.join(version.to_string()),
+        const TARGET: &str = "zv::toolchain";
+
+        // --- 1.  decide final destination -----------------------------------------------------------
+        let dest = if is_master {
+            self.versions_path.join("master").join(version.to_string())
+        } else {
+            self.versions_path.join(version.to_string())
         };
+        tracing::debug!(
+            target: TARGET,
+            %version,
+            is_master,
+            dest = %dest.display(),
+            "Determined installation destination"
+        );
 
-        // Temporary dir for extraction
+        // --- 2.  prepare temporary extraction directory --------------------------------------------
         let temp_dest = dest.with_extension("tmp");
-
-        // Clean up any existing temp directory
         if temp_dest.exists() {
+            tracing::trace!(target: TARGET, temp = %temp_dest.display(), "Removing stale temp directory");
             fs::remove_dir_all(&temp_dest).await?;
         }
-
         fs::create_dir_all(&temp_dest).await?;
 
-        // Extract archive to temp directory
+        // --- 3.  extract archive --------------------------------------------------------------------
         let bytes = fs::read(archive_path).await?;
+        tracing::trace!(
+            target: TARGET,
+            archive = %archive_path.display(),
+            size = bytes.len(),
+            "Read archive into memory"
+        );
+
         match ext {
             ArchiveExt::TarXz => {
+                tracing::trace!(target: TARGET, "Unpacking tar.xz archive");
                 let xz = xz2::read::XzDecoder::new(std::io::Cursor::new(bytes));
                 let mut ar = tar::Archive::new(xz);
                 ar.unpack(&temp_dest)?;
             }
             ArchiveExt::Zip => {
+                tracing::trace!(target: TARGET, "Unpacking zip archive");
                 let mut ar = zip::ZipArchive::new(std::io::Cursor::new(bytes))?;
                 for i in 0..ar.len() {
                     let mut file = ar.by_index(i)?;
@@ -198,63 +215,85 @@ impl ToolchainManager {
             }
         }
 
-        // Verify the installation is valid before committing
-        let temp_zig_bin = temp_dest.join(Shim::Zig.executable_name());
-        if !temp_zig_bin.is_file() {
-            // Clean up temp directory on failure
+        /// --- 4.  find the real root directory (strip single top-level wrapper) ----------------------
+        use tokio::fs;
+        let mut entries = fs::read_dir(&temp_dest).await?;
+        let mut top_dirs = Vec::new();
+        while let Some(entry) = entries.next_entry().await? {
+            if entry.file_type().await?.is_dir() {
+                top_dirs.push(entry.path());
+            }
+        }
+
+        let actual_root = match top_dirs.len() {
+            1 => top_dirs.into_iter().next().unwrap(), // upstream wrapper directory
+            _ => temp_dest.clone(),                    // already flat
+        };
+
+        // --- 5.  sanity-check -----------------------------------------------------------------------
+        let zig_bin = actual_root.join(Shim::Zig.executable_name());
+        if !zig_bin.is_file() {
+            tracing::warn!(
+                target: TARGET,
+                expected = %zig_bin.display(),
+                "Zig executable missing after extraction"
+            );
             let _ = fs::remove_dir_all(&temp_dest).await;
             return Err(eyre!("Zig executable not found after installation"));
         }
+        tracing::trace!(target: TARGET, zig_bin = %zig_bin.display(), "Extraction sanity-check passed");
 
-        let old_install_to_remove = if is_master && dest.exists() {
-            // Find the old installation in our cache (we'll remove it after successful swap)
-            self.installations
-                .iter()
-                .position(|install| install.version == *version && install.is_master)
-        } else {
-            None
-        };
-
+        // --- 6.  remove old installation ------------------------------------------------------------
         if dest.exists() {
+            tracing::info!(target: TARGET, old = %dest.display(), "Removing previous installation");
             fs::remove_dir_all(&dest).await?;
         }
 
-        fs::rename(&temp_dest, &dest).await.with_context(|| {
-            format!(
-                "Failed to move installation from {} to {}",
-                temp_dest.display(),
-                dest.display()
-            )
-        })?;
-
-        // Update our cache only after successful installation
-        if let Some(pos) = old_install_to_remove {
-            self.installations.remove(pos);
+        // --- 7.  atomically promote the real root into place ----------------------------------------
+        if actual_root != temp_dest {
+            // move wrapper directory contents up one level
+            fs::rename(&actual_root, &dest).await.with_context(|| {
+                format!(
+                    "Failed to move {} -> {}",
+                    actual_root.display(),
+                    dest.display()
+                )
+            })?;
+            // clean up now-empty temp directory
+            fs::remove_dir_all(&temp_dest).await.ok();
+        } else {
+            fs::rename(&temp_dest, &dest).await?;
         }
+        tracing::trace!(target: TARGET, to = %dest.display(), "Promoted installation to final location");
 
+        // --- 8.  update in-memory cache -------------------------------------------------------------
         let new_install = ZigInstall {
             version: version.clone(),
-            path: dest,
+            path: dest.clone(),
             is_master,
         };
-        let zig_bin = new_install.path.join(Shim::Zig.executable_name());
-
-        // Insert in sorted position
         match self
             .installations
-            .binary_search_by(|install| install.version.cmp(version))
+            .binary_search_by(|i| i.version.cmp(version))
         {
             Ok(pos) => {
-                // Version already exists, replace it
+                tracing::debug!(target: TARGET, %version, "Replacing existing installation in cache");
                 self.installations[pos] = new_install;
             }
             Err(pos) => {
-                // Insert at the correct sorted position
+                tracing::debug!(target: TARGET, %version, "Inserting new installation into cache at position {pos}");
                 self.installations.insert(pos, new_install);
             }
         }
 
-        Ok(zig_bin)
+        let final_zig_bin = dest.join(Shim::Zig.executable_name());
+        tracing::info!(
+            target: TARGET,
+            %version,
+            zig_bin = %final_zig_bin.display(),
+            "Installation completed successfully"
+        );
+        Ok(final_zig_bin)
     }
 
     /// Sets the active Zig version, updating the symlink in bin/ and writing to the active file
@@ -313,7 +352,9 @@ impl ToolchainManager {
         }
 
         fs::create_dir_all(&self.bin_path).await?;
-
+        if dst.exists() {
+            fs::remove_file(&dst).await?;
+        }
         #[cfg(unix)]
         tokio::fs::symlink(&src, &dst).await?;
         #[cfg(windows)]

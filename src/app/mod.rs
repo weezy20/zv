@@ -317,19 +317,31 @@ impl App {
     }
     /// Install the current loaded `to_install` ZigRelease
     pub async fn install_release(&mut self) -> Result<(), ZvError> {
+        const TARGET: &str = "zv::app::install_release";
+
         let zig_release = self.to_install.take().ok_or_else(|| {
             ZvError::ZigVersionResolveError(eyre!(
                 "No ZigRelease is currently loaded for installation"
             ))
         })?;
+
         let semver_version = zig_release.resolved_version().version();
         let is_master = zig_release.resolved_version().is_master();
+        tracing::debug!(
+            target: TARGET,
+            version = %semver_version,
+            is_master,
+            "Starting installation"
+        );
+
         let zig_tarball = zig_tarball(&semver_version, None).ok_or_else(|| {
             eyre!(
                 "Could not determine tarball name for Zig version {}",
                 zig_release.version_string()
             )
         })?;
+        tracing::debug!(target: TARGET, tarball = %zig_tarball, "Determined tarball name");
+
         let ext = if zig_tarball.ends_with(".zip") {
             ArchiveExt::Zip
         } else if zig_tarball.ends_with(".tar.xz") {
@@ -337,6 +349,8 @@ impl App {
         } else {
             unreachable!("Unknown archive extension for tarball: {}", zig_tarball)
         };
+        tracing::debug!(target: TARGET, ?ext, "Detected archive format");
+
         self.ensure_network_with_mirrors().await?;
         let host_target = utils::host_target().ok_or_else(|| {
             eyre!(
@@ -344,6 +358,8 @@ impl App {
                 zig_release.version_string()
             )
         })?;
+        tracing::debug!(target: TARGET, %host_target, "Resolved host target");
+
         let download_artifact = zig_release
             .target_artifact(&host_target)
             .ok_or_else(|| {
@@ -354,6 +370,12 @@ impl App {
                 )
             })
             .map_err(ZvError::ZigNotFound)?;
+        tracing::debug!(
+            target: TARGET,
+            artifact_url = %download_artifact.ziglang_org_tarball,
+            "Selected download artifact"
+        );
+
         let ZigDownload {
             tarball_path,
             minisig_path,
@@ -364,17 +386,26 @@ impl App {
             .unwrap()
             .download_version(&semver_version, &zig_tarball, download_artifact)
             .await?;
+        tracing::info!(
+            target: TARGET,
+            tarball = %tarball_path.display(),
+            minisig = %minisig_path.display(),
+            ?mirror_used,
+            "Download completed"
+        );
 
         self.toolchain_manager
-            .install_version(
-                &tarball_path,
-                &semver_version,
-                is_master.then(|| "master"),
-                ext,
-                is_master,
-            )
+            .install_version(&tarball_path, &semver_version, ext, is_master)
             .await?;
+        tracing::info!(
+            target: TARGET,
+            version = %semver_version,
+            "Tool-chain installation succeeded"
+        );
+
         remove_files(&[tarball_path.as_path(), minisig_path.as_path()]).await;
+        tracing::debug!(target: TARGET, "Cleaned up temporary download files");
+
         Ok(())
     }
 }
