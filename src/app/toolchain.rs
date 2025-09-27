@@ -1,4 +1,4 @@
-use crate::{ArchiveExt, ResolvedZigVersion, Result, Shim, ZvError};
+use crate::{ArchiveExt, ResolvedZigVersion, Result, Shim, ZvError, app::utils::ProgressHandle};
 use color_eyre::eyre::{Context, eyre};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -170,32 +170,75 @@ impl ToolchainManager {
             fs::remove_dir_all(&archive_tmp).await?;
         }
         fs::create_dir_all(&archive_tmp).await?;
-
+        let progress_handle = ProgressHandle::spawn();
         let bytes = fs::read(archive_path).await?;
+        let archive_name = archive_path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "zig archive".to_string());
+        match ext {
+            ArchiveExt::TarXz => progress_handle.start(format!("Extracting {archive_name}")),
+            ArchiveExt::Zip => progress_handle.start(format!("Extracting {archive_name}")),
+        };
         match ext {
             ArchiveExt::TarXz => {
                 let xz = xz2::read::XzDecoder::new(std::io::Cursor::new(bytes));
                 let mut ar = tar::Archive::new(xz);
-                ar.unpack(&archive_tmp)?;
+                if let Err(e) = ar.unpack(&archive_tmp) {
+                    progress_handle.finish_with_error("Failed to extract tar.xz archive");
+                    return Err(e.into());
+                }
             }
             ArchiveExt::Zip => {
-                let mut ar = zip::ZipArchive::new(std::io::Cursor::new(bytes))?;
+                let mut ar = match zip::ZipArchive::new(std::io::Cursor::new(bytes)) {
+                    Ok(ar) => ar,
+                    Err(e) => {
+                        progress_handle.finish_with_error("Failed to open zip archive");
+                        return Err(e.into());
+                    }
+                };
                 for i in 0..ar.len() {
-                    let mut file = ar.by_index(i)?;
+                    let mut file = match ar.by_index(i) {
+                        Ok(file) => file,
+                        Err(e) => {
+                            progress_handle.finish_with_error("Failed to read zip entry");
+                            return Err(e.into());
+                        }
+                    };
                     let out = archive_tmp.join(file.name());
                     if file.is_dir() {
-                        fs::create_dir_all(&out).await?;
+                        if let Err(e) = fs::create_dir_all(&out).await {
+                            progress_handle
+                                .finish_with_error("Failed to create directory during extraction");
+                            return Err(e.into());
+                        }
                     } else {
                         if let Some(p) = out.parent() {
-                            fs::create_dir_all(p).await?;
+                            if let Err(e) = fs::create_dir_all(p).await {
+                                progress_handle.finish_with_error(
+                                    "Failed to create parent directory during extraction",
+                                );
+                                return Err(e.into());
+                            }
                         }
-                        let mut w = std::fs::File::create(&out)?;
-                        std::io::copy(&mut file, &mut w)?;
+                        let mut w = match std::fs::File::create(&out) {
+                            Ok(w) => w,
+                            Err(e) => {
+                                progress_handle
+                                    .finish_with_error("Failed to create file during extraction");
+                                return Err(e.into());
+                            }
+                        };
+                        if let Err(e) = std::io::copy(&mut file, &mut w) {
+                            progress_handle
+                                .finish_with_error("Failed to write file during extraction");
+                            return Err(e.into());
+                        }
                     }
                 }
             }
         }
-
+        progress_handle.finish("Extraction complete");
         // strip wrapper directory
         let mut entries = fs::read_dir(&archive_tmp).await?;
         let mut top_dirs = Vec::new();
