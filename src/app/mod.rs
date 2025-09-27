@@ -329,6 +329,7 @@ impl App {
             ))
         })?;
         let semver_version = zig_release.resolved_version().version();
+        let is_master = zig_release.resolved_version().is_master();
         let zig_tarball = zig_tarball(&semver_version, None).ok_or_else(|| {
             eyre!(
                 "Could not determine tarball name for Zig version {}",
@@ -370,7 +371,12 @@ impl App {
             unreachable!("Unknown archive extension for tarball: {}", zig_tarball)
         };
         self.toolchain_manager
-            .install_version(&tarball_path, &semver_version, None, ext)
+            .install_version(
+                &tarball_path,
+                &semver_version,
+                is_master.then(|| "master"),
+                ext,
+            )
             .await?;
         remove_files(&[tarball_path.as_path(), minisig_path.as_path()]).await;
         Ok(())
