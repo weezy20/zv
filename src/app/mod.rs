@@ -400,7 +400,7 @@ impl App {
         tracing::info!(
             target: TARGET,
             version = %semver_version,
-            "Tool-chain installation succeeded"
+            "Toolchain installation succeeded"
         );
 
         remove_files(&[tarball_path.as_path(), minisig_path.as_path()]).await;
