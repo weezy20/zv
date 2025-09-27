@@ -66,7 +66,7 @@ pub struct App {
     /// Network client
     network: Option<network::ZvNetwork>,
     /// Toolchain manager
-    toolchain_manager: ToolchainManager,
+    pub(crate) toolchain_manager: ToolchainManager,
     /// <ZV_DIR>/bin in $PATH? If not prompt user to run `setup` or add `source <ZV_DIR>/env to their shell profile`
     pub(crate) source_set: bool,
     /// Current detected shell

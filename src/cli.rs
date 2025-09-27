@@ -166,7 +166,7 @@ impl Commands {
                     std::process::exit(2);
                 }
             },
-            Commands::List => todo!(),
+            Commands::List => list::list_versions(&mut app).await,
             Commands::Clean { what } => clean::clean(&app, what).await,
             Commands::Setup {
                 dry_run,
