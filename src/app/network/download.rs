@@ -185,11 +185,11 @@ pub(in crate::app::network) async fn stream_download_file(
 
             let progress_msg = if content_length > 0 {
                 format!(
-                    "Downloaded {:.1}/{:.1} MB ({}%)",
+                    "Downloading {:.1}/{:.1} MB ({}%)",
                     downloaded_mb, total_mb, percentage
                 )
             } else {
-                format!("Downloaded {:.1} MB", downloaded_mb)
+                format!("Downloading {:.1} MB", downloaded_mb)
             };
 
             if let Err(e) = progress_handle.update(progress_msg).await {

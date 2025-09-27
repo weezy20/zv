@@ -3,8 +3,8 @@ pub mod constants;
 pub(crate) mod network;
 pub(crate) mod toolchain;
 pub(crate) mod utils;
-use crate::app::network::ZigRelease;
-use crate::app::utils::zig_tarball;
+use crate::app::network::{ZigDownload, ZigRelease};
+use crate::app::utils::{remove_files, zig_tarball};
 use crate::tools::canonicalize;
 use crate::types::*;
 mod minisign;
@@ -352,15 +352,27 @@ impl App {
                 )
             })
             .map_err(ZvError::ZigNotFound)?;
-        let download_result = self
+        let ZigDownload {
+            tarball_path,
+            minisig_path,
+            mirror_used,
+        } = self
             .network
             .as_mut()
             .unwrap()
             .download_version(&semver_version, &zig_tarball, download_artifact)
             .await?;
-        // self.toolchain_manager
-        //     .install_version(&download_result.tarball_path, &semver_version, None)
-        //     .await?;
+        let ext = if zig_tarball.ends_with(".zip") {
+            ArchiveExt::Zip
+        } else if zig_tarball.ends_with(".tar.xz") {
+            ArchiveExt::TarXz
+        } else {
+            unreachable!("Unknown archive extension for tarball: {}", zig_tarball)
+        };
+        self.toolchain_manager
+            .install_version(&tarball_path, &semver_version, None, ext)
+            .await?;
+        remove_files(&[tarball_path.as_path(), minisig_path.as_path()]).await;
         Ok(())
     }
 }
