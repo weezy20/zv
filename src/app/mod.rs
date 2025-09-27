@@ -144,10 +144,7 @@ impl App {
         &mut self,
         version: &'b ResolvedZigVersion,
     ) -> Result<&'b ResolvedZigVersion, ZvError> {
-        println!("App::set_active_version called with version: {:?}", version);
-        println!("This is a placeholder implementation");
-
-        // self.active_version = Some(version.clone());
+        let is_master = version.is_master();
         Ok(version)
     }
 
@@ -318,6 +315,7 @@ impl App {
     }
 
     /// Check if version is installed
+    #[inline]
     pub fn check_installed(&self, version: &str, nested: Option<&str>) -> bool {
         self.toolchain_manager.is_version_installed(version, nested)
     }
