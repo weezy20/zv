@@ -336,6 +336,13 @@ impl App {
                 zig_release.version_string()
             )
         })?;
+        let ext = if zig_tarball.ends_with(".zip") {
+            ArchiveExt::Zip
+        } else if zig_tarball.ends_with(".tar.xz") {
+            ArchiveExt::TarXz
+        } else {
+            unreachable!("Unknown archive extension for tarball: {}", zig_tarball)
+        };
         self.ensure_network_with_mirrors().await?;
         let host_target = utils::host_target().ok_or_else(|| {
             eyre!(
@@ -363,13 +370,7 @@ impl App {
             .unwrap()
             .download_version(&semver_version, &zig_tarball, download_artifact)
             .await?;
-        let ext = if zig_tarball.ends_with(".zip") {
-            ArchiveExt::Zip
-        } else if zig_tarball.ends_with(".tar.xz") {
-            ArchiveExt::TarXz
-        } else {
-            unreachable!("Unknown archive extension for tarball: {}", zig_tarball)
-        };
+
         self.toolchain_manager
             .install_version(
                 &tarball_path,
