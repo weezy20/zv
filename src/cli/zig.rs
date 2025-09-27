@@ -3,7 +3,7 @@ use color_eyre::eyre::{bail, eyre};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-pub fn zig_main() -> crate::Result<()> {
+pub async fn zig_main() -> crate::Result<()> {
     // Recursion guard - check early to prevent infinite loops
     crate::check_recursion_with_context("zig proxy")?;
 
@@ -27,7 +27,7 @@ pub fn zig_main() -> crate::Result<()> {
         find_zig_for_version(&version)?
     } else {
         // Default to system zig or zv-managed zig
-        find_default_zig()?
+        find_default_zig().await?
     };
 
     // Get current recursion count for incrementing
@@ -105,13 +105,15 @@ fn find_zig_for_version(version: &ZigVersion) -> crate::Result<PathBuf> {
 }
 
 /// Find the default Zig executable (zv-managed or system)
-fn find_default_zig() -> crate::Result<PathBuf> {
+async fn find_default_zig() -> crate::Result<PathBuf> {
     // Try to get zv-managed zig first
     if let Ok((zv_base_path, _)) = tools::fetch_zv_dir() {
         if let Ok(app) = App::init(UserConfig {
             zv_base_path,
             shell: None,
-        }) {
+        })
+        .await
+        {
             if let Some(zig_path) = app.zv_zig() {
                 return Ok(zig_path);
             }

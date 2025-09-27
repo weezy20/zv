@@ -45,7 +45,7 @@ pub static MAX_RETRIES: LazyLock<u32> = LazyLock::new(|| {
 });
 
 /// Zv App State
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct App {
     /// <ZV_DIR> - Home for zv
     zv_base_path: PathBuf,
@@ -66,7 +66,7 @@ pub struct App {
     /// Network client
     network: Option<network::ZvNetwork>,
     /// Toolchain manager
-    toolchain_manager: Arc<ToolchainManager>,
+    toolchain_manager: ToolchainManager,
     /// <ZV_DIR>/bin in $PATH? If not prompt user to run `setup` or add `source <ZV_DIR>/env to their shell profile`
     pub(crate) source_set: bool,
     /// Current detected shell
@@ -77,7 +77,7 @@ pub struct App {
 
 impl App {
     /// Minimal App path initialization & directory creation
-    pub fn init(
+    pub async fn init(
         UserConfig {
             zv_base_path,
             shell,
@@ -126,12 +126,12 @@ impl App {
             } else {
                 path_utils::check_dir_in_path(&bin_path)
             },
-            zv_base_path,
             bin_path,
             config_path,
             env_path,
             config,
-            toolchain_manager: Arc::new(ToolchainManager::new(versions_path.as_path())),
+            toolchain_manager: ToolchainManager::new(zv_base_path.as_path()).await?,
+            zv_base_path,
             versions_path,
             shell: shell,
             to_install: None,
@@ -143,32 +143,21 @@ impl App {
     pub async fn set_active_version<'b>(
         &mut self,
         version: &'b ResolvedZigVersion,
-    ) -> Result<&'b ResolvedZigVersion, ZvError> {
-        let is_master = version.is_master();
-        Ok(version)
+    ) -> crate::Result<()> {
+        self.toolchain_manager.set_active_version(version).await
     }
 
     /// Initialize network client if not already done
     pub async fn ensure_network(&mut self) -> Result<(), ZvError> {
         if self.network.is_none() {
-            self.network = Some(
-                network::ZvNetwork::new(
-                    self.zv_base_path.as_path(),
-                    self.toolchain_manager.clone(),
-                )
-                .await?,
-            );
+            self.network = Some(network::ZvNetwork::new(self.zv_base_path.as_path()).await?);
         }
         Ok(())
     }
     /// Initialize network client with mirror manager if not already done
     pub async fn ensure_network_with_mirrors(&mut self) -> Result<(), ZvError> {
         if self.network.is_none() {
-            let mut net = network::ZvNetwork::new(
-                self.zv_base_path.as_path(),
-                self.toolchain_manager.clone(),
-            )
-            .await?;
+            let mut net = network::ZvNetwork::new(self.zv_base_path.as_path()).await?;
             net.ensure_mirror_manager().await?;
             self.network = Some(net);
         } else if self.network.is_some() {
@@ -314,9 +303,9 @@ impl App {
         Ok(zig_release)
     }
 
-    /// Check if version is installed
+    /// Check if version is installed returning Some(path) to zig binary if so
     #[inline]
-    pub fn check_installed(&self, version: &str, nested: Option<&str>) -> bool {
+    pub fn check_installed(&self, version: &str, nested: Option<&str>) -> Option<PathBuf> {
         self.toolchain_manager.is_version_installed(version, nested)
     }
     /// Install the current loaded `to_install` ZigRelease
@@ -375,6 +364,7 @@ impl App {
                 &semver_version,
                 is_master.then(|| "master"),
                 ext,
+                is_master,
             )
             .await?;
         remove_files(&[tarball_path.as_path(), minisig_path.as_path()]).await;

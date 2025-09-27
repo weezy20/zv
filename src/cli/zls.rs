@@ -3,7 +3,7 @@ use color_eyre::eyre::{bail, eyre};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-pub fn zls_main() -> crate::Result<()> {
+pub async fn zls_main() -> crate::Result<()> {
     // Recursion guard - check early to prevent infinite loops
     crate::check_recursion_with_context("zls proxy")?;
 
@@ -11,7 +11,7 @@ pub fn zls_main() -> crate::Result<()> {
     let mut args: Vec<String> = std::env::args().collect();
     args.remove(0); // drop program name
 
-    let zls_path = find_compatible_zls()?;
+    let zls_path = find_compatible_zls().await?;
 
     // Get current recursion count for incrementing
     let recursion_count: u32 = std::env::var("ZV_RECURSION_COUNT")
@@ -36,7 +36,7 @@ pub fn zls_main() -> crate::Result<()> {
 }
 
 /// Find a compatible ZLS executable for the current Zig version
-fn find_compatible_zls() -> crate::Result<PathBuf> {
+async fn find_compatible_zls() -> crate::Result<PathBuf> {
     // Initialize app to access zv directory structure
     let (zv_base_path, _) = tools::fetch_zv_dir()?;
 
@@ -44,6 +44,7 @@ fn find_compatible_zls() -> crate::Result<PathBuf> {
         zv_base_path,
         shell: None,
     })
+    .await
     .map_err(|e| eyre!("Failed to initialize app: {}", e))?;
 
     // Get the currently active Zig version

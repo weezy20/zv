@@ -45,8 +45,8 @@ async fn main() -> Result<()> {
 
     match program_name.as_str() {
         "zv" => cli::zv_main().await,
-        "zig" => cli::zig_main(),
-        "zls" => cli::zls_main(),
+        "zig" => cli::zig_main().await,
+        "zls" => cli::zls_main().await,
         _ => {
             eprintln!(
                 "Unknown invocation: {}. This binary should be invoked as 'zv', 'zig', or 'zls'.",

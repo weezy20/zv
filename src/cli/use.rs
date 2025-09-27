@@ -36,11 +36,10 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
         ResolvedZigVersion::Master(v) => (v.to_string(), Some(&"master"[..])),
     };
 
-    let set_result = if app.check_installed(&version_string, nesting) {
+    if app.check_installed(&version_string, nesting).is_some() {
         // Version is already installed, just set it as active
-        app.set_active_version(&resolved_version).await?.to_string()
-    } 
-    else {
+        app.set_active_version(&resolved_version).await?
+    } else {
         app.install_release().await.wrap_err_with(|| {
             format!(
                 "Failed to download and install Zig version {}",
@@ -48,10 +47,13 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
             )
         })?;
 
-        app.set_active_version(&resolved_version).await?.to_string()
-    };
+        app.set_active_version(&resolved_version).await?
+    }
 
-    println!("✅ Active zig version set: {}", Paint::blue(&set_result));
+    println!(
+        "✅ Active zig version set: {}",
+        Paint::blue(&version_string)
+    );
     Ok(())
 }
 

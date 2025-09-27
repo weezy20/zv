@@ -31,7 +31,8 @@ pub async fn zv_main() -> super::Result<()> {
     let app = App::init(UserConfig {
         zv_base_path,
         shell: Some(Shell::detect()),
-    })?;
+    })
+    .await?;
 
     match zv_cli.command {
         Some(cmd) => cmd.execute(app, using_env).await?,

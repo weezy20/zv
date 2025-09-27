@@ -62,8 +62,6 @@ pub struct ZvNetwork {
     download_cache: PathBuf,
     /// Network Client
     client: reqwest::Client,
-    /// Reference to ToolchainManager for version management
-    toolchain_manager: Arc<ToolchainManager>,
 }
 
 // === Initialize ZvNetwork ===
@@ -71,7 +69,6 @@ impl ZvNetwork {
     /// Initialize ZvNetwork with given base path (ZV_DIR)
     pub async fn new(
         zv_base_path: impl AsRef<Path>,
-        toolchain_manager: Arc<ToolchainManager>,
     ) -> Result<Self, ZvError> {
         let client = create_client()?;
 
@@ -82,7 +79,6 @@ impl ZvNetwork {
                 client.clone(),
             ),
             client,
-            toolchain_manager,
             base_path: zv_base_path.as_ref().to_path_buf(),
             mirror_manager: None,
         })
