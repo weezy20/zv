@@ -172,15 +172,25 @@ impl ToolchainManager {
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "zig archive".to_string());
         match ext {
-            ArchiveExt::TarXz => progress_handle.start(format!("Extracting {archive_name}")),
-            ArchiveExt::Zip => progress_handle.start(format!("Extracting {archive_name}")),
+            ArchiveExt::TarXz => {
+                progress_handle
+                    .start(format!("Extracting {archive_name}"))
+                    .await
+            }
+            ArchiveExt::Zip => {
+                progress_handle
+                    .start(format!("Extracting {archive_name}"))
+                    .await
+            }
         };
         match ext {
             ArchiveExt::TarXz => {
                 let xz = xz2::read::XzDecoder::new(std::io::Cursor::new(bytes));
                 let mut ar = tar::Archive::new(xz);
                 if let Err(e) = ar.unpack(&archive_tmp) {
-                    progress_handle.finish_with_error("Failed to extract tar.xz archive");
+                    progress_handle
+                        .finish_with_error("Failed to extract tar.xz archive")
+                        .await;
                     return Err(e.into());
                 }
             }
@@ -188,7 +198,9 @@ impl ToolchainManager {
                 let mut ar = match zip::ZipArchive::new(std::io::Cursor::new(bytes)) {
                     Ok(ar) => ar,
                     Err(e) => {
-                        progress_handle.finish_with_error("Failed to open zip archive");
+                        progress_handle
+                            .finish_with_error("Failed to open zip archive")
+                            .await;
                         return Err(e.into());
                     }
                 };
@@ -196,7 +208,9 @@ impl ToolchainManager {
                     let mut file = match ar.by_index(i) {
                         Ok(file) => file,
                         Err(e) => {
-                            progress_handle.finish_with_error("Failed to read zip entry");
+                            progress_handle
+                                .finish_with_error("Failed to read zip entry")
+                                .await;
                             return Err(e.into());
                         }
                     };
@@ -204,15 +218,18 @@ impl ToolchainManager {
                     if file.is_dir() {
                         if let Err(e) = fs::create_dir_all(&out).await {
                             progress_handle
-                                .finish_with_error("Failed to create directory during extraction");
+                                .finish_with_error("Failed to create directory during extraction")
+                                .await;
                             return Err(e.into());
                         }
                     } else {
                         if let Some(p) = out.parent() {
                             if let Err(e) = fs::create_dir_all(p).await {
-                                progress_handle.finish_with_error(
-                                    "Failed to create parent directory during extraction",
-                                );
+                                progress_handle
+                                    .finish_with_error(
+                                        "Failed to create parent directory during extraction",
+                                    )
+                                    .await;
                                 return Err(e.into());
                             }
                         }
@@ -220,20 +237,22 @@ impl ToolchainManager {
                             Ok(w) => w,
                             Err(e) => {
                                 progress_handle
-                                    .finish_with_error("Failed to create file during extraction");
+                                    .finish_with_error("Failed to create file during extraction")
+                                    .await;
                                 return Err(e.into());
                             }
                         };
                         if let Err(e) = std::io::copy(&mut file, &mut w) {
                             progress_handle
-                                .finish_with_error("Failed to write file during extraction");
+                                .finish_with_error("Failed to write file during extraction")
+                                .await;
                             return Err(e.into());
                         }
                     }
                 }
             }
         }
-        progress_handle.finish("Extraction complete");
+        progress_handle.finish("Extraction complete").await;
         // strip wrapper directory
         let mut entries = fs::read_dir(&archive_tmp).await?;
         let mut top_dirs = Vec::new();
@@ -322,10 +341,11 @@ impl ToolchainManager {
         installed_path: PathBuf,
     ) -> Result<()> {
         // installed_path is the full path to zig.exe, we need the directory containing it
-        let install_dir = installed_path.parent()
+        let install_dir = installed_path
+            .parent()
             .ok_or_else(|| eyre!("Invalid installed path: {}", installed_path.display()))?
             .to_path_buf();
-        
+
         tracing::debug!(target: TARGET, version = %rzv.version(), install_dir = %install_dir.display(), "Setting active version with path");
         let zig_install = ZigInstall {
             version: rzv.version().clone(),
@@ -344,7 +364,7 @@ impl ToolchainManager {
     /// Deploys or updates the symlink in bin/ to point to the given install's zig executable
     async fn deploy_active_link(&self, install: &ZigInstall) -> Result<()> {
         let zig_exe = Shim::Zig.executable_name();
-        
+
         // Ensure we have the correct path to the zig executable
         // install.path should be the directory containing zig, but handle cases where it might be the zig executable itself
         let src = if install.path.file_name().and_then(|n| n.to_str()) == Some(zig_exe) {
@@ -355,7 +375,7 @@ impl ToolchainManager {
             // install.path points to the directory, join with executable name
             install.path.join(&zig_exe)
         };
-        
+
         let dst = self.bin_path.join(&zig_exe);
 
         tracing::debug!(target: TARGET, src = %src.display(), dst = %dst.display(), "Deploying active link");
@@ -434,8 +454,13 @@ impl ToolchainManager {
                 }
                 Err(symlink_err) => {
                     tracing::debug!(target: TARGET, "Symlink failed: {}, trying hard link", symlink_err);
-                    std::fs::hard_link(&src, &dst)
-                        .wrap_err_with(|| format!("Failed to create hard link from {} to {}", src.display(), dst.display()))?;
+                    std::fs::hard_link(&src, &dst).wrap_err_with(|| {
+                        format!(
+                            "Failed to create hard link from {} to {}",
+                            src.display(),
+                            dst.display()
+                        )
+                    })?;
                     tracing::debug!(target: TARGET, "Created hard link successfully");
                 }
             }
