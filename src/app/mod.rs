@@ -386,7 +386,7 @@ impl App {
             .unwrap()
             .download_version(&semver_version, &zig_tarball, download_artifact)
             .await?;
-        tracing::info!(
+        tracing::debug!(
             target: TARGET,
             tarball = %tarball_path.display(),
             minisig = %minisig_path.display(),

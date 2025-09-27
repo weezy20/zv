@@ -301,12 +301,14 @@ impl ToolchainManager {
     /// Sets the active Zig version, updating the symlink in bin/ and writing to the active file
     pub async fn set_active_version(&mut self, rzv: &ResolvedZigVersion) -> Result<()> {
         let version = rzv.version();
+        tracing::debug!(target: TARGET, %version, "Setting active version");
         let install = self
             .installations
             .iter()
             .find(|i| &i.version == version)
             .ok_or_else(|| eyre!("Version {} is not installed", version))?;
 
+        tracing::debug!(target: TARGET, install_path = %install.path.display(), "Found installation, deploying link");
         self.deploy_active_link(install).await?;
 
         let json = serde_json::to_vec(&install)
@@ -324,11 +326,18 @@ impl ToolchainManager {
         rzv: &ResolvedZigVersion,
         installed_path: PathBuf,
     ) -> Result<()> {
+        // installed_path is the full path to zig.exe, we need the directory containing it
+        let install_dir = installed_path.parent()
+            .ok_or_else(|| eyre!("Invalid installed path: {}", installed_path.display()))?
+            .to_path_buf();
+        
+        tracing::debug!(target: TARGET, version = %rzv.version(), install_dir = %install_dir.display(), "Setting active version with path");
         let zig_install = ZigInstall {
             version: rzv.version().clone(),
-            path: installed_path,
+            path: install_dir,
             is_master: rzv.is_master(),
         };
+        tracing::debug!(target: TARGET, "Deploying active link");
         self.deploy_active_link(&zig_install).await?;
         let json = serde_json::to_vec(&zig_install)
             .wrap_err("Failed to serialize Zig install for active file")?;
@@ -343,8 +352,11 @@ impl ToolchainManager {
         let src = install.path.join(&zig_exe);
         let dst = self.bin_path.join(&zig_exe);
 
+        tracing::debug!(target: TARGET, src = %src.display(), dst = %dst.display(), "Deploying active link");
+
         // fast-path: already deployed correctly
         if dst.is_symlink() {
+            tracing::debug!(target: TARGET, "Destination is symlink, checking target");
             if let Ok(current_target) = tokio::fs::read_link(&dst).await {
                 // Resolve both paths to compare canonically
                 let current_resolved = if current_target.is_absolute() {
@@ -363,6 +375,7 @@ impl ToolchainManager {
                 }
             }
         } else if dst.is_file() {
+            tracing::debug!(target: TARGET, "Destination is file, checking if it's a hard link");
             // Handle hard links - check if they're the same file
             if let (Ok(dst_meta), Ok(src_meta)) = (dst.metadata(), src.metadata()) {
                 #[cfg(unix)]
@@ -382,8 +395,11 @@ impl ToolchainManager {
                     }
                 }
             }
+        } else {
+            tracing::debug!(target: TARGET, "Destination does not exist");
         }
 
+        tracing::debug!(target: TARGET, "Creating bin directory and removing existing file");
         fs::create_dir_all(&self.bin_path).await?;
 
         // Remove existing file/symlink
@@ -402,8 +418,18 @@ impl ToolchainManager {
         tokio::fs::symlink(&src, &dst).await?;
 
         #[cfg(windows)]
-        if tokio::fs::symlink_file(&src, &dst).await.is_err() {
-            std::fs::hard_link(&src, &dst)?;
+        {
+            match tokio::fs::symlink_file(&src, &dst).await {
+                Ok(()) => {
+                    tracing::debug!(target: TARGET, "Created symlink successfully");
+                }
+                Err(symlink_err) => {
+                    tracing::debug!(target: TARGET, "Symlink failed: {}, trying hard link", symlink_err);
+                    std::fs::hard_link(&src, &dst)
+                        .wrap_err_with(|| format!("Failed to create hard link from {} to {}", src.display(), dst.display()))?;
+                    tracing::debug!(target: TARGET, "Created hard link successfully");
+                }
+            }
         }
 
         Ok(())
