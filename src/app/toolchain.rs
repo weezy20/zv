@@ -53,18 +53,13 @@ impl ToolchainManager {
             None
         };
 
-        let mut toolchain_manager = Self {
+        let toolchain_manager = Self {
             versions_path,
             installations,
             active_install,
             bin_path,
             active_file,
         };
-
-        // ensure the active compiler is reachable in bin/
-        if let Some(ref install) = toolchain_manager.active_install {
-            toolchain_manager.deploy_active_link(install).await?;
-        }
 
         Ok(toolchain_manager)
     }
@@ -349,7 +344,18 @@ impl ToolchainManager {
     /// Deploys or updates the symlink in bin/ to point to the given install's zig executable
     async fn deploy_active_link(&self, install: &ZigInstall) -> Result<()> {
         let zig_exe = Shim::Zig.executable_name();
-        let src = install.path.join(&zig_exe);
+        
+        // Ensure we have the correct path to the zig executable
+        // install.path should be the directory containing zig, but handle cases where it might be the zig executable itself
+        let src = if install.path.file_name().and_then(|n| n.to_str()) == Some(zig_exe) {
+            // install.path points to the zig executable itself, use it directly
+            tracing::debug!(target: TARGET, "Install path points to executable directly: {}", install.path.display());
+            install.path.clone()
+        } else {
+            // install.path points to the directory, join with executable name
+            install.path.join(&zig_exe)
+        };
+        
         let dst = self.bin_path.join(&zig_exe);
 
         tracing::debug!(target: TARGET, src = %src.display(), dst = %dst.display(), "Deploying active link");
@@ -370,6 +376,7 @@ impl ToolchainManager {
                     (current_resolved.canonicalize(), src.canonicalize())
                 {
                     if current_canonical == src_canonical {
+                        tracing::debug!(target: TARGET, "Symlink already points to correct target, skipping");
                         return Ok(()); // identical target – nothing to do
                     }
                 }
@@ -382,6 +389,7 @@ impl ToolchainManager {
                 {
                     use std::os::unix::fs::MetadataExt;
                     if dst_meta.ino() == src_meta.ino() && dst_meta.dev() == src_meta.dev() {
+                        tracing::debug!(target: TARGET, "Hard link already points to correct target, skipping");
                         return Ok(()); // same file via hard link
                     }
                 }
@@ -391,6 +399,7 @@ impl ToolchainManager {
                     if dst_meta.len() == src_meta.len()
                         && dst_meta.modified().ok() == src_meta.modified().ok()
                     {
+                        tracing::debug!(target: TARGET, "File appears to be correct hard link, skipping");
                         return Ok(());
                     }
                 }
