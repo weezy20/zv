@@ -53,10 +53,6 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
 
 /// Resolves a ZigVersion against the app's index using network operations when needed
 ///
-/// This function validates user input by using existing app methods to fetch and validate
-/// versions. It applies appropriate cache strategies based on the version type and integrates
-/// with the app's network layer for validation. If a ZigRelease is found it is set into app's to_install field
-///
 /// # Arguments
 ///
 /// * `app` - Mutable reference to the App instance
@@ -66,19 +62,6 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
 ///
 /// * `Ok(ResolvedZigVersion)` - If the version was successfully resolved and validated
 /// * `Err(ZvError)` - If the version cannot be resolved or validation fails
-///
-/// # Cache Strategies Applied
-///
-/// * Semver/Stable with version: RespectTTL, fallback to OnlyCache
-/// * Latest: AlwaysRefresh, fallback to latest from OnlyCache
-/// * Master: AlwaysRefresh, fallback to OnlyCache
-///
-/// # Example usage:
-///
-/// ```rust
-/// let version = ZigVersion::Semver(Version::parse("0.11.0").unwrap());
-/// let resolved = resolve_zig_version(&mut app, &version).await?;
-/// ```
 pub async fn resolve_zig_version(
     app: &mut App,
     version: &ZigVersion,
