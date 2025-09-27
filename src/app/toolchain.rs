@@ -171,20 +171,12 @@ impl ToolchainManager {
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "zig archive".to_string());
+        // extract archive
         match ext {
             ArchiveExt::TarXz => {
                 progress_handle
                     .start(format!("Extracting {archive_name}"))
-                    .await
-            }
-            ArchiveExt::Zip => {
-                progress_handle
-                    .start(format!("Extracting {archive_name}"))
-                    .await
-            }
-        };
-        match ext {
-            ArchiveExt::TarXz => {
+                    .await;
                 let xz = xz2::read::XzDecoder::new(std::io::Cursor::new(bytes));
                 let mut ar = tar::Archive::new(xz);
                 if let Err(e) = ar.unpack(&archive_tmp) {
@@ -195,6 +187,9 @@ impl ToolchainManager {
                 }
             }
             ArchiveExt::Zip => {
+                progress_handle
+                    .start(format!("Extracting {archive_name}"))
+                    .await;
                 let mut ar = match zip::ZipArchive::new(std::io::Cursor::new(bytes)) {
                     Ok(ar) => ar,
                     Err(e) => {
@@ -273,7 +268,7 @@ impl ToolchainManager {
             return Err(eyre!("Zig executable not found after installation"));
         }
 
-        // --- 6.  promote to final location ------------------------------------------------------
+        // promote to final location
         if install_destination.exists() {
             fs::remove_dir_all(&install_destination).await?;
         }
@@ -294,7 +289,7 @@ impl ToolchainManager {
             fs::rename(&archive_tmp, &install_destination).await?;
         }
 
-        // --- 7.  update cache -------------------------------------------------------------------
+        // update cache
         let new_install = ZigInstall {
             version: version.clone(),
             path: install_destination.clone(),
