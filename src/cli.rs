@@ -99,7 +99,7 @@ pub enum Commands {
 
     /// Clean up Zig installations. Non-zv managed installations will not be affected.
     #[clap(name = "clean", alias = "rm")]
-    Clean { version: Option<ZigVersion> },
+    Clean { what: Option<String> },
 
     /// Setup shell environment for zv (required to make zig binaries available in $PATH)
     Setup {
@@ -167,7 +167,7 @@ impl Commands {
                 }
             },
             Commands::List => todo!(),
-            Commands::Clean { version: _version } => clean::clean_bin(&app).await,
+            Commands::Clean { what } => clean::clean(&app, what).await,
             Commands::Setup {
                 dry_run,
                 default_version,

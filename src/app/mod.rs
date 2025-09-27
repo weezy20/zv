@@ -56,7 +56,7 @@ pub struct App {
     /// <ZV_DIR>/bin/zls - Zv managed zls executable if any
     zls: Option<PathBuf>,
     /// <ZV_DIR>/versions - Installed versions
-    versions_path: PathBuf,
+    pub(crate) versions_path: PathBuf,
     /// <ZV_DIR>/config.toml - Config path
     config_path: PathBuf,
     /// <ZV_DIR>/env for *nix. For powershell/cmd prompt we rely on direct PATH variable manipulation.
@@ -139,11 +139,18 @@ impl App {
         Ok(app)
     }
 
-    /// Set the active Zig version
+    /// Set the active Zig version. Optionally provide the installed path to skip re-checking installation
     pub async fn set_active_version<'b>(
         &mut self,
         version: &'b ResolvedZigVersion,
+        installed_path: Option<PathBuf>,
     ) -> crate::Result<()> {
+        if let Some(p) = installed_path {
+            return self
+                .toolchain_manager
+                .set_active_version_with_path(version, p)
+                .await;
+        }
         self.toolchain_manager.set_active_version(version).await
     }
 
@@ -305,8 +312,8 @@ impl App {
 
     /// Check if version is installed returning Some(path) to zig binary if so
     #[inline]
-    pub fn check_installed(&self, version: &str, nested: Option<&str>) -> Option<PathBuf> {
-        self.toolchain_manager.is_version_installed(version, nested)
+    pub fn check_installed(&self, rzv: &ResolvedZigVersion) -> Option<PathBuf> {
+        self.toolchain_manager.is_version_installed(rzv)
     }
     /// Install the current loaded `to_install` ZigRelease
     pub async fn install_release(&mut self) -> Result<(), ZvError> {

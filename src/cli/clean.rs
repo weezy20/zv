@@ -2,6 +2,21 @@ use crate::App;
 use walkdir::WalkDir;
 use yansi::Paint;
 
+pub async fn clean(app: &App, what: Option<String>) -> crate::Result<()> {
+    match what.as_deref().unwrap_or("all") {
+        "bin" => clean_bin(app).await,
+        "all" => clean_all(app).await,
+        _ => {
+            eprintln!(
+                "{} Unknown clean target: {}. Use 'bin', 'versions', or 'all'.",
+                Paint::red("✗"),
+                what.expect("validated by unwrap_or")
+            );
+            Ok(())
+        }
+    }
+}
+
 /// Clean up executables from the bin directory, keeping only zv/zv.exe
 pub async fn clean_bin(app: &App) -> crate::Result<()> {
     let bin_path = app.bin_path();
@@ -63,5 +78,117 @@ pub async fn clean_bin(app: &App) -> crate::Result<()> {
         Paint::green("✓"),
         cleaned_count
     );
+    Ok(())
+}
+
+/// Clean up all Zig installations from the versions directory
+pub async fn clean_versions(app: &App) -> crate::Result<()> {
+    let versions_path = &app.versions_path;
+
+    println!("{}", Paint::cyan("Cleaning versions directory...").bold());
+
+    if !versions_path.exists() {
+        println!(
+            "{} Versions directory doesn't exist: {}",
+            Paint::yellow("⚠"),
+            versions_path.display()
+        );
+        return Ok(());
+    }
+
+    let mut cleaned_count = 0;
+    let mut failed_count = 0;
+
+    // Use walkdir to iterate through directories in versions_path
+    for entry in WalkDir::new(versions_path)
+        .max_depth(2) // Look at versions/* and versions/master/*
+        .min_depth(1) // Skip the versions_path itself
+        .into_iter()
+        .filter_map(|e| e.ok()) // Skip entries with errors
+        .filter(|e| e.file_type().is_dir())
+    // Only process directories
+    {
+        let path = entry.path();
+        let depth = entry.depth();
+
+        // Skip temporary directories (from failed installations)
+        if let Some(filename) = path.file_name() {
+            if filename.to_string_lossy().ends_with(".tmp") {
+                continue;
+            }
+        }
+
+        // We want to remove:
+        // - Depth 1: versions/0.13.0, versions/0.12.0, etc. (but not versions/master)
+        // - Depth 2: versions/master/0.14.0-dev.123, etc.
+        let should_remove = match depth {
+            1 => {
+                // Don't remove the master directory itself
+                path.file_name() != Some(std::ffi::OsStr::new("master"))
+            }
+            2 => {
+                // Remove any directory inside versions/master/
+                path.parent()
+                    .and_then(|p| p.file_name())
+                    .map(|name| name == "master")
+                    .unwrap_or(false)
+            }
+            _ => false,
+        };
+
+        if should_remove {
+            match tokio::fs::remove_dir_all(path).await {
+                Ok(()) => {
+                    cleaned_count += 1;
+                    let display_path = if depth == 2 {
+                        // For master builds, show master/version
+                        format!("master/{}", path.file_name().unwrap().to_string_lossy())
+                    } else {
+                        // For regular builds, show just the version
+                        path.file_name().unwrap().to_string_lossy().to_string()
+                    };
+                    println!("{} Removed: {}", Paint::red("✗"), display_path);
+                }
+                Err(e) => {
+                    failed_count += 1;
+                    eprintln!(
+                        "{} Failed to remove {}: {}",
+                        Paint::red("✗"),
+                        path.display(),
+                        e
+                    );
+                }
+            }
+        }
+    }
+
+    if failed_count > 0 {
+        println!(
+            "{} Cleaned {} installation(s), {} failed",
+            Paint::yellow("⚠"),
+            cleaned_count,
+            failed_count
+        );
+    } else {
+        println!(
+            "{} Cleaned {} Zig installation(s) from versions directory",
+            Paint::green("✓"),
+            cleaned_count
+        );
+    }
+
+    Ok(())
+}
+
+/// Clean up both bin and versions directories
+pub async fn clean_all(app: &App) -> crate::Result<()> {
+    println!("{}", Paint::cyan("Performing full cleanup...").bold());
+
+    clean_bin(app).await?;
+    println!(); // Add spacing
+    clean_versions(app).await?;
+
+    println!();
+    println!("{}", Paint::green("Full cleanup completed!").bold());
     Ok(())
 }

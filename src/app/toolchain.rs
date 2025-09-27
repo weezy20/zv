@@ -133,11 +133,13 @@ impl ToolchainManager {
         Ok(out)
     }
 
-    /// Check if a specific version is installed, optionally within a nested directory (e.g., "master")
-    pub fn is_version_installed(&self, version: &str, nested: Option<&str>) -> Option<PathBuf> {
-        let base = match nested {
-            Some(n) => self.versions_path.join(n).join(version),
-            None => self.versions_path.join(version),
+    /// Check if a specific version is installed
+    pub fn is_version_installed(&self, rzv: &ResolvedZigVersion) -> Option<PathBuf> {
+        let (is_master, version) = (rzv.is_master(), rzv.version());
+        let base = if is_master {
+            self.versions_path.join("master").join(version.to_string())
+        } else {
+            self.versions_path.join(version.to_string())
         };
         if !base.is_dir() {
             return None;
@@ -160,33 +162,29 @@ impl ToolchainManager {
             None => self.versions_path.join(version.to_string()),
         };
 
-        // If replacing an existing master installation, remove it from the vec first
-        if is_master && dest.exists() {
-            println!(
-                "Replacing existing master installation at {}",
-                dest.display()
-            );
-            fs::remove_dir_all(&dest).await?;
+        // Temporary dir for extraction
+        let temp_dest = dest.with_extension("tmp");
 
-            // Remove the old installation from our cache
-            self.installations
-                .retain(|install| !(install.version == *version && install.is_master));
+        // Clean up any existing temp directory
+        if temp_dest.exists() {
+            fs::remove_dir_all(&temp_dest).await?;
         }
 
-        fs::create_dir_all(&dest).await?;
+        fs::create_dir_all(&temp_dest).await?;
 
+        // Extract archive to temp directory
         let bytes = fs::read(archive_path).await?;
         match ext {
             ArchiveExt::TarXz => {
                 let xz = xz2::read::XzDecoder::new(std::io::Cursor::new(bytes));
                 let mut ar = tar::Archive::new(xz);
-                ar.unpack(&dest)?;
+                ar.unpack(&temp_dest)?;
             }
             ArchiveExt::Zip => {
                 let mut ar = zip::ZipArchive::new(std::io::Cursor::new(bytes))?;
                 for i in 0..ar.len() {
                     let mut file = ar.by_index(i)?;
-                    let out = dest.join(file.name());
+                    let out = temp_dest.join(file.name());
                     if file.is_dir() {
                         fs::create_dir_all(&out).await?;
                     } else {
@@ -200,17 +198,46 @@ impl ToolchainManager {
             }
         }
 
-        let zig_bin = dest.join(Shim::Zig.executable_name());
-        if !zig_bin.is_file() {
+        // Verify the installation is valid before committing
+        let temp_zig_bin = temp_dest.join(Shim::Zig.executable_name());
+        if !temp_zig_bin.is_file() {
+            // Clean up temp directory on failure
+            let _ = fs::remove_dir_all(&temp_dest).await;
             return Err(eyre!("Zig executable not found after installation"));
         }
 
-        // Add the new installation to our cache and keep it sorted
+        let old_install_to_remove = if is_master && dest.exists() {
+            // Find the old installation in our cache (we'll remove it after successful swap)
+            self.installations
+                .iter()
+                .position(|install| install.version == *version && install.is_master)
+        } else {
+            None
+        };
+
+        if dest.exists() {
+            fs::remove_dir_all(&dest).await?;
+        }
+
+        fs::rename(&temp_dest, &dest).await.with_context(|| {
+            format!(
+                "Failed to move installation from {} to {}",
+                temp_dest.display(),
+                dest.display()
+            )
+        })?;
+
+        // Update our cache only after successful installation
+        if let Some(pos) = old_install_to_remove {
+            self.installations.remove(pos);
+        }
+
         let new_install = ZigInstall {
             version: version.clone(),
             path: dest,
             is_master,
         };
+        let zig_bin = new_install.path.join(Shim::Zig.executable_name());
 
         // Insert in sorted position
         match self
@@ -218,7 +245,7 @@ impl ToolchainManager {
             .binary_search_by(|install| install.version.cmp(version))
         {
             Ok(pos) => {
-                // Version already exists, replace it (shouldn't happen unless we missed the cleanup above)
+                // Version already exists, replace it
                 self.installations[pos] = new_install;
             }
             Err(pos) => {
@@ -237,16 +264,36 @@ impl ToolchainManager {
             .installations
             .iter()
             .find(|i| &i.version == version)
-            .ok_or_else(|| eyre!("Version {} is not installed", version))?
-            .clone();
+            .ok_or_else(|| eyre!("Version {} is not installed", version))?;
 
-        self.deploy_active_link(&install).await?;
+        self.deploy_active_link(install).await?;
 
-        self.active_install = Some(install.clone());
-        let json = serde_json::to_vec(&install)?;
+        let json = serde_json::to_vec(&install)
+            .wrap_err("Failed to serialize Zig install for active file")?;
         fs::write(&self.active_file, json).await?;
+        self.active_install = Some(install.clone());
 
         println!("✓ Set active Zig version to {}", version);
+        Ok(())
+    }
+    /// Sets the active Zig version, updating the symlink in bin/ and writing to the active file
+    /// Optionally provide the installed path to skip re-checking installation
+    pub async fn set_active_version_with_path(
+        &mut self,
+        rzv: &ResolvedZigVersion,
+        installed_path: PathBuf,
+    ) -> Result<()> {
+        let zig_install = ZigInstall {
+            version: rzv.version().clone(),
+            path: installed_path,
+            is_master: rzv.is_master(),
+        };
+        self.deploy_active_link(&zig_install).await?;
+        let json = serde_json::to_vec(&zig_install)
+            .wrap_err("Failed to serialize Zig install for active file")?;
+        fs::write(&self.active_file, json).await?;
+        self.active_install = Some(zig_install.clone());
+        println!("✓ Set active Zig version to {}", rzv.version());
         Ok(())
     }
     /// Deploys or updates the symlink in bin/ to point to the given install's zig executable
