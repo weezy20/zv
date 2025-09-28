@@ -1,6 +1,6 @@
 use crate::shell::setup::{
     SetupContext, execute_setup, post_setup_actions, pre_setup_checks,
-    InteractiveSetup, apply_user_choices
+    InteractiveSetup, apply_user_choices, handle_interactive_error, is_recoverable_interactive_error
 };
 use crate::{App, Shell, ZigVersion};
 use color_eyre::eyre::Context as _;
@@ -70,8 +70,36 @@ pub async fn setup_shell(
     // Phase 2: Interactive confirmation (default behavior) or fallback to existing behavior
     let final_requirements = if should_use_interactive(&context) {
         let interactive_setup = InteractiveSetup::new(context.clone(), requirements.clone());
-        let user_choices = interactive_setup.run_interactive_flow().await?;
-        apply_user_choices(requirements, user_choices)?
+        
+        match interactive_setup.run_interactive_flow().await {
+            Ok(user_choices) => {
+                // Interactive flow succeeded, apply user choices
+                apply_user_choices(requirements, user_choices)?
+            }
+            Err(e) => {
+                // Try to downcast the error to ZvError for better handling
+                if let Some(zv_error) = e.downcast_ref::<crate::ZvError>() {
+                    // Interactive flow failed, check if we can recover
+                    if is_recoverable_interactive_error(zv_error) {
+                        // Provide clear error message and fallback
+                        if let Some(message) = handle_interactive_error(zv_error) {
+                            crate::tools::warn(message);
+                            crate::tools::warn("Falling back to non-interactive mode");
+                        }
+                        requirements
+                    } else {
+                        // User explicitly cancelled or non-recoverable error
+                        if let Some(suggestion) = handle_interactive_error(zv_error) {
+                            crate::tools::error(suggestion);
+                        }
+                        return Err(e);
+                    }
+                } else {
+                    // Non-ZvError, don't attempt recovery
+                    return Err(e);
+                }
+            }
+        }
     } else {
         // Fallback to existing behavior
         requirements
@@ -108,6 +136,18 @@ fn should_use_interactive(context: &SetupContext) -> bool {
         return false;
     }
 
+    // Don't use interactive mode in CI environments
+    if std::env::var("CI").is_ok() {
+        return false;
+    }
+
+    // Don't use interactive mode if TERM is dumb
+    if let Ok(term) = std::env::var("TERM") {
+        if term == "dumb" {
+            return false;
+        }
+    }
+
     // Check if TTY is available for interactive prompts
-    crate::tools::is_tty()
+    crate::tools::supports_interactive_prompts()
 }
