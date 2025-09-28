@@ -128,18 +128,12 @@ pub async fn setup_shell(
 /// 
 /// Interactive mode is automatically disabled when:
 /// - `--no-interactive` flag is provided
-/// - Running in dry-run mode (`--dry-run`)
 /// - CI environment is detected (CI environment variable is set)
 /// - TERM environment variable is set to "dumb"
 /// - TTY is not available for interactive prompts
 fn should_use_interactive(context: &SetupContext) -> bool {
     // Don't use interactive mode if explicitly disabled
     if context.no_interactive {
-        return false;
-    }
-
-    // Don't use interactive mode in dry run
-    if context.dry_run {
         return false;
     }
 

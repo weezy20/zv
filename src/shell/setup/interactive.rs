@@ -54,16 +54,16 @@ impl Theme for ZvTheme {
         active: bool,
     ) -> std::fmt::Result {
         if active {
-            // Active item: use zig orange background with white text for visibility
+            // Active item: use zig orange color with arrow indicator like modern tools
             write!(
                 f,
                 "{}",
                 Paint::new(format!("❯ {}", text))
-                    .fg(yansi::Color::White)
-                    .bg(yansi::Color::Rgb(247, 147, 26))
+                    .fg(yansi::Color::Rgb(247, 147, 26))
+                    .bold()
             )
         } else {
-            // Inactive items: use dim white for subtle appearance
+            // Inactive items: simple bullet with dim text
             write!(f, "  {}", Paint::new(text).fg(yansi::Color::White).dim())
         }
     }
