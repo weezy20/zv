@@ -119,7 +119,7 @@ pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
 }
 
 /// Get the default ZV directory, handling emulated shells on Windows
-fn get_default_zv_dir() -> Result<PathBuf> {
+pub(crate) fn get_default_zv_dir() -> Result<PathBuf> {
     // Use shell detection to determine appropriate home directory
     let shell = crate::shell::Shell::detect();
 

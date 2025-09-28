@@ -5,6 +5,7 @@ use yansi::Paint;
 pub mod actions;
 pub mod context;
 pub mod instructions;
+pub mod interactive;
 pub mod requirements;
 pub mod unix;
 pub mod windows;
@@ -12,6 +13,7 @@ pub mod windows;
 pub use actions::*;
 pub use context::*;
 pub use instructions::*;
+pub use interactive::*;
 pub use requirements::*;
 
 /// Pre-setup checks phase - analyze current system state and determine required actions

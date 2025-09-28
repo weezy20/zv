@@ -54,6 +54,7 @@ minisign-verify = "0.2.4"
 tar = "0.4.44"
 xz2 = "0.1.7"
 zip = "5.1.1"
+dialoguer = { version = "0.12.0", default-features = false }
 
 [target."cfg(windows)".dependencies]
 windows-registry = "0.6.0"
