@@ -102,6 +102,7 @@ pub enum Commands {
     Clean { what: Option<String> },
 
     /// Setup shell environment for zv (required to make zig binaries available in $PATH)
+    /// Interactive mode is enabled by default - use --no-interactive to disable
     Setup {
         /// Show what would be changed without making any modifications
         #[arg(
@@ -125,6 +126,12 @@ pub enum Commands {
             help = "Skip installing default zig compiler toolchain"
         )]
         no_zig: bool,
+        /// Disable interactive prompts and use default choices
+        #[arg(
+            long = "no-interactive",
+            help = "Disable interactive prompts and use default choices for automation"
+        )]
+        no_interactive: bool,
     },
 
     /// Synchronize index, mirrors list and metadata for zv.
@@ -172,6 +179,7 @@ impl Commands {
                 dry_run,
                 default_version,
                 no_zig,
+                no_interactive,
             } => {
                 // Validate that no_zig and default_version are not both specified
                 if no_zig && default_version.is_some() {
@@ -185,6 +193,7 @@ impl Commands {
                     &mut app,
                     using_env,
                     dry_run,
+                    no_interactive,
                     (!no_zig).then(|| {
                         default_version.unwrap_or_else(|| {
                             ZigVersion::placeholder_for_variant("latest").expect("valid zigversion")
