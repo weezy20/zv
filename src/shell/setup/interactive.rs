@@ -54,8 +54,8 @@ impl InteractiveSetup {
         // Prompt for ZV_DIR choice
         let zv_dir_choice = self.prompt_zv_dir_choice()?;
 
-        // Prompt for PATH choice (placeholder for now)
-        let path_choice = self.get_default_path_choice();
+        // Prompt for PATH choice
+        let path_choice = self.prompt_path_choice()?;
 
         Ok(UserChoices {
             zv_dir_choice,
@@ -209,6 +209,92 @@ impl InteractiveSetup {
                 println!("{}", Paint::yellow("ZV_DIR will not be made permanent"));
                 println!("  Note: You'll need to set ZV_DIR manually in future sessions");
                 Ok(ZvDirChoice::Skip)
+            }
+            _ => unreachable!("Invalid selection index"),
+        }
+    }
+
+    /// Prompt user for PATH modification choice with interactive dialog
+    fn prompt_path_choice(&self) -> crate::Result<PathChoice> {
+        // If PATH is already configured, no need to prompt
+        if matches!(
+            self.requirements.path_action,
+            super::PathAction::AlreadyConfigured
+        ) {
+            return Ok(PathChoice::Proceed(self.context.app.bin_path().clone()));
+        }
+
+        // Get the bin path that will be added to PATH
+        let bin_path = match &self.requirements.path_action {
+            super::PathAction::AddToRegistry { bin_path } => bin_path,
+            super::PathAction::GenerateEnvFile { bin_path, .. } => bin_path,
+            super::PathAction::AlreadyConfigured => {
+                // This case is handled above, but include for completeness
+                return Ok(PathChoice::Proceed(self.context.app.bin_path().clone()));
+            }
+        };
+
+        // Display explanation header
+        println!();
+        println!("{}", Paint::yellow("PATH Configuration").bold());
+        println!();
+        println!("zv needs to add its binary directory to your PATH to function properly:");
+        println!("  Will add: {}", Paint::cyan(&bin_path.display()));
+
+        // Show platform-specific modification method
+        if self.context.shell.is_windows_shell() && !self.context.shell.is_powershell_in_unix() {
+            println!("  Method: {}", Paint::dim("Windows system environment variables"));
+            println!("  Scope: {}", Paint::dim("Current user registry"));
+        } else {
+            println!("  Method: {}", Paint::dim("Shell profile modification"));
+            match &self.requirements.path_action {
+                super::PathAction::GenerateEnvFile { rc_file, .. } => {
+                    println!("  Profile: {}", Paint::dim(&rc_file.display()));
+                }
+                _ => {}
+            }
+        }
+
+        println!();
+        println!("{}", Paint::yellow("Note:").bold());
+        println!("  PATH modification is required for zv/zig/zls to work from any directory.");
+        println!();
+
+        // Create options with bullet-point style formatting
+        let options = vec![
+            format!("• Proceed with adding {} to PATH", bin_path.display()),
+            "• Abort setup".to_string(),
+        ];
+
+        // Create themed prompt with proceed as default (index 0)
+        let theme = ColorfulTheme::default();
+        let selection = Select::with_theme(&theme)
+            .with_prompt("PATH modification is required for zv to function:")
+            .items(&options)
+            .default(0) // Proceed is the default option
+            .interact()
+            .map_err(|e| {
+                crate::ZvError::shell_setup_failed(
+                    "interactive-prompt",
+                    &format!("Failed to get user input for PATH choice: {}", e),
+                )
+            })?;
+
+        // Convert selection to PathChoice
+        match selection {
+            0 => {
+                println!();
+                println!(
+                    "{}",
+                    Paint::green("Proceeding with PATH modifications")
+                );
+                Ok(PathChoice::Proceed(bin_path.clone()))
+            }
+            1 => {
+                println!();
+                println!("{}", Paint::red("Setup aborted by user"));
+                println!("  Note: zv may not function properly without PATH configuration");
+                Ok(PathChoice::Abort)
             }
             _ => unreachable!("Invalid selection index"),
         }
