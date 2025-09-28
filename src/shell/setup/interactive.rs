@@ -31,12 +31,12 @@ pub enum InteractiveError {
 /// Custom theme for zv interactive prompts that matches the existing color scheme
 ///
 /// This theme provides consistent visual formatting that aligns with zv's brand colors:
-/// - Zig orange (247, 147, 26) for active selections and headers
+/// - Zig orange (247, 147, 26) for active selections with arrow indicator
 /// - Yellow for prompts and important information
 /// - Green for success/positive actions
 /// - Red for errors/abort actions  
 /// - Cyan for file paths and informational text
-/// - White/dim for inactive items and secondary text
+/// - White for inactive items with simple indentation
 #[derive(Debug, Clone)]
 pub struct ZvTheme;
 
@@ -63,8 +63,8 @@ impl Theme for ZvTheme {
                     .bold()
             )
         } else {
-            // Inactive items: simple bullet with dim text
-            write!(f, "  {}", Paint::new(text).fg(yansi::Color::White).dim())
+            // Inactive items: simple bullet with normal text
+            write!(f, "  {}", Paint::new(text).fg(yansi::Color::White))
         }
     }
 

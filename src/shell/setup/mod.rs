@@ -66,12 +66,20 @@ pub async fn determine_zv_dir_action(context: &SetupContext) -> crate::Result<Zv
     if is_permanent {
         Ok(ZvDirAction::AlreadyPermanent)
     } else {
-        // ZV_DIR is set temporarily, ask user to make permanent (unless dry run)
+        // ZV_DIR is set temporarily, determine action based on mode
         if context.dry_run {
+            // In dry run, assume we would make it permanent for preview
+            Ok(ZvDirAction::MakePermanent {
+                current_path: zv_dir.clone(),
+            })
+        } else if will_use_interactive_mode(context) {
+            // Interactive mode will handle the user choice, so return MakePermanent
+            // as a placeholder - the interactive flow will determine the actual choice
             Ok(ZvDirAction::MakePermanent {
                 current_path: zv_dir.clone(),
             })
         } else {
+            // Non-interactive mode: ask user with old prompt
             let should_make_permanent = ask_user_zv_dir_confirmation(zv_dir)?;
             if should_make_permanent {
                 Ok(ZvDirAction::MakePermanent {
@@ -82,6 +90,29 @@ pub async fn determine_zv_dir_action(context: &SetupContext) -> crate::Result<Zv
             }
         }
     }
+}
+
+/// Check if interactive mode will be used based on context
+fn will_use_interactive_mode(context: &SetupContext) -> bool {
+    // Don't use interactive mode if explicitly disabled
+    if context.no_interactive {
+        return false;
+    }
+
+    // Don't use interactive mode in CI environments
+    if std::env::var("CI").is_ok() {
+        return false;
+    }
+
+    // Don't use interactive mode if TERM is dumb
+    if let Ok(term) = std::env::var("TERM") {
+        if term == "dumb" {
+            return false;
+        }
+    }
+
+    // Check if TTY is available for interactive prompts
+    crate::tools::supports_interactive_prompts()
 }
 
 /// Determine what action is needed for PATH configuration
