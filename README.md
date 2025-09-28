@@ -40,13 +40,17 @@ If not set, the default zv directory is `$HOME/.zv` on Unix-like systems and `$U
 
 ```sh
 # Run zv setup as a one-time step to set up directories and environment zv needs.
-# If you have ZV_DIR set, it'll prompt you if you wish to make it permanent.
+# Interactive mode is enabled by default, providing clear prompts about system changes.
+# Interactive mode is automatically disabled in CI environments or when TTY is not available.
 
 # First, preview changes:
 zv setup --dry-run | zv setup -d
 
 # Then, once you're happy, run:
-zv setup # This applies those changes and self-installs zv from your current working directory to <ZV_DIR>/bin
+zv setup # This applies those changes with interactive prompts and self-installs zv from your current invocation to <ZV_DIR>/bin in case versions mismatch
+
+# For automation or CI environments:
+zv setup --no-interactive
 
 # To get help about a particular subcommand:
 zv <subcommand> -h (short help) | --help (long help)
@@ -92,7 +96,7 @@ zv clean | rm                          # Remove Zig versions interactively.
 zv clean | rm <version | all>          # Clean up all zv-managed installations using `all` or just a single one (e.g., zv clean 0.14).
 zv clean 0.14,0.14.0                   # Clean up multiple Zig installations using a comma-separated list.
 zv rm master                           # Clean up the `master` branch toolchain.
-zv setup                               # Set up shell environment for zv and display instructions for including `$HOME/.zv/bin` or `<ZV_DIR>/bin` in $PATH
+zv setup                               # Set up shell environment for zv with interactive prompts (use --no-interactive for automation)
 zv sync                                # Resync community mirrors list from [ziglang.org/download/community-mirrors.txt]; also force resync of index to fetch latest nightly builds.
 zv help                                # Detailed instructions for zv. Use `--help` for long help or `-h` for short help with a subcommand.
 ```

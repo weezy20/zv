@@ -102,7 +102,10 @@ pub enum Commands {
     Clean { what: Option<String> },
 
     /// Setup shell environment for zv (required to make zig binaries available in $PATH)
-    /// Interactive mode is enabled by default - use --no-interactive to disable
+    /// 
+    /// Interactive mode is enabled by default, providing clear prompts about system changes.
+    /// Interactive mode is automatically disabled in CI environments, when TERM=dumb, 
+    /// or when TTY is not available.
     Setup {
         /// Show what would be changed without making any modifications
         #[arg(
@@ -126,10 +129,13 @@ pub enum Commands {
             help = "Skip installing default zig compiler toolchain"
         )]
         no_zig: bool,
-        /// Disable interactive prompts and use default choices
+        /// Disable interactive prompts and use default choices for automation
         #[arg(
             long = "no-interactive",
-            help = "Disable interactive prompts and use default choices for automation"
+            help = "Disable interactive prompts and use default choices for automation",
+            long_help = "Disable interactive prompts and use default choices for automation.\n\
+                         Interactive mode is automatically disabled in CI environments,\n\
+                         when TERM=dumb, or when TTY is not available."
         )]
         no_interactive: bool,
     },
@@ -360,7 +366,7 @@ fn print_welcome_message(app: App) {
     );
     print_command(
         "setup",
-        "Setup shell environment for zv (required to make zig binaries available in $PATH)",
+        "Setup shell environment for zv with interactive prompts (use --no-interactive to disable)",
     );
     print_command(
         "sync",
