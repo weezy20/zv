@@ -1,9 +1,148 @@
 use std::path::PathBuf;
 
-use dialoguer::{Select, theme::ColorfulTheme};
+use dialoguer::{
+    Select,
+    theme::{ColorfulTheme, Theme},
+};
 use yansi::Paint;
 
 use super::{SetupContext, SetupRequirements};
+
+/// Custom theme for zv interactive prompts that matches the existing color scheme
+///
+/// This theme provides consistent visual formatting that aligns with zv's brand colors:
+/// - Zig orange (247, 147, 26) for active selections and headers
+/// - Yellow for prompts and important information
+/// - Green for success/positive actions
+/// - Red for errors/abort actions  
+/// - Cyan for file paths and informational text
+/// - White/dim for inactive items and secondary text
+#[derive(Debug, Clone)]
+pub struct ZvTheme;
+
+impl Theme for ZvTheme {
+    /// Format the prompt text (the question being asked)
+    fn format_prompt(&self, f: &mut dyn std::fmt::Write, prompt: &str) -> std::fmt::Result {
+        write!(f, "{}", Paint::yellow(prompt).bold())
+    }
+
+    /// Format an individual item in a selection list
+    fn format_select_prompt_item(
+        &self,
+        f: &mut dyn std::fmt::Write,
+        text: &str,
+        active: bool,
+    ) -> std::fmt::Result {
+        if active {
+            // Active item: use zig orange background with white text for visibility
+            write!(
+                f,
+                "{}",
+                Paint::new(format!("❯ {}", text))
+                    .fg(yansi::Color::White)
+                    .bg(yansi::Color::Rgb(247, 147, 26))
+            )
+        } else {
+            // Inactive items: use dim white for subtle appearance
+            write!(f, "  {}", Paint::new(text).fg(yansi::Color::White).dim())
+        }
+    }
+
+    /// Format the confirmation prompt (y/n style prompts)
+    fn format_confirm_prompt(
+        &self,
+        f: &mut dyn std::fmt::Write,
+        prompt: &str,
+        default: Option<bool>,
+    ) -> std::fmt::Result {
+        match default {
+            Some(true) => write!(
+                f,
+                "{} {}",
+                Paint::yellow(prompt).bold(),
+                Paint::dim("[Y/n]")
+            ),
+            Some(false) => write!(
+                f,
+                "{} {}",
+                Paint::yellow(prompt).bold(),
+                Paint::dim("[y/N]")
+            ),
+            None => write!(
+                f,
+                "{} {}",
+                Paint::yellow(prompt).bold(),
+                Paint::dim("[y/n]")
+            ),
+        }
+    }
+
+    /// Format confirmation prompt after user makes a selection
+    fn format_confirm_prompt_selection(
+        &self,
+        f: &mut dyn std::fmt::Write,
+        prompt: &str,
+        selection: Option<bool>,
+    ) -> std::fmt::Result {
+        let selection_text = match selection {
+            Some(true) => Paint::green("yes"),
+            Some(false) => Paint::red("no"),
+            None => Paint::dim("n/a"),
+        };
+        write!(f, "{} {}", Paint::yellow(prompt).bold(), selection_text)
+    }
+
+    /// Format the final selection result for select prompts
+    fn format_select_prompt_selection(
+        &self,
+        f: &mut dyn std::fmt::Write,
+        prompt: &str,
+        sel: &str,
+    ) -> std::fmt::Result {
+        write!(f, "{} {}", Paint::yellow(prompt).bold(), Paint::cyan(sel))
+    }
+
+    /// Format input prompts (text input)
+    fn format_input_prompt(
+        &self,
+        f: &mut dyn std::fmt::Write,
+        prompt: &str,
+        default: Option<&str>,
+    ) -> std::fmt::Result {
+        match default {
+            Some(default) => write!(
+                f,
+                "{} {}",
+                Paint::yellow(prompt).bold(),
+                Paint::dim(&format!("[{}]", default))
+            ),
+            None => write!(f, "{}", Paint::yellow(prompt).bold()),
+        }
+    }
+
+    /// Format input prompt after user provides input
+    fn format_input_prompt_selection(
+        &self,
+        f: &mut dyn std::fmt::Write,
+        prompt: &str,
+        sel: &str,
+    ) -> std::fmt::Result {
+        write!(f, "{} {}", Paint::yellow(prompt).bold(), Paint::cyan(sel))
+    }
+}
+
+impl ZvTheme {
+    /// Create a new instance of the ZV theme
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for ZvTheme {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Core interactive setup coordinator
 #[derive(Debug, Clone)]
@@ -83,15 +222,9 @@ impl InteractiveSetup {
                 let default_path = self.get_default_zv_dir_path()?;
                 Ok(ZvDirChoice::UseDefault(default_path))
             }
-            super::ZvDirAction::MakePermanent { current_path } => {
-                // On Unix systems, default to skip; on Windows, default to detected
-                if self.context.shell.is_windows_shell()
-                    && !self.context.shell.is_powershell_in_unix()
-                {
-                    Ok(ZvDirChoice::UseDetected(current_path.clone()))
-                } else {
-                    Ok(ZvDirChoice::Skip)
-                }
+            super::ZvDirAction::MakePermanent { current_path: _ } => {
+                // Always default to skipping ZV_DIR permanent setup for consistency
+                Ok(ZvDirChoice::Skip)
             }
             super::ZvDirAction::AlreadyPermanent => {
                 Ok(ZvDirChoice::UseDetected(self.context.app.path().clone()))
@@ -143,43 +276,50 @@ impl InteractiveSetup {
             return Ok(ZvDirChoice::UseDefault(default_path));
         }
 
-        // Display explanation header
+        // Display explanation header with enhanced visual formatting
         println!();
-        println!("{}", Paint::yellow("ZV_DIR Configuration").bold());
+        println!(
+            "{}",
+            Paint::new("━━━ ZV_DIR Configuration ━━━")
+                .fg(yansi::Color::Rgb(247, 147, 26))
+                .bold()
+        );
         println!();
         println!("Your environment has ZV_DIR set to a custom location:");
         println!(
-            "  Current detected: {}",
-            Paint::cyan(&current_path.display())
+            "  {} {}",
+            Paint::new("Current detected:").bold(),
+            Paint::cyan(&current_path.display()).underline()
         );
         println!(
-            "  Default location: {}",
+            "  {} {}",
+            Paint::new("Default location:").bold(),
             Paint::dim(&default_path.display())
         );
         println!();
 
-        // Create options with bullet-point style formatting
-        let options = vec![
-            format!("• Use detected ZV_DIR ({})", current_path.display()),
-            format!("• Use default ZV_DIR ({})", default_path.display()),
-            "• Skip making ZV_DIR permanent".to_string(),
+        // Always recommend skipping ZV_DIR permanent setup and using default location
+        let enhanced_options = vec![
+            format!(
+                "Make detected ZV_DIR permanent → {}",
+                Paint::cyan(&current_path.display()).bold()
+            ),
+            format!(
+                "Make default ZV_DIR permanent → {}",
+                Paint::dim(&default_path.display())
+            ),
+            format!(
+                "Skip making ZV_DIR a permanent environment variable {}",
+                Paint::green("(recommended)")
+            ),
         ];
+        let default_index = 2; // Always default to skipping ZV_DIR permanent setup
 
-        // Platform-specific default selection
-        // Unix defaults to skip (index 2), Windows defaults to detected (index 0)
-        let default_index = if self.context.shell.is_windows_shell()
-            && !self.context.shell.is_powershell_in_unix()
-        {
-            0 // Windows defaults to using detected ZV_DIR
-        } else {
-            2 // Unix defaults to skip making ZV_DIR permanent
-        };
-
-        // Create themed prompt
-        let theme = ColorfulTheme::default();
+        // Create themed prompt using custom zv theme
+        let theme = ZvTheme::new();
         let selection = Select::with_theme(&theme)
             .with_prompt("How would you like to handle ZV_DIR?")
-            .items(&options)
+            .items(&enhanced_options)
             .default(default_index)
             .interact()
             .map_err(|e| {
@@ -195,19 +335,34 @@ impl InteractiveSetup {
                 println!();
                 println!(
                     "{}",
-                    Paint::green("Will make detected ZV_DIR permanent in environment")
+                    Paint::new("✓ Will make detected ZV_DIR a permanent environment variable")
+                        .fg(yansi::Color::Green)
+                        .bold()
                 );
                 Ok(ZvDirChoice::UseDetected(current_path))
             }
             1 => {
                 println!();
-                println!("{}", Paint::green("Will use default ZV_DIR location"));
+                println!(
+                    "{}",
+                    Paint::new("✓ Will make default ZV_DIR a permanent environment variable")
+                        .fg(yansi::Color::Green)
+                        .bold()
+                );
                 Ok(ZvDirChoice::UseDefault(default_path))
             }
             2 => {
                 println!();
-                println!("{}", Paint::yellow("ZV_DIR will not be made permanent"));
-                println!("  Note: You'll need to set ZV_DIR manually in future sessions");
+                println!(
+                    "{}",
+                    Paint::new("⚠ ZV_DIR will not be made a permanent environment variable")
+                        .fg(yansi::Color::Yellow)
+                        .bold()
+                );
+                println!(
+                    "  {} You'll need to set ZV_DIR manually in future sessions",
+                    Paint::dim("Note:")
+                );
                 Ok(ZvDirChoice::Skip)
             }
             _ => unreachable!("Invalid selection index"),
@@ -234,40 +389,69 @@ impl InteractiveSetup {
             }
         };
 
-        // Display explanation header
+        // Display explanation header with enhanced visual formatting
         println!();
-        println!("{}", Paint::yellow("PATH Configuration").bold());
+        println!(
+            "{}",
+            Paint::new("━━━ PATH Configuration ━━━")
+                .fg(yansi::Color::Rgb(247, 147, 26))
+                .bold()
+        );
         println!();
         println!("zv needs to add its binary directory to your PATH to function properly:");
-        println!("  Will add: {}", Paint::cyan(&bin_path.display()));
+        println!(
+            "  {} {}",
+            Paint::new("Will add:").bold(),
+            Paint::cyan(&bin_path.display()).underline()
+        );
 
-        // Show platform-specific modification method
+        // Show platform-specific modification method with enhanced formatting
         if self.context.shell.is_windows_shell() && !self.context.shell.is_powershell_in_unix() {
-            println!("  Method: {}", Paint::dim("Windows system environment variables"));
-            println!("  Scope: {}", Paint::dim("Current user registry"));
+            println!(
+                "  {} {}",
+                Paint::new("Method:").bold(),
+                Paint::dim("Windows system environment variables")
+            );
+            println!(
+                "  {} {}",
+                Paint::new("Scope:").bold(),
+                Paint::dim("Current user registry")
+            );
         } else {
-            println!("  Method: {}", Paint::dim("Shell profile modification"));
+            println!(
+                "  {} {}",
+                Paint::new("Method:").bold(),
+                Paint::dim("Shell profile modification")
+            );
             match &self.requirements.path_action {
                 super::PathAction::GenerateEnvFile { rc_file, .. } => {
-                    println!("  Profile: {}", Paint::dim(&rc_file.display()));
+                    println!(
+                        "  {} {}",
+                        Paint::new("Profile:").bold(),
+                        Paint::dim(&rc_file.display())
+                    );
                 }
                 _ => {}
             }
         }
 
         println!();
-        println!("{}", Paint::yellow("Note:").bold());
+        println!("{}", Paint::new("ℹ Note:").fg(yansi::Color::Blue).bold());
         println!("  PATH modification is required for zv/zig/zls to work from any directory.");
         println!();
 
-        // Create options with bullet-point style formatting
+        // Create options with enhanced formatting and default indicator
         let options = vec![
-            format!("• Proceed with adding {} to PATH", bin_path.display()),
-            "• Abort setup".to_string(),
+            format!(
+                "Proceed → Add {} to PATH {}",
+                Paint::cyan(&bin_path.display()).bold(),
+                Paint::green("(recommended)")
+            ),
+            format!("{}", Paint::red("Abort setup")),
         ];
 
         // Create themed prompt with proceed as default (index 0)
-        let theme = ColorfulTheme::default();
+        let theme = ZvTheme::new();
         let selection = Select::with_theme(&theme)
             .with_prompt("PATH modification is required for zv to function:")
             .items(&options)
@@ -286,14 +470,24 @@ impl InteractiveSetup {
                 println!();
                 println!(
                     "{}",
-                    Paint::green("Proceeding with PATH modifications")
+                    Paint::new("✓ Proceeding with PATH modifications")
+                        .fg(yansi::Color::Green)
+                        .bold()
                 );
                 Ok(PathChoice::Proceed(bin_path.clone()))
             }
             1 => {
                 println!();
-                println!("{}", Paint::red("Setup aborted by user"));
-                println!("  Note: zv may not function properly without PATH configuration");
+                println!(
+                    "{}",
+                    Paint::new("✗ Setup aborted by user")
+                        .fg(yansi::Color::Red)
+                        .bold()
+                );
+                println!(
+                    "  {} zv may not function properly without PATH configuration",
+                    Paint::dim("Note:")
+                );
                 Ok(PathChoice::Abort)
             }
             _ => unreachable!("Invalid selection index"),
