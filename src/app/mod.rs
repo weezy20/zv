@@ -44,6 +44,12 @@ pub static MAX_RETRIES: LazyLock<u32> = LazyLock::new(|| {
         .unwrap_or(3)
 });
 
+impl App {
+    pub fn download_cache(&self) -> &Path {
+        &self.download_cache
+    }
+}
+
 /// Zv App State
 #[derive(Debug, Clone)]
 pub struct App {
