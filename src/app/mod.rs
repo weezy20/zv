@@ -383,12 +383,24 @@ impl App {
             tarball_path,
             minisig_path,
             mirror_used,
-        } = self
-            .network
-            .as_mut()
-            .unwrap()
-            .download_version(&semver_version, &zig_tarball, download_artifact)
-            .await?;
+        } = if !force_ziglang {
+            self.network
+                .as_mut()
+                .unwrap()
+                .download_version(&semver_version, &zig_tarball, download_artifact)
+                .await?
+        } else {
+            tracing::info!(target: "zv", "--force-ziglang: Using ziglang.org as download source");
+            let download_url = &download_artifact.ziglang_org_tarball;
+            let minisig_url = format!("{}.minisig", download_url);
+            let shasum = &download_artifact.shasum;
+            todo!();
+            ZigDownload {
+                tarball_path: todo!(),
+                minisig_path: todo!(),
+                mirror_used: download_url.to_string(),
+            }
+        };
         tracing::debug!(
             target: TARGET,
             tarball = %tarball_path.display(),
