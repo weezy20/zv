@@ -52,8 +52,10 @@ fn detect_shell_from_string(shell_str: &str) -> Option<ShellType> {
 /// Main shell detection logic
 pub fn detect_shell() -> ShellType {
     if cfg!(windows) {
+        tracing::debug!(target: "shell_detection", "cfg!(windows)");
         detect_windows_shell()
     } else {
+        tracing::debug!(target: "shell_detection", "cfg!(not(windows))");
         detect_unix_shell()
     }
 }

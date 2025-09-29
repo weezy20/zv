@@ -316,7 +316,7 @@ impl App {
         self.toolchain_manager.is_version_installed(rzv)
     }
     /// Install the current loaded `to_install` ZigRelease
-    pub async fn install_release(&mut self) -> Result<(), ZvError> {
+    pub async fn install_release(&mut self, force_ziglang: bool) -> Result<(), ZvError> {
         const TARGET: &str = "zv::app::install_release";
 
         let zig_release = self.to_install.take().ok_or_else(|| {
@@ -350,8 +350,11 @@ impl App {
             unreachable!("Unknown archive extension for tarball: {}", zig_tarball)
         };
         tracing::debug!(target: TARGET, ?ext, "Detected archive format");
-
-        self.ensure_network_with_mirrors().await?;
+        if !force_ziglang {
+            self.ensure_network_with_mirrors().await?;
+        } else {
+            self.ensure_network().await?;
+        }
         let host_target = utils::host_target().ok_or_else(|| {
             eyre!(
                 "Could not determine host target for Zig version {}",
