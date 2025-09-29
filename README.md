@@ -78,9 +78,10 @@ zv init --zig | -z                     # Create a new Zig project using the stan
 
 ```sh
 # Version selection - basic usage
+# pass in -f or --force-ziglang to download using `ziglang.org` instead of community mirrors (default & recommended)
 zv use <version | master | stable | latest> # Select a Zig version to use. Can be a semver, master (branch)
 zv use 0.13.0                               # Use a specific semantic version
-zv use 0.14                                 # Use a version (auto-completes to 0.14.0)
+zv use 0.14 -f                              # Use a version (auto-completes to 0.14.0) & downloads from `ziglang.org` due to -f
 zv use master                               # Use master branch build (queries network to find the latest master build)
 zv use stable                               # Use latest stable release (refers to cached index)
 zv use latest                               # Use latest stable release (queries network to fetch the latest stable)
@@ -92,9 +93,10 @@ zig [...zig args]                       # Uses current configured Zig or prefers
 
 # Management commands
 zv list  | ls                          # List installed Zig versions
-zv clean | rm                          # Remove Zig versions interactively.
+zv clean | rm                          # Remove Zig versions interactively. Additionally cleans up downloads cache, temporary download artifacts.
 zv clean | rm <version | all>          # Clean up all zv-managed installations using `all` or just a single one (e.g., zv clean 0.14).
 zv clean 0.14,0.14.0                   # Clean up multiple Zig installations using a comma-separated list.
+zv clean --except <version>            # Clean up every version except the version mentioned as argument to --except <version>
 zv rm master                           # Clean up the `master` branch toolchain.
 zv setup                               # Set up shell environment for zv with interactive prompts (use --no-interactive for automation)
 zv sync                                # Resync community mirrors list from [ziglang.org/download/community-mirrors.txt]; also force resync of index to fetch latest nightly builds.
