@@ -53,6 +53,15 @@ pub enum ShellErr {
         shell_type: String,
         platform: String,
     },
+
+    #[error("Interactive prompt failed: {reason}")]
+    InteractivePromptFailed { reason: String },
+
+    #[error("Interactive mode not available: {reason}")]
+    InteractiveModeNotAvailable { reason: String },
+
+    #[error("User cancelled interactive setup")]
+    UserCancelledInteractive,
 }
 
 impl ShellErr {
@@ -158,6 +167,25 @@ impl ShellErr {
         }
     }
 
+    /// Create an interactive prompt failed error
+    pub fn interactive_prompt_failed(reason: &str) -> Self {
+        Self::InteractivePromptFailed {
+            reason: reason.to_string(),
+        }
+    }
+
+    /// Create an interactive mode not available error
+    pub fn interactive_mode_not_available(reason: &str) -> Self {
+        Self::InteractiveModeNotAvailable {
+            reason: reason.to_string(),
+        }
+    }
+
+    /// Create a user cancelled interactive error
+    pub fn user_cancelled_interactive() -> Self {
+        Self::UserCancelledInteractive
+    }
+
     /// Get error recovery suggestions for common failure modes
     pub fn recovery_suggestion(&self) -> Option<String> {
         match self {
@@ -199,6 +227,21 @@ impl ShellErr {
                     "Setup incomplete because '{}' was declined. You can run 'zv setup' again to retry.",
                     operation
                 ))
+            }
+            Self::InteractivePromptFailed { reason } => {
+                Some(format!(
+                    "Interactive prompt failed: {}. Try running 'zv setup --no-interactive' to use non-interactive mode.",
+                    reason
+                ))
+            }
+            Self::InteractiveModeNotAvailable { reason } => {
+                Some(format!(
+                    "Interactive mode not available: {}. Falling back to non-interactive mode.",
+                    reason
+                ))
+            }
+            Self::UserCancelledInteractive => {
+                Some("Setup was cancelled by user. You can run 'zv setup' again to retry.".to_string())
             }
             _ => None,
         }
@@ -348,6 +391,21 @@ impl ZvError {
     /// Create a shell unsupported configuration error
     pub fn shell_unsupported_configuration(shell_type: &str, platform: &str) -> Self {
         Self::ShellError(ShellErr::unsupported_configuration(shell_type, platform))
+    }
+
+    /// Create a shell interactive prompt failed error
+    pub fn shell_interactive_prompt_failed(reason: &str) -> Self {
+        Self::ShellError(ShellErr::interactive_prompt_failed(reason))
+    }
+
+    /// Create a shell interactive mode not available error
+    pub fn shell_interactive_mode_not_available(reason: &str) -> Self {
+        Self::ShellError(ShellErr::interactive_mode_not_available(reason))
+    }
+
+    /// Create a shell user cancelled interactive error
+    pub fn shell_user_cancelled_interactive() -> Self {
+        Self::ShellError(ShellErr::user_cancelled_interactive())
     }
 
     /// Get error recovery suggestions if available

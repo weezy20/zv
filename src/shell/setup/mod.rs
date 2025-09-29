@@ -5,6 +5,7 @@ use yansi::Paint;
 pub mod actions;
 pub mod context;
 pub mod instructions;
+pub mod interactive;
 pub mod requirements;
 pub mod unix;
 pub mod windows;
@@ -12,6 +13,7 @@ pub mod windows;
 pub use actions::*;
 pub use context::*;
 pub use instructions::*;
+pub use interactive::*;
 pub use requirements::*;
 
 /// Pre-setup checks phase - analyze current system state and determine required actions
@@ -64,12 +66,20 @@ pub async fn determine_zv_dir_action(context: &SetupContext) -> crate::Result<Zv
     if is_permanent {
         Ok(ZvDirAction::AlreadyPermanent)
     } else {
-        // ZV_DIR is set temporarily, ask user to make permanent (unless dry run)
+        // ZV_DIR is set temporarily, determine action based on mode
         if context.dry_run {
+            // In dry run, assume we would make it permanent for preview
+            Ok(ZvDirAction::MakePermanent {
+                current_path: zv_dir.clone(),
+            })
+        } else if will_use_interactive_mode(context) {
+            // Interactive mode will handle the user choice, so return MakePermanent
+            // as a placeholder - the interactive flow will determine the actual choice
             Ok(ZvDirAction::MakePermanent {
                 current_path: zv_dir.clone(),
             })
         } else {
+            // Non-interactive mode: ask user with old prompt
             let should_make_permanent = ask_user_zv_dir_confirmation(zv_dir)?;
             if should_make_permanent {
                 Ok(ZvDirAction::MakePermanent {
@@ -80,6 +90,29 @@ pub async fn determine_zv_dir_action(context: &SetupContext) -> crate::Result<Zv
             }
         }
     }
+}
+
+/// Check if interactive mode will be used based on context
+fn will_use_interactive_mode(context: &SetupContext) -> bool {
+    // Don't use interactive mode if explicitly disabled
+    if context.no_interactive {
+        return false;
+    }
+
+    // Don't use interactive mode in CI environments
+    if std::env::var("CI").is_ok() {
+        return false;
+    }
+
+    // Don't use interactive mode if TERM is dumb
+    if let Ok(term) = std::env::var("TERM") {
+        if term == "dumb" {
+            return false;
+        }
+    }
+
+    // Check if TTY is available for interactive prompts
+    crate::tools::supports_interactive_prompts()
 }
 
 /// Determine what action is needed for PATH configuration
@@ -477,157 +510,4 @@ pub async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crate::Resu
     Ok(())
 }
 
-/// Main setup coordination function that orchestrates all three phases
-pub async fn setup_shell(app: &App, using_env_var: bool, dry_run: bool) -> crate::Result<()> {
-    use color_eyre::eyre::Context;
-    use yansi::Paint;
 
-    // Phase 1: Create SetupContext and validate
-    let shell = app.shell.clone().unwrap_or_default();
-    let context = SetupContext::new(shell.clone(), app.clone(), using_env_var, dry_run);
-
-    if dry_run {
-        println!("{}", Paint::cyan("→ zv Setup (Dry Run)"));
-        println!("Shell: {}", Paint::cyan(&shell.to_string()));
-        println!("ZV_DIR: {}", Paint::cyan(&app.path().display().to_string()));
-        println!(
-            "Bin Path: {}",
-            Paint::cyan(&app.bin_path().display().to_string())
-        );
-        println!();
-    } else {
-        println!("{}", Paint::green("→ zv Setup"));
-        println!("Shell: {}", Paint::green(&shell.to_string()));
-        println!(
-            "ZV_DIR: {}",
-            Paint::green(&app.path().display().to_string())
-        );
-        println!(
-            "Bin Path: {}",
-            Paint::green(&app.bin_path().display().to_string())
-        );
-        println!();
-    }
-
-    // Phase 2: Pre-setup checks - analyze current system state
-    let requirements = pre_setup_checks(&context)
-        .await
-        .with_context(|| "Pre-setup checks failed")?;
-
-    if dry_run {
-        println!("{}", Paint::cyan("→ Pre-Setup Analysis"));
-    } else {
-        println!("{}", Paint::green("→ Pre-Setup Analysis"));
-    }
-
-    // Display analysis results
-    if requirements.zv_bin_in_path {
-        println!("✓ zv bin directory is already in PATH");
-    } else {
-        println!("• zv bin directory needs to be added to PATH");
-    }
-
-    match &requirements.zv_dir_action {
-        ZvDirAction::NotSet => {
-            println!("✓ ZV_DIR: Using default path (no permanent setting needed)");
-        }
-        ZvDirAction::AlreadyPermanent => {
-            println!("✓ ZV_DIR: Already set permanently");
-        }
-        ZvDirAction::MakePermanent { current_path } => {
-            if dry_run {
-                println!("• ZV_DIR: Would set {} permanently", current_path.display());
-            } else {
-                println!("• ZV_DIR: Will set {} permanently", current_path.display());
-            }
-        }
-    }
-
-    match &requirements.path_action {
-        PathAction::AlreadyConfigured => {
-            println!("✓ PATH: Already configured");
-        }
-        PathAction::AddToRegistry { bin_path } => {
-            if dry_run {
-                println!(
-                    "• PATH: Would add {} via Windows registry",
-                    bin_path.display()
-                );
-            } else {
-                println!(
-                    "• PATH: Will add {} via Windows registry",
-                    bin_path.display()
-                );
-            }
-        }
-        PathAction::GenerateEnvFile {
-            env_file_path,
-            rc_file,
-            bin_path: _,
-        } => {
-            if dry_run {
-                println!(
-                    "• PATH: Would generate env file at {}",
-                    env_file_path.display()
-                );
-                println!("• PATH: Would modify shell config at {}", rc_file.display());
-            } else {
-                println!(
-                    "• PATH: Will generate env file at {}",
-                    env_file_path.display()
-                );
-                println!("• PATH: Will modify shell config at {}", rc_file.display());
-            }
-        }
-    }
-
-    if requirements.needs_post_setup {
-        if dry_run {
-            println!("• Post-setup: Would copy binary and regenerate shims");
-        } else {
-            println!("• Post-setup: Will copy binary and regenerate shims");
-        }
-    } else {
-        println!("✓ Post-setup: No actions needed");
-    }
-
-    println!();
-
-    // Check if any setup is actually needed
-    let setup_needed = !requirements.zv_bin_in_path
-        || requirements.zv_dir_action.modifies_system()
-        || requirements.path_action.modifies_system()
-        || requirements.needs_post_setup;
-
-    if !setup_needed {
-        println!(
-            "{}",
-            Paint::green("✓ Shell environment is already configured - no setup needed")
-        );
-        return Ok(());
-    }
-
-    // Phase 3: Execute setup based on requirements
-    execute_setup(&context, &requirements)
-        .await
-        .with_context(|| "Setup execution failed")?;
-
-    // Success message
-    if dry_run {
-        println!();
-        println!("{}", Paint::cyan("→ Dry Run Complete"));
-        println!("Run without --dry-run to perform actual setup");
-    } else {
-        println!();
-        println!("{}", Paint::green("→ Setup Complete"));
-        println!("Shell environment has been configured for zv");
-
-        // Generate and display shell-specific post-setup instructions
-        let modified_files = context.get_modified_files();
-        let instructions =
-            PostSetupInstructions::generate_for_shell(&context.shell, modified_files);
-        instructions.display();
-    }
-
-    Ok(())
-}

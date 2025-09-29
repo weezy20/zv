@@ -180,6 +180,92 @@ pub async fn clean_versions(app: &App) -> crate::Result<()> {
     Ok(())
 }
 
+pub fn clean_downloads(app: &App) {
+    let downloads_path = app.download_cache();
+    println!("{}", Paint::cyan("Cleaning downloads directory...").bold());
+
+    match std::fs::read_dir(&downloads_path) {
+        Ok(entries) => {
+            let mut removed_count = 0;
+            let mut failed_count = 0;
+
+            for entry in entries.flatten() {
+                let path = entry.path();
+
+                // Special handling for tmp folder - clean its contents but keep the folder
+                if path.is_dir() && path.file_name().and_then(|n| n.to_str()) == Some("tmp") {
+                    for entry in WalkDir::new(&path).min_depth(1).contents_first(true) {
+                        if let Ok(entry) = entry {
+                            let entry_path = entry.path();
+                            let result = if entry_path.is_dir() {
+                                std::fs::remove_dir(entry_path)
+                            } else {
+                                std::fs::remove_file(entry_path)
+                            };
+
+                            match result {
+                                Ok(_) => removed_count += 1,
+                                Err(e) => {
+                                    eprintln!(
+                                        "{} Failed to remove {}: {}",
+                                        Paint::red("✗"),
+                                        entry_path.display(),
+                                        e
+                                    );
+                                    failed_count += 1;
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                // Remove everything else normally
+                let result = if path.is_dir() {
+                    std::fs::remove_dir_all(&path)
+                } else {
+                    std::fs::remove_file(&path)
+                };
+
+                match result {
+                    Ok(_) => removed_count += 1,
+                    Err(e) => {
+                        eprintln!(
+                            "{} Failed to remove {}: {}",
+                            Paint::red("✗"),
+                            path.display(),
+                            e
+                        );
+                        failed_count += 1;
+                    }
+                }
+            }
+
+            if failed_count == 0 {
+                println!(
+                    "{} Cleaned downloads directory ({} items removed)",
+                    Paint::green("✓"),
+                    removed_count
+                );
+            } else {
+                println!(
+                    "{} Partially cleaned downloads directory ({} removed, {} failed)",
+                    Paint::yellow("⚠"),
+                    removed_count,
+                    failed_count
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "{} Failed to read downloads directory: {}",
+                Paint::red("✗"),
+                e
+            );
+        }
+    }
+}
+
 /// Clean up both bin and versions directories
 pub async fn clean_all(app: &App) -> crate::Result<()> {
     println!("{}", Paint::cyan("Performing full cleanup...").bold());
@@ -187,7 +273,7 @@ pub async fn clean_all(app: &App) -> crate::Result<()> {
     clean_bin(app).await?;
     println!(); // Add spacing
     clean_versions(app).await?;
-
+    clean_downloads(app);
     println!();
     println!("{}", Paint::green("Full cleanup completed!").bold());
     Ok(())

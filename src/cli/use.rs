@@ -14,7 +14,11 @@ use std::path::PathBuf;
 use yansi::Paint;
 
 /// Main entry point for the use command
-pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Result<()> {
+pub(crate) async fn use_version(
+    zig_version: ZigVersion,
+    app: &mut App,
+    force_ziglang: bool,
+) -> Result<()> {
     // Resolve ZigVersion to a validated ResolvedZigVersion
     // This already does all the validation and fetching we need
     let resolved_version = resolve_zig_version(app, &zig_version).await
@@ -34,7 +38,7 @@ pub(crate) async fn use_version(zig_version: ZigVersion, app: &mut App) -> Resul
         // Version is already installed, just set it as active
         app.set_active_version(&resolved_version, Some(p)).await?
     } else {
-        app.install_release().await.wrap_err_with(|| {
+        app.install_release(force_ziglang).await.wrap_err_with(|| {
             format!(
                 "Failed to download and install Zig version {}",
                 resolved_version

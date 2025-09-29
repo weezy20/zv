@@ -79,6 +79,13 @@ pub enum Commands {
 
     /// Select which Zig version to use - master | latest | stable | <semver>,
     Use {
+        /// Force using ziglang.org as a download source. Default is to use community mirrors.
+        #[arg(
+            long = "force-ziglang",
+            short = 'f',
+            long_help = "Force using ziglang.org as a download source. Default is to use community mirrors."
+        )]
+        force_ziglang: bool,
         /// Version of Zig to use
         #[arg(
             value_parser = clap::value_parser!(ZigVersion),
@@ -102,6 +109,10 @@ pub enum Commands {
     Clean { what: Option<String> },
 
     /// Setup shell environment for zv (required to make zig binaries available in $PATH)
+    ///
+    /// Interactive mode is enabled by default, providing clear prompts about system changes.
+    /// Interactive mode is automatically disabled in CI environments, when TERM=dumb,
+    /// or when TTY is not available.
     Setup {
         /// Show what would be changed without making any modifications
         #[arg(
@@ -125,6 +136,15 @@ pub enum Commands {
             help = "Skip installing default zig compiler toolchain"
         )]
         no_zig: bool,
+        /// Disable interactive prompts and use default choices for automation
+        #[arg(
+            long = "no-interactive",
+            help = "Disable interactive prompts and use default choices for automation",
+            long_help = "Disable interactive prompts and use default choices for automation.\n\
+                         Interactive mode is automatically disabled in CI environments,\n\
+                         when TERM=dumb, or when TTY is not available."
+        )]
+        no_interactive: bool,
     },
 
     /// Synchronize index, mirrors list and metadata for zv.
@@ -159,8 +179,11 @@ impl Commands {
                     init::init_project(Template::new(project_name, TemplateType::Embedded), &app)
                 }
             }
-            Commands::Use { version } => match version {
-                Some(version) => r#use::use_version(version, &mut app).await,
+            Commands::Use {
+                version,
+                force_ziglang,
+            } => match version {
+                Some(version) => r#use::use_version(version, &mut app, force_ziglang).await,
                 None => {
                     error("Version must be specified. e.g., `zv use latest` or `zv use 0.15.1`");
                     std::process::exit(2);
@@ -172,6 +195,7 @@ impl Commands {
                 dry_run,
                 default_version,
                 no_zig,
+                no_interactive,
             } => {
                 // Validate that no_zig and default_version are not both specified
                 if no_zig && default_version.is_some() {
@@ -185,6 +209,7 @@ impl Commands {
                     &mut app,
                     using_env,
                     dry_run,
+                    no_interactive,
                     (!no_zig).then(|| {
                         default_version.unwrap_or_else(|| {
                             ZigVersion::placeholder_for_variant("latest").expect("valid zigversion")
@@ -351,7 +376,7 @@ fn print_welcome_message(app: App) {
     );
     print_command(
         "setup",
-        "Setup shell environment for zv (required to make zig binaries available in $PATH)",
+        "Setup shell environment for zv with interactive prompts (use --no-interactive to disable)",
     );
     print_command(
         "sync",

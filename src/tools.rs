@@ -21,6 +21,34 @@ pub(crate) fn is_tty() -> bool {
     yansi::is_enabled()
 }
 
+/// Check if the current environment supports interactive prompts
+pub(crate) fn supports_interactive_prompts() -> bool {
+    // Check basic TTY availability
+    if !is_tty() {
+        return false;
+    }
+
+    // Check for CI environments
+    if std::env::var("CI").is_ok() {
+        return false;
+    }
+
+    // Check for non-interactive terminals
+    if let Ok(term) = std::env::var("TERM") {
+        if term == "dumb" {
+            return false;
+        }
+    }
+
+    // Additional environment checks
+    if std::env::var("DEBIAN_FRONTEND").as_deref() == Ok("noninteractive") {
+        return false;
+    }
+
+    // For now, rely on yansi's TTY detection which handles most cases
+    true
+}
+
 /// Macro to print standardized solution suggestions with bullet points
 ///
 /// Usage:
@@ -119,7 +147,7 @@ pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
 }
 
 /// Get the default ZV directory, handling emulated shells on Windows
-fn get_default_zv_dir() -> Result<PathBuf> {
+pub(crate) fn get_default_zv_dir() -> Result<PathBuf> {
     // Use shell detection to determine appropriate home directory
     let shell = crate::shell::Shell::detect();
 

@@ -13,7 +13,11 @@ pub struct SetupContext {
     pub using_env_var: bool,
     /// Whether to perform actual operations or just preview
     pub dry_run: bool,
+    /// Whether to disable interactive prompts and use defaults
+    pub no_interactive: bool,
     /// Files modified during setup (for post-setup instructions)
+    /// Uses Arc<Mutex<>> to allow modification through immutable references
+    /// since setup functions take &SetupContext but need to track modifications
     pub modified_files: std::sync::Arc<std::sync::Mutex<Vec<ModifiedFile>>>,
 }
 
@@ -25,6 +29,25 @@ impl SetupContext {
             app,
             using_env_var,
             dry_run,
+            no_interactive: false,
+            modified_files: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Create a new setup context with interactive mode control
+    pub fn new_with_interactive(
+        shell: Shell,
+        app: App,
+        using_env_var: bool,
+        dry_run: bool,
+        no_interactive: bool,
+    ) -> Self {
+        Self {
+            shell,
+            app,
+            using_env_var,
+            dry_run,
+            no_interactive,
             modified_files: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
