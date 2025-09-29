@@ -69,11 +69,12 @@ impl ZvNetwork {
     /// Initialize ZvNetwork with given base path (ZV_DIR)
     pub async fn new(
         zv_base_path: impl AsRef<Path>,
+        download_cache: PathBuf,
     ) -> Result<Self, ZvError> {
         let client = create_client()?;
 
         Ok(Self {
-            download_cache: zv_base_path.as_ref().join("downloads"),
+            download_cache,
             index_manager: IndexManager::new(
                 zv_base_path.as_ref().join("index.toml"),
                 client.clone(),
@@ -526,6 +527,97 @@ impl ZvNetwork {
                 })
             }
         }
+    }
+
+    /// Direct download function for --force-ziglang mode
+    /// Downloads tarball and minisig directly from ziglang.org, verifies checksum and minisign signature
+    pub async fn direct_download(
+        &self,
+        tarball_url: &str,
+        minisig_url: &str,
+        zig_tarball: &str,
+        expected_shasum: &str,
+        expected_size: u64,
+    ) -> Result<ZigDownload, ZvError> {
+        const TARGET: &str = "zv::network::direct_download";
+        
+        tracing::debug!(target: TARGET, "Starting direct download from ziglang.org");
+        tracing::debug!(target: TARGET, "Tarball URL: {}", tarball_url);
+        tracing::debug!(target: TARGET, "Minisig URL: {}", minisig_url);
+        tracing::debug!(target: TARGET, "Expected size: {} bytes ({:.1} MB)", expected_size, expected_size as f64 / 1_048_576.0);
+        tracing::debug!(target: TARGET, "Expected checksum: {}", expected_shasum);
+
+        // Ensure download cache directory exists
+        if !self.download_cache.exists() {
+            tokio::fs::create_dir_all(&self.download_cache)
+                .await
+                .map_err(ZvError::Io)
+                .wrap_err("Failed to create download cache directory")?;
+        }
+
+        let final_tarball_path = self.download_cache.join(zig_tarball);
+        let final_minisig_path = self.download_cache.join(format!("{}.minisig", zig_tarball));
+        
+        let progress_handle = ProgressHandle::spawn();
+
+        // Phase 1: Download tarball directly from ziglang.org
+        tracing::debug!(target: TARGET, "Downloading tarball directly from {}", tarball_url);
+        let progress_msg = format!("Downloading {} from ziglang.org", zig_tarball);
+        if let Err(e) = progress_handle.start(&progress_msg).await {
+            tracing::debug!(target: TARGET, "Failed to start progress reporting: {} - continuing without progress updates", e);
+        }
+
+        stream_download_file(
+            &self.client,
+            tarball_url,
+            &final_tarball_path,
+            expected_size,
+            &progress_handle,
+        )
+        .await
+        .map_err(ZvError::NetworkError)?;
+
+        // Phase 2: Verify checksum
+        tracing::debug!(target: TARGET, "Verifying tarball checksum");
+        verify_checksum(&final_tarball_path, expected_shasum).await?;
+
+        // Phase 3: Download minisig file directly from ziglang.org
+        tracing::debug!(target: TARGET, "Downloading signature file directly from {}", minisig_url);
+        if let Err(e) = progress_handle.update("Downloading signature file...").await {
+            tracing::warn!(target: TARGET, "Failed to update progress for minisig download: {} - continuing", e);
+        }
+
+        stream_download_file(
+            &self.client,
+            minisig_url,
+            &final_minisig_path,
+            0, // minisig files are small, size unknown
+            &progress_handle,
+        )
+        .await
+        .map_err(ZvError::NetworkError)?;
+
+        // Phase 4: Verify minisign signature
+        tracing::debug!(target: TARGET, "Verifying minisign signature");
+        if let Err(e) = progress_handle.update("Verifying signature...").await {
+            tracing::warn!(target: TARGET, "Failed to update progress for signature verification: {} - continuing", e);
+        }
+
+        crate::app::minisign::verify_minisign_signature(&final_tarball_path, &final_minisig_path)?;
+
+        // Finish progress reporting
+        if let Err(e) = progress_handle.finish("Download and verification completed").await {
+            tracing::debug!(target: TARGET, "Failed to finish progress handle: {} - This is non-critical", e);
+        }
+
+        tracing::debug!(target: TARGET, "Successfully downloaded and verified {} ({:.1} MB) from ziglang.org", 
+                     zig_tarball, expected_size as f64 / 1_048_576.0);
+
+        Ok(ZigDownload {
+            tarball_path: final_tarball_path,
+            minisig_path: final_minisig_path,
+            mirror_used: tarball_url.to_string(),
+        })
     }
 }
 

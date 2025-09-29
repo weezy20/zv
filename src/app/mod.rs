@@ -51,6 +51,8 @@ pub struct App {
     zv_base_path: PathBuf,
     /// <ZV_DIR>/bin - Binary symlink location
     bin_path: PathBuf,
+    /// <ZV_DIR>/downloads -  Download cache path
+    download_cache: PathBuf,
     /// <ZV_DIR>/bin/zig - Zv managed zig executable if any
     zig: Option<PathBuf>,
     /// <ZV_DIR>/bin/zls - Zv managed zls executable if any
@@ -85,7 +87,7 @@ impl App {
     ) -> Result<Self, ZvError> {
         /* path is canonicalized in tools::fetch_zv_dir() so we don't need to do that here */
         let bin_path = zv_base_path.join("bin");
-
+        let download_cache = zv_base_path.as_path().join("downloads");
         let mut zig = None;
         let mut zls = None;
 
@@ -127,6 +129,7 @@ impl App {
                 path_utils::check_dir_in_path(&bin_path)
             },
             bin_path,
+            download_cache,
             config_path,
             env_path,
             config,
@@ -157,14 +160,19 @@ impl App {
     /// Initialize network client if not already done
     pub async fn ensure_network(&mut self) -> Result<(), ZvError> {
         if self.network.is_none() {
-            self.network = Some(network::ZvNetwork::new(self.zv_base_path.as_path()).await?);
+            self.network = Some(
+                network::ZvNetwork::new(self.zv_base_path.as_path(), self.download_cache.clone())
+                    .await?,
+            );
         }
         Ok(())
     }
     /// Initialize network client with mirror manager if not already done
     pub async fn ensure_network_with_mirrors(&mut self) -> Result<(), ZvError> {
         if self.network.is_none() {
-            let mut net = network::ZvNetwork::new(self.zv_base_path.as_path()).await?;
+            let mut net =
+                network::ZvNetwork::new(self.zv_base_path.as_path(), self.download_cache.clone())
+                    .await?;
             net.ensure_mirror_manager().await?;
             self.network = Some(net);
         } else if self.network.is_some() {
@@ -391,15 +399,17 @@ impl App {
                 .await?
         } else {
             tracing::info!(target: "zv", "--force-ziglang: Using ziglang.org as download source");
-            let download_url = &download_artifact.ziglang_org_tarball;
-            let minisig_url = format!("{}.minisig", download_url);
-            let shasum = &download_artifact.shasum;
-            todo!();
-            ZigDownload {
-                tarball_path: todo!(),
-                minisig_path: todo!(),
-                mirror_used: download_url.to_string(),
-            }
+            self.network
+                .as_mut()
+                .unwrap()
+                .direct_download(
+                    &download_artifact.ziglang_org_tarball,
+                    &format!("{}.minisig", &download_artifact.ziglang_org_tarball),
+                    &zig_tarball,
+                    &download_artifact.shasum,
+                    download_artifact.size,
+                )
+                .await?
         };
         tracing::debug!(
             target: TARGET,
