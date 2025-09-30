@@ -320,12 +320,12 @@ impl Mirror {
         match self.layout {
             Layout::Flat => format!(
                 "{}/{tarball}?source={}",
-                self.base_url.to_string(),
+                self.base_url.to_string().trim_end_matches('/'),
                 zv_agent()
             ),
             Layout::Versioned => format!(
                 "{}/{}/{}?source={}",
-                self.base_url.to_string(),
+                self.base_url.to_string().trim_end_matches('/'),
                 version,
                 tarball,
                 zv_agent()
