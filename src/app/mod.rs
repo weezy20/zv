@@ -320,7 +320,7 @@ impl App {
         self.toolchain_manager.is_version_installed(rzv)
     }
     /// Install the current loaded `to_install` ZigRelease
-    pub async fn install_release(&mut self, force_ziglang: bool) -> Result<(), ZvError> {
+    pub async fn install_release(&mut self, force_ziglang: bool) -> Result<PathBuf, ZvError> {
         const TARGET: &str = "zv::app::install_release";
 
         let zig_release = self.to_install.take().ok_or_else(|| {
@@ -415,7 +415,8 @@ impl App {
             "Download completed"
         );
 
-        self.toolchain_manager
+        let zig_exe = self
+            .toolchain_manager
             .install_version(&tarball_path, &semver_version, ext, is_master)
             .await?;
         tracing::info!(
@@ -427,6 +428,6 @@ impl App {
         remove_files(&[tarball_path.as_path(), minisig_path.as_path()]).await;
         tracing::debug!(target: TARGET, "Cleaned up temporary download files");
 
-        Ok(())
+        Ok(zig_exe)
     }
 }
