@@ -98,6 +98,7 @@ pub async fn generate_unix_env_file(
     env_file_path: &Path,
     zv_dir: &Path,
     bin_path: &Path,
+    export_zv_dir: bool,
 ) -> crate::Result<()> {
     use crate::shell::path_utils::{escape_path_for_shell, normalize_path_for_shell};
 
@@ -108,7 +109,7 @@ pub async fn generate_unix_env_file(
     let escaped_bin_path = escape_path_for_shell(shell, &bin_path_str);
 
     // Generate shell-specific content
-    let content = shell.generate_env_content(&escaped_zv_dir, &escaped_bin_path);
+    let content = shell.generate_env_content(&escaped_zv_dir, &escaped_bin_path, export_zv_dir);
 
     // Create parent directories if they don't exist
     if let Some(parent) = env_file_path.parent() {
@@ -120,8 +121,8 @@ pub async fn generate_unix_env_file(
         })?;
     }
 
-    // Write the environment file
-    tokio::fs::write(env_file_path, content)
+    // Write the environment file with proper line endings
+    crate::shell::env_export::write_shell_file_with_line_endings(env_file_path, &content)
         .await
         .map_err(|e| {
             tracing::error!(target: TARGET,
@@ -179,8 +180,8 @@ pub async fn add_source_to_rc_file(
         })?;
     }
 
-    // Write the updated content
-    tokio::fs::write(rc_file, content).await.map_err(|e| {
+    // Write the updated content with proper line endings
+    write_rc_file_with_line_endings(rc_file, &content).await.map_err(|e| {
         crate::ZvError::shell_rc_file_modification_failed(&rc_file.display().to_string(), e)
     })?;
 
@@ -253,8 +254,8 @@ pub async fn add_zv_dir_export_to_rc_file(
         })?;
     }
 
-    // Write the updated content
-    tokio::fs::write(rc_file, content).await.map_err(|e| {
+    // Write the updated content with proper line endings
+    write_rc_file_with_line_endings(rc_file, &content).await.map_err(|e| {
         crate::ZvError::shell_rc_file_modification_failed(&rc_file.display().to_string(), e)
     })?;
 
@@ -373,7 +374,7 @@ pub async fn execute_path_setup_unix(
     };
 
     // Generate the environment file
-    generate_unix_env_file(&context.shell, env_file_path, context.app.path(), bin_path).await?;
+    generate_unix_env_file(&context.shell, env_file_path, context.app.path(), bin_path, context.using_env_var).await?;
 
     println!(
         "✓ Generated environment file at {}",
@@ -401,4 +402,11 @@ pub async fn execute_path_setup_unix(
     ));
 
     Ok(())
+}
+/// Write RC file content with proper line endings (always Unix LF for RC files)
+async fn write_rc_file_with_line_endings(file_path: &Path, content: &str) -> Result<(), std::io::Error> {
+    // RC files should always use Unix line endings (LF) even on Windows
+    // because they're shell configuration files
+    let normalized_content = content.replace("\r\n", "\n");
+    tokio::fs::write(file_path, normalized_content).await
 }

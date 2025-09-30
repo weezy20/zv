@@ -15,7 +15,8 @@ pub fn generate_powershell_content(zv_dir: &str, zv_bin_path: &str) -> String {
             is_emulated: cfg!(unix), // PowerShell on Unix is emulated
         },
     };
-    shell.generate_env_content(zv_dir, zv_bin_path)
+    // Default to exporting ZV_DIR for backward compatibility
+    shell.generate_env_content(zv_dir, zv_bin_path, true)
 }
 
 /// Generate Windows Command Prompt batch script
@@ -29,7 +30,8 @@ pub fn generate_cmd_content(zv_dir: &str, zv_bin_path: &str) -> String {
             is_emulated: false,
         },
     };
-    shell.generate_env_content(zv_dir, zv_bin_path)
+    // Default to exporting ZV_DIR for backward compatibility
+    shell.generate_env_content(zv_dir, zv_bin_path, true)
 }
 
 /// Generate Fish shell setup script
@@ -47,7 +49,8 @@ pub fn generate_fish_content(zv_dir: &str, zv_bin_path: &str) -> String {
             is_emulated: cfg!(target_os = "windows"), // Fish on Windows is emulated
         },
     };
-    shell.generate_env_content(zv_dir, zv_bin_path)
+    // Default to exporting ZV_DIR for backward compatibility
+    shell.generate_env_content(zv_dir, zv_bin_path, true)
 }
 
 /// Generate Nushell setup script
@@ -65,7 +68,8 @@ pub fn generate_nu_content(zv_dir: &str, zv_bin_path: &str) -> String {
             is_emulated: cfg!(target_os = "windows"), // Nu on Windows is emulated
         },
     };
-    shell.generate_env_content(zv_dir, zv_bin_path)
+    // Default to exporting ZV_DIR for backward compatibility
+    shell.generate_env_content(zv_dir, zv_bin_path, true)
 }
 
 /// Generate tcsh/csh setup script
@@ -83,7 +87,8 @@ pub fn generate_tcsh_content(zv_dir: &str, zv_bin_path: &str) -> String {
             is_emulated: cfg!(target_os = "windows"), // Tcsh on Windows is emulated
         },
     };
-    shell.generate_env_content(zv_dir, zv_bin_path)
+    // Default to exporting ZV_DIR for backward compatibility
+    shell.generate_env_content(zv_dir, zv_bin_path, true)
 }
 
 /// Generate POSIX-compliant shell setup script (bash, zsh, sh)
@@ -101,13 +106,15 @@ pub fn generate_posix_content(zv_dir: &str, zv_bin_path: &str) -> String {
             is_emulated: cfg!(target_os = "windows"), // Bash on Windows is emulated
         },
     };
-    shell.generate_env_content(zv_dir, zv_bin_path)
+    // Default to exporting ZV_DIR for backward compatibility
+    shell.generate_env_content(zv_dir, zv_bin_path, true)
 }
 
 /// Generate shell-specific uninstall/cleanup script
 /// This function is now a wrapper around the Shell::generate_cleanup_content method
 pub fn generate_cleanup_content(shell: &Shell, zv_dir: &str, zv_bin_path: &str) -> String {
-    shell.generate_cleanup_content(zv_dir, zv_bin_path)
+    // Default to cleaning up ZV_DIR for backward compatibility
+    shell.generate_cleanup_content(zv_dir, zv_bin_path, true)
 }
 
 /// Generate PowerShell cleanup script
@@ -124,7 +131,7 @@ fn generate_powershell_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
             is_emulated: cfg!(unix), // PowerShell on Unix is emulated
         },
     };
-    shell.generate_cleanup_content(zv_dir, zv_bin_path)
+    shell.generate_cleanup_content(zv_dir, zv_bin_path, true)
 }
 
 /// Generate CMD cleanup script
@@ -137,7 +144,7 @@ fn generate_cmd_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
             is_emulated: false,
         },
     };
-    shell.generate_cleanup_content(zv_dir, zv_bin_path)
+    shell.generate_cleanup_content(zv_dir, zv_bin_path, true)
 }
 
 /// Generate Fish cleanup script
@@ -154,7 +161,7 @@ fn generate_fish_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
             is_emulated: cfg!(target_os = "windows"), // Fish on Windows is emulated
         },
     };
-    shell.generate_cleanup_content(zv_dir, zv_bin_path)
+    shell.generate_cleanup_content(zv_dir, zv_bin_path, true)
 }
 
 /// Generate Nushell cleanup script
@@ -171,7 +178,7 @@ fn generate_nu_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
             is_emulated: cfg!(target_os = "windows"), // Nu on Windows is emulated
         },
     };
-    shell.generate_cleanup_content(zv_dir, zv_bin_path)
+    shell.generate_cleanup_content(zv_dir, zv_bin_path, true)
 }
 
 /// Generate tcsh cleanup script
@@ -188,7 +195,7 @@ fn generate_tcsh_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
             is_emulated: cfg!(target_os = "windows"), // Tcsh on Windows is emulated
         },
     };
-    shell.generate_cleanup_content(zv_dir, zv_bin_path)
+    shell.generate_cleanup_content(zv_dir, zv_bin_path, true)
 }
 
 /// Generate POSIX cleanup script
@@ -205,7 +212,7 @@ fn generate_posix_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
             is_emulated: cfg!(target_os = "windows"), // Bash on Windows is emulated
         },
     };
-    shell.generate_cleanup_content(zv_dir, zv_bin_path)
+    shell.generate_cleanup_content(zv_dir, zv_bin_path, true)
 }
 
 /// Generate shell-specific instructions for manual setup

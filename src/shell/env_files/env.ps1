@@ -3,7 +3,7 @@
 # [Environment]::SetEnvironmentVariable("ZV_DIR", "{zv_dir}", "User")
 # [Environment]::SetEnvironmentVariable("PATH", "{zv_bin_path}{zv_path_separator}$env:PATH", "User")
 
-$env:ZV_DIR = "{zv_dir}"
+{zv_dir_export}
 if ($env:PATH -notlike "*{zv_bin_path}*") {{
     $env:PATH = "{zv_bin_path}{zv_path_separator}$env:PATH"
 }}
