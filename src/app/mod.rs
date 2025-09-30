@@ -1,4 +1,3 @@
-pub(crate) mod config;
 pub mod constants;
 pub(crate) mod network;
 pub(crate) mod toolchain;
@@ -15,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::{Arc, LazyLock};
 use toolchain::ToolchainManager;
+
 /// 21 days default TTL for index
 pub static INDEX_TTL_DAYS: LazyLock<i64> = LazyLock::new(|| {
     std::env::var("ZV_INDEX_TTL_DAYS")
@@ -65,12 +65,8 @@ pub struct App {
     zls: Option<PathBuf>,
     /// <ZV_DIR>/versions - Installed versions
     pub(crate) versions_path: PathBuf,
-    /// <ZV_DIR>/config.toml - Config path
-    config_path: PathBuf,
     /// <ZV_DIR>/env for *nix. For powershell/cmd prompt we rely on direct PATH variable manipulation.
     env_path: PathBuf,
-    /// <ZV_DIR>/config.toml - Configuration implementation
-    config: Option<config::ZvConfig>,
     /// Network client
     network: Option<network::ZvNetwork>,
     /// Toolchain manager
@@ -114,10 +110,6 @@ impl App {
                 .wrap_err("Creation of versions directory failed")?;
         }
 
-        let config_path = zv_base_path.join("config.toml");
-
-        let config = None;
-
         let env_path = if let Some(ref shell_type) = shell {
             zv_base_path.join(shell_type.env_file_name())
         } else {
@@ -136,9 +128,7 @@ impl App {
             },
             bin_path,
             download_cache,
-            config_path,
             env_path,
-            config,
             toolchain_manager: ToolchainManager::new(zv_base_path.as_path()).await?,
             zv_base_path,
             versions_path,

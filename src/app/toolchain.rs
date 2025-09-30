@@ -30,7 +30,7 @@ impl ToolchainManager {
         let zv_root = zv_root.as_ref().to_path_buf();
         let versions_path = zv_root.join("versions");
         let bin_path = zv_root.join("bin");
-        let active_file = zv_root.join("active");
+        let active_file = zv_root.join("active.json");
 
         // discover what is on disk
         let installations =
