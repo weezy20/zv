@@ -12,22 +12,29 @@ pub async fn zig_main() -> crate::Result<()> {
     args.remove(0); // drop program name
 
     // Check for +version override (only if it's the first argument)
-    let version_override = if args.first().map_or(false, |arg| arg.starts_with('+')) {
+    let inline_version_override = if args.first().map_or(false, |arg| arg.starts_with('+')) {
         Some(args.remove(0).strip_prefix('+').unwrap().to_string())
     } else {
         None
     };
+    // Check for .zigversion file in current directory
 
-    let zig_path = if let Some(version_str) = version_override {
+    let zig_path = if let Some(version_str) = inline_version_override {
         // Parse the version override
-        let version = version_str
+        let zv = version_str
             .parse::<ZigVersion>()
             .map_err(|e| eyre!("Invalid version override '+{}': {}", version_str, e))?;
 
-        find_zig_for_version(&version)?
+        find_zig_for_version(&zv)?
     } else {
-        // Default to system zig or zv-managed zig
-        find_default_zig().await?
+        // Check for .zigversion file in current directory
+        if let Some(zv) = find_zigversion_from_file() {
+            find_zig_for_version(&zv)?
+        }
+        // Default to current active zig
+        else {
+            find_default_zig().await?
+        }
     };
 
     // Get current recursion count for incrementing
@@ -49,7 +56,19 @@ pub async fn zig_main() -> crate::Result<()> {
         .wait()
         .map_err(|e| eyre!("Failed to wait for zig: {}", e))?;
 
-    std::process::exit(status.code().unwrap_or(3));
+    if let Some(code) = status.code() {
+        std::process::exit(code);
+    } else {
+        // On Unix, process was terminated by signal
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            if let Some(signal) = status.signal() {
+                std::process::exit(128 + signal);
+            }
+        }
+        std::process::exit(1);
+    }
 }
 
 /// Find the Zig executable for a specific version
@@ -122,4 +141,31 @@ async fn find_default_zig() -> crate::Result<PathBuf> {
 
     // Fall back to system zig
     bail!("Could not find zig executable")
+}
+
+/// Search for a .zigversion file in the current directory or its ancestors
+/// Returns the parsed ZigVersion if found beside a build.zig file
+fn find_zigversion_from_file() -> Option<ZigVersion> {
+    let mut current = std::env::current_dir().ok()?;
+
+    loop {
+        // Check if build.zig exists (project root marker)
+        if current.join("build.zig").exists() {
+            // Look for .zigversion in same directory
+            let zigversion_file = current.join(".zigversion");
+            if zigversion_file.exists() {
+                return std::fs::read_to_string(zigversion_file)
+                    .ok()
+                    .and_then(|s| s.trim().parse::<ZigVersion>().ok());
+            }
+            break;
+        }
+
+        // Move up to parent directory
+        if !current.pop() {
+            break;
+        }
+    }
+
+    None
 }
