@@ -393,7 +393,7 @@ pub async fn copy_zv_binary_if_needed(app: &App, dry_run: bool) -> crate::Result
         match files_have_same_hash(&current_exe, &target_exe) {
             Ok(true) => {
                 if !dry_run {
-                    println!("✓ zv binary is up to date in bin directory");
+                    println!("✓ zv binary present ({})", Paint::green(&target_exe.display()));
                 }
                 return Ok(());
             }
@@ -471,7 +471,7 @@ pub async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crate::Resu
 
     if !has_zig_shim && !has_zls_shim {
         if !dry_run {
-            println!("No zig/zls shims found - nothing to regenerate");
+            println!("No pre-existing zig/zls shims found - nothing to regenerate");
         }
         return Ok(());
     }
@@ -509,5 +509,3 @@ pub async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crate::Resu
 
     Ok(())
 }
-
-
