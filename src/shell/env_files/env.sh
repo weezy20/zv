@@ -1,7 +1,7 @@
 #!/bin/sh
 # zv shell setup
 # affix colons on either side of $PATH to simplify matching
-export ZV_DIR="{zv_dir}"
+{zv_dir_export}
 case ":{zv_path_separator}${PATH}{zv_path_separator}" in
     *{zv_path_separator}{zv_bin_path}{zv_path_separator}*)
         ;;

@@ -286,7 +286,7 @@ impl Shell {
     }
 
     /// Generate shell-specific environment content using templates
-    pub fn generate_env_content(&self, zv_dir: &str, zv_bin_path: &str) -> String {
+    pub fn generate_env_content(&self, zv_dir: &str, zv_bin_path: &str, export_zv_dir: bool) -> String {
         use crate::shell::path_utils::escape_path_for_shell;
 
         // Escape paths for shell-specific safety
@@ -312,14 +312,29 @@ impl Shell {
             }
         };
 
+        // Generate the ZV_DIR export line based on shell type and whether it should be exported
+        let zv_dir_export = if export_zv_dir {
+            match self.shell_type {
+                ShellType::PowerShell => format!("$env:ZV_DIR = \"{}\"", escaped_zv_dir),
+                ShellType::Cmd => format!("set \"ZV_DIR={}\"", escaped_zv_dir),
+                ShellType::Fish => format!("set -gx ZV_DIR \"{}\"", escaped_zv_dir),
+                ShellType::Nu => format!("$env.ZV_DIR = \"{}\"", escaped_zv_dir),
+                ShellType::Tcsh => format!("setenv ZV_DIR \"{}\"", escaped_zv_dir),
+                _ => format!("export ZV_DIR=\"{}\"", escaped_zv_dir), // POSIX shells
+            }
+        } else {
+            String::new()
+        };
+
         template
+            .replace("{zv_dir_export}", &zv_dir_export)
             .replace("{zv_dir}", &escaped_zv_dir)
             .replace("{zv_bin_path}", &escaped_bin_path)
             .replace("{zv_path_separator}", &path_separator.to_string())
     }
 
     /// Generate shell-specific cleanup content using templates
-    pub fn generate_cleanup_content(&self, zv_dir: &str, zv_bin_path: &str) -> String {
+    pub fn generate_cleanup_content(&self, zv_dir: &str, zv_bin_path: &str, export_zv_dir: bool) -> String {
         use crate::shell::path_utils::escape_path_for_shell;
 
         // Escape paths for shell-specific safety
@@ -342,7 +357,22 @@ impl Shell {
             }
         };
 
+        // Generate the ZV_DIR cleanup line based on shell type and whether it was exported
+        let zv_dir_cleanup = if export_zv_dir {
+            match self.shell_type {
+                ShellType::PowerShell => "Remove-Item Env:ZV_DIR -ErrorAction SilentlyContinue".to_string(),
+                ShellType::Cmd => "set \"ZV_DIR=\"".to_string(),
+                ShellType::Fish => "set -e ZV_DIR".to_string(),
+                ShellType::Nu => "$env.ZV_DIR = null".to_string(),
+                ShellType::Tcsh => "unsetenv ZV_DIR".to_string(),
+                _ => "unset ZV_DIR".to_string(), // POSIX shells
+            }
+        } else {
+            String::new()
+        };
+
         template
+            .replace("{zv_dir_cleanup}", &zv_dir_cleanup)
             .replace("{zv_dir}", &escaped_zv_dir)
             .replace("{zv_bin_path}", &escaped_bin_path)
             .replace("{zv_path_separator}", &path_separator.to_string())

@@ -307,7 +307,7 @@ impl ToolchainManager {
         Ok(exe_path)
     }
 
-    /// Sets the active Zig version, updating the symlink in bin/ and writing to the active file
+    /// Sets the active Zig version, updating the shims in bin/ and writing to the active file
     pub async fn set_active_version(&mut self, rzv: &ResolvedZigVersion) -> Result<()> {
         let version = rzv.version();
         tracing::debug!(target: TARGET, %version, "Setting active version");
@@ -317,8 +317,8 @@ impl ToolchainManager {
             .find(|i| &i.version == version)
             .ok_or_else(|| eyre!("Version {} is not installed", version))?;
 
-        tracing::debug!(target: TARGET, install_path = %install.path.display(), "Found installation, deploying link");
-        self.deploy_active_link(install).await?;
+        tracing::debug!(target: TARGET, install_path = %install.path.display(), "Found installation, deploying shims");
+        self.deploy_shims(install).await?;
 
         let json = serde_json::to_vec(&install)
             .wrap_err("Failed to serialize Zig install for active file")?;
@@ -328,7 +328,7 @@ impl ToolchainManager {
         tracing::trace!(target: TARGET, %version, "Set active Zig version");
         Ok(())
     }
-    /// Sets the active Zig version, updating the symlink in bin/ and writing to the active file
+    /// Sets the active Zig version, updating the shims in bin/ and writing to the active file
     /// Optionally provide the installed path to skip re-checking installation
     pub async fn set_active_version_with_path(
         &mut self,
@@ -347,8 +347,8 @@ impl ToolchainManager {
             path: install_dir,
             is_master: rzv.is_master(),
         };
-        tracing::debug!(target: TARGET, "Deploying active link");
-        self.deploy_active_link(&zig_install).await?;
+        tracing::debug!(target: TARGET, "Deploying shims");
+        self.deploy_shims(&zig_install).await?;
         let json = serde_json::to_vec(&zig_install)
             .wrap_err("Failed to serialize Zig install for active file")?;
         fs::write(&self.active_file, json).await?;
@@ -356,112 +356,154 @@ impl ToolchainManager {
         tracing::trace!(target: TARGET, version = ?rzv.version().to_string(), "Set active Zig completed");
         Ok(())
     }
-    /// Deploys or updates the symlink in bin/ to point to the given install's zig executable
-    async fn deploy_active_link(&self, install: &ZigInstall) -> Result<()> {
-        let zig_exe = Shim::Zig.executable_name();
+    /// Validates that the zv binary exists in the bin directory
+    /// Similar to setup logic - checks existence and warns about checksum mismatches but continues
+    fn validate_zv_binary(&self) -> Result<PathBuf> {
+        use crate::tools::files_have_same_hash;
 
-        // Ensure we have the correct path to the zig executable
-        // install.path should be the directory containing zig, but handle cases where it might be the zig executable itself
-        let src = if install.path.file_name().and_then(|n| n.to_str()) == Some(zig_exe) {
-            // install.path points to the zig executable itself, use it directly
-            tracing::debug!(target: TARGET, "Install path points to executable directly: {}", install.path.display());
-            install.path.clone()
-        } else {
-            // install.path points to the directory, join with executable name
-            install.path.join(&zig_exe)
-        };
+        let zv_path = self.bin_path.join(Shim::Zv.executable_name());
 
-        let dst = self.bin_path.join(&zig_exe);
-
-        tracing::debug!(target: TARGET, src = %src.display(), dst = %dst.display(), "Deploying active link");
-
-        // fast-path: already deployed correctly
-        if dst.is_symlink() {
-            tracing::debug!(target: TARGET, "Destination is symlink, checking target");
-            if let Ok(current_target) = tokio::fs::read_link(&dst).await {
-                // Resolve both paths to compare canonically
-                let current_resolved = if current_target.is_absolute() {
-                    current_target
-                } else {
-                    dst.parent().unwrap_or(&dst).join(&current_target)
-                };
-
-                // Compare the canonical forms
-                if let (Ok(current_canonical), Ok(src_canonical)) =
-                    (current_resolved.canonicalize(), src.canonicalize())
-                {
-                    if current_canonical == src_canonical {
-                        tracing::debug!(target: TARGET, "Symlink already points to correct target, skipping");
-                        return Ok(()); // identical target – nothing to do
-                    }
-                }
-            }
-        } else if dst.is_file() {
-            tracing::debug!(target: TARGET, "Destination is file, checking if it's a hard link");
-            // Handle hard links - check if they're the same file
-            if let (Ok(dst_meta), Ok(src_meta)) = (dst.metadata(), src.metadata()) {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::MetadataExt;
-                    if dst_meta.ino() == src_meta.ino() && dst_meta.dev() == src_meta.dev() {
-                        tracing::debug!(target: TARGET, "Hard link already points to correct target, skipping");
-                        return Ok(()); // same file via hard link
-                    }
-                }
-                #[cfg(windows)]
-                {
-                    // On Windows, compare file size and modified time as a heuristic
-                    if dst_meta.len() == src_meta.len()
-                        && dst_meta.modified().ok() == src_meta.modified().ok()
-                    {
-                        tracing::debug!(target: TARGET, "File appears to be correct hard link, skipping");
-                        return Ok(());
-                    }
-                }
-            }
-        } else {
-            tracing::debug!(target: TARGET, "Destination does not exist");
+        // Check if zv binary exists
+        if !zv_path.exists() {
+            return Err(eyre!(
+                "zv binary not found in bin directory: {}",
+                self.bin_path.display()
+            ));
         }
 
-        tracing::debug!(target: TARGET, "Creating bin directory and removing existing file");
-        fs::create_dir_all(&self.bin_path).await?;
+        // Get current executable for comparison
+        let current_exe =
+            std::env::current_exe().wrap_err("Failed to get current executable path")?;
 
-        // Remove existing file/symlink
-        if dst.exists() || dst.is_symlink() {
-            fs::remove_file(&dst).await?;
+        // Compare checksums like setup does
+        match files_have_same_hash(&current_exe, &zv_path) {
+            Ok(true) => {
+                tracing::debug!(target: TARGET, zv_path = %zv_path.display(), "Validated zv binary (checksum match)");
+            }
+            Ok(false) => {
+                tracing::warn!(target: TARGET,
+                    current_exe = %current_exe.display(),
+                    zv_path = %zv_path.display(),
+                    "zv versions mismatch (checksum) - created zig/zls installations may not perform correctly. Please run `zv setup`"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(target: TARGET,
+                    "zv versions mismatch (checksum comparison failed: {}) - created zig/zls installations may not perform correctly. Please run `zv setup`", e
+                );
+            }
         }
 
-        tracing::info!(
-            target: TARGET,
-            link = %dst.display(),
-            to = %src.display(),
-            "Creating Zig symlink"
+        tracing::debug!(target: TARGET, zv_path = %zv_path.display(), "Using zv binary from bin directory");
+        Ok(zv_path)
+    }
+
+    /// Deploys or updates the proxy shims (zig, zls) in bin/ that link to zv
+    pub async fn deploy_shims(&self, install: &ZigInstall) -> Result<()> {
+        // First validate that zv binary exists
+        let zv_path = self.validate_zv_binary()?;
+
+        tracing::debug!(target: TARGET, install_path = %install.path.display(), "Deploying shims for installation");
+
+        // Create shims for zig and zls
+        self.create_shim(&zv_path, Shim::Zig).await?;
+        self.create_shim(&zv_path, Shim::Zls).await?;
+
+        tracing::info!(target: TARGET, "Successfully deployed zig for version {}", install.version);
+        Ok(())
+    }
+
+    /// Creates a single shim (hard link or symlink) to the zv binary
+    async fn create_shim(&self, zv_path: &Path, shim: Shim) -> Result<()> {
+        let shim_path = self.bin_path.join(shim.executable_name());
+
+        tracing::trace!(target: TARGET,
+            shim = shim.executable_name(),
+            zv_path = %zv_path.display(),
+            shim_path = %shim_path.display(),
+            "Creating shim"
+        );
+
+        // Check if shim already exists and points to the correct zv binary
+        if self.is_valid_shim(&shim_path, zv_path)? {
+            tracing::trace!(target: TARGET, "Shim {} already exists and is valid, skipping", shim.executable_name());
+            return Ok(());
+        }
+
+        // Remove existing file/symlink if it exists
+        if shim_path.exists() || shim_path.is_symlink() {
+            fs::remove_file(&shim_path).await?;
+        }
+
+        tracing::info!(target: TARGET,
+            shim = shim.executable_name(),
+            "Creating shim {} -> {}",
+            shim_path.display(),
+            zv_path.display()
         );
 
         #[cfg(unix)]
-        tokio::fs::symlink(&src, &dst).await?;
+        tokio::fs::symlink(zv_path, &shim_path).await?;
 
         #[cfg(windows)]
         {
-            match tokio::fs::symlink_file(&src, &dst).await {
+            match tokio::fs::symlink_file(zv_path, &shim_path).await {
                 Ok(()) => {
-                    tracing::debug!(target: TARGET, "Created symlink successfully");
+                    tracing::debug!(target: TARGET, "Created symlink successfully for {}", shim.executable_name());
                 }
                 Err(symlink_err) => {
-                    tracing::debug!(target: TARGET, "Symlink failed: {}, trying hard link", symlink_err);
-                    std::fs::hard_link(&src, &dst).wrap_err_with(|| {
+                    tracing::debug!(target: TARGET, "Symlink failed for {}: {}, trying hard link", shim.executable_name(), symlink_err);
+                    std::fs::hard_link(zv_path, &shim_path).wrap_err_with(|| {
                         format!(
                             "Failed to create hard link from {} to {}",
-                            src.display(),
-                            dst.display()
+                            zv_path.display(),
+                            shim_path.display()
                         )
                     })?;
-                    tracing::debug!(target: TARGET, "Created hard link successfully");
+                    tracing::debug!(target: TARGET, "Created hard link successfully for {}", shim.executable_name());
                 }
             }
         }
 
         Ok(())
+    }
+
+    /// Checks if a shim file exists and points to the correct zv binary
+    fn is_valid_shim(&self, shim_path: &Path, zv_path: &Path) -> Result<bool> {
+        use same_file::Handle;
+
+        if !shim_path.exists() {
+            return Ok(false);
+        }
+
+        let zv_handle =
+            Handle::from_path(zv_path).wrap_err("Failed to create handle for zv binary")?;
+
+        // Check for hard links
+        if let Ok(shim_handle) = Handle::from_path(shim_path) {
+            if shim_handle == zv_handle {
+                return Ok(true);
+            }
+        }
+
+        // Check for symlinks
+        if shim_path.is_symlink() {
+            if let Ok(target) = std::fs::read_link(shim_path) {
+                let resolved_target = if target.is_absolute() {
+                    target
+                } else {
+                    shim_path.parent().unwrap_or(shim_path).join(&target)
+                };
+
+                if let Ok(target_handle) = Handle::from_path(&resolved_target) {
+                    if target_handle == zv_handle {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+
+        Ok(false)
     }
 
     /// Get the currently active installation, if any

@@ -98,9 +98,11 @@ impl App {
                 .map_err(ZvError::Io)
                 .wrap_err("Creation of bin directory failed")?;
         }
-
+        let toolchain_manager = ToolchainManager::new(&zv_base_path).await?;
         // Check for existing ZV zig/zls shims in bin directory
-        zig = utils::detect_shim(&bin_path, Shim::Zig);
+        zig = toolchain_manager
+            .get_active_install()
+            .map(|zig_install| zig_install.path.join(Shim::Zig.executable_name()));
         zls = utils::detect_shim(&bin_path, Shim::Zls);
 
         let versions_path = zv_base_path.join("versions");
@@ -129,7 +131,7 @@ impl App {
             bin_path,
             download_cache,
             env_path,
-            toolchain_manager: ToolchainManager::new(zv_base_path.as_path()).await?,
+            toolchain_manager,
             zv_base_path,
             versions_path,
             shell: shell,
@@ -320,7 +322,7 @@ impl App {
         self.toolchain_manager.is_version_installed(rzv)
     }
     /// Install the current loaded `to_install` ZigRelease
-    pub async fn install_release(&mut self, force_ziglang: bool) -> Result<(), ZvError> {
+    pub async fn install_release(&mut self, force_ziglang: bool) -> Result<PathBuf, ZvError> {
         const TARGET: &str = "zv::app::install_release";
 
         let zig_release = self.to_install.take().ok_or_else(|| {
@@ -394,7 +396,7 @@ impl App {
                 .download_version(&semver_version, &zig_tarball, download_artifact)
                 .await?
         } else {
-            tracing::info!(target: "zv", "--force-ziglang: Using ziglang.org as download source");
+            tracing::trace!(target: "zv", "Using ziglang.org as download source");
             self.network
                 .as_mut()
                 .unwrap()
@@ -415,7 +417,8 @@ impl App {
             "Download completed"
         );
 
-        self.toolchain_manager
+        let zig_exe = self
+            .toolchain_manager
             .install_version(&tarball_path, &semver_version, ext, is_master)
             .await?;
         tracing::info!(
@@ -427,6 +430,6 @@ impl App {
         remove_files(&[tarball_path.as_path(), minisig_path.as_path()]).await;
         tracing::debug!(target: TARGET, "Cleaned up temporary download files");
 
-        Ok(())
+        Ok(zig_exe)
     }
 }

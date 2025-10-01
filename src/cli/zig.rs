@@ -1,5 +1,6 @@
-use crate::{App, UserConfig, ZigVersion, tools};
-use color_eyre::eyre::{bail, eyre};
+use crate::cli::r#use::resolve_zig_version;
+use crate::{App, UserConfig, ZigVersion, ZvError, tools};
+use color_eyre::eyre::{Context, bail, eyre};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -12,22 +13,32 @@ pub async fn zig_main() -> crate::Result<()> {
     args.remove(0); // drop program name
 
     // Check for +version override (only if it's the first argument)
-    let version_override = if args.first().map_or(false, |arg| arg.starts_with('+')) {
+    let inline_version_override = if args.first().map_or(false, |arg| arg.starts_with('+')) {
         Some(args.remove(0).strip_prefix('+').unwrap().to_string())
     } else {
         None
     };
+    // Check for .zigversion file in current directory
 
-    let zig_path = if let Some(version_str) = version_override {
+    let zig_path = if let Some(version_str) = inline_version_override {
         // Parse the version override
-        let version = version_str
+        let zv = version_str
             .parse::<ZigVersion>()
             .map_err(|e| eyre!("Invalid version override '+{}': {}", version_str, e))?;
 
-        find_zig_for_version(&version)?
+        find_zig_for_version(&zv).await?
     } else {
-        // Default to system zig or zv-managed zig
-        find_default_zig().await?
+        // Check for .zigversion file in current directory
+        if let Some((zv, file)) = find_zigversion_from_file() {
+            find_zig_for_version(&zv).await.wrap_err(eyre!(
+                "Failed to find zig for version {zv} from file {}",
+                file.display(),
+            ))?
+        }
+        // Default to current active zig
+        else {
+            find_default_zig().await?
+        }
     };
 
     // Get current recursion count for incrementing
@@ -49,58 +60,75 @@ pub async fn zig_main() -> crate::Result<()> {
         .wait()
         .map_err(|e| eyre!("Failed to wait for zig: {}", e))?;
 
-    std::process::exit(status.code().unwrap_or(3));
+    if let Some(code) = status.code() {
+        std::process::exit(code);
+    } else {
+        // On Unix, process was terminated by signal
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            if let Some(signal) = status.signal() {
+                std::process::exit(128 + signal);
+            }
+        }
+        std::process::exit(1);
+    }
 }
 
 /// Find the Zig executable for a specific version
-fn find_zig_for_version(version: &ZigVersion) -> crate::Result<PathBuf> {
+async fn find_zig_for_version(zig_version: &ZigVersion) -> crate::Result<PathBuf> {
     // Get zv directory structure
     let (zv_base_path, _) = tools::fetch_zv_dir()?;
-
-    match version {
-        ZigVersion::Semver(v) => {
-            // Look for installed version in zv directory
-            let version_dir = zv_base_path.join("versions").join(v.to_string());
-            let zig_exe = if cfg!(windows) {
-                version_dir.join("zig.exe")
-            } else {
-                version_dir.join("zig")
-            };
-
-            if zig_exe.exists() {
-                Ok(zig_exe)
-            } else {
-                Err(eyre!(
-                    "Zig version {} is not installed. Run 'zv install {}' first.",
-                    v,
-                    v
-                ))
+    let mut app = App::init(UserConfig {
+        zv_base_path,
+        shell: None,
+    })
+    .await?;
+    // Resolve ZigVersion to a validated ResolvedZigVersion
+    // This already does all the validation and fetching we need
+    let resolved_version = resolve_zig_version(&mut app, &zig_version).await
+        .map_err(|e| {
+            match e {
+                ZvError::ZigVersionResolveError(err) => {
+                    ZvError::ZigVersionResolveError(eyre!(
+                        "Failed to resolve version '{}': {}. Try running 'zv sync' to update the index or 'zv list' to see available versions.",
+                        zig_version, err
+                    ))
+                }
+                _ => e,
             }
-        }
-        ZigVersion::Master(_) => {
-            // Look for master build
-            let master_dir = zv_base_path.join("versions").join("master");
-            let zig_exe = if cfg!(windows) {
-                master_dir.join("zig.exe")
-            } else {
-                master_dir.join("zig")
-            };
-
-            if zig_exe.exists() {
-                Ok(zig_exe)
-            } else {
-                Err(eyre!(
-                    "Zig master version is not installed. Run 'zv install master' first."
-                ))
+        })?;
+    if let Some(p) = app.check_installed(&resolved_version) {
+        Ok(p)
+    } else {
+        // Try installing with ziglang.org first, then fallback to mirrors
+        let zig_exe = match app.install_release(true).await {
+            Ok(path) => path,
+            Err(e) => {
+                tracing::warn!("Failed to install zig version {}: {}", resolved_version, e);
+                tracing::warn!("Retrying with community mirrors...");
+                
+                // We need to re-resolve the version since install_release consumed to_install
+                let resolved_version_retry = resolve_zig_version(&mut app, &zig_version).await
+                    .map_err(|e| {
+                        match e {
+                            ZvError::ZigVersionResolveError(err) => {
+                                ZvError::ZigVersionResolveError(eyre!(
+                                    "Failed to resolve version '{}' for retry: {}. Try running 'zv sync' to update the index or 'zv list' to see available versions.",
+                                    zig_version, err
+                                ))
+                            }
+                            _ => e,
+                        }
+                    })?;
+                
+                app.install_release(false).await.map_err(|e| {
+                    eyre!("Failed to download & install zig version {}: {}", resolved_version_retry, e)
+                })?
             }
-        }
-        ZigVersion::Stable(_) | ZigVersion::Latest(_) => {
-            // For stable/latest, we need to resolve to actual version first
-            // For now, fall back to system zig
-            Err(eyre!(
-                "Stable/latest version resolution not yet implemented. Use specific version."
-            ))
-        }
+        };
+        
+        Ok(zig_exe)
     }
 }
 
@@ -115,11 +143,42 @@ async fn find_default_zig() -> crate::Result<PathBuf> {
         .await
         {
             if let Some(zig_path) = app.zv_zig() {
+                tracing::trace!(target: "zig", "Using zv-managed zig at {}", zig_path.display());
                 return Ok(zig_path);
             }
         }
     }
-
-    // Fall back to system zig
     bail!("Could not find zig executable")
+}
+
+/// Search for a .zigversion file in the current directory or its ancestors
+/// Returns the parsed ZigVersion if found beside a build.zig file
+fn find_zigversion_from_file() -> Option<(ZigVersion, PathBuf)> {
+    let mut current = std::env::current_dir().ok()?;
+
+    loop {
+        // Check if build.zig exists (project root marker)
+        if current.join("build.zig").exists() {
+            // Look for .zigversion in same directory
+            let zigversion_file = current.join(".zigversion");
+            if zigversion_file.exists() {
+                return std::fs::read_to_string(&zigversion_file)
+                    .ok()
+                    .and_then(|s| {
+                        s.trim()
+                            .parse::<ZigVersion>()
+                            .ok()
+                            .map(|zv| (zv, zigversion_file))
+                    });
+            }
+            break;
+        }
+
+        // Move up to parent directory
+        if !current.pop() {
+            break;
+        }
+    }
+
+    None
 }

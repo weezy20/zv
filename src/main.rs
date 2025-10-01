@@ -42,7 +42,6 @@ async fn main() -> Result<()> {
     init_tracing()?;
 
     let program_name = get_program_name()?;
-
     match program_name.as_str() {
         "zv" => cli::zv_main().await,
         "zig" => cli::zig_main().await,
@@ -96,9 +95,13 @@ fn init_tracing() -> Result<()> {
     Ok(())
 }
 fn get_program_name() -> Result<String> {
-    let current_exe = std::env::current_exe().wrap_err("Failed to get current executable path")?;
+    // Use args().next() to get the program name as invoked, not the actual executable path
+    // This is important for hard links and symlinks to work correctly
+    let program_path = std::env::args_os()
+        .next()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Failed to get program name from args"))?;
 
-    let file_name = current_exe
+    let file_name = std::path::Path::new(&program_path)
         .file_name()
         .ok_or_else(|| color_eyre::eyre::eyre!("Failed to get executable filename"))?
         .to_string_lossy();
