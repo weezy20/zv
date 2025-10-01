@@ -452,19 +452,13 @@ pub async fn copy_zv_binary_if_needed(app: &App, dry_run: bool) -> crate::Result
     Ok(())
 }
 
-/// Regenerate hardlinks/shims for zig and zls if they exist and config is available
+/// Regenerate hardlinks/shims for zig and zls if they exist and active version is available
 pub async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crate::Result<()> {
-    let zig_shim = if cfg!(windows) {
-        app.bin_path().join("zig.exe")
-    } else {
-        app.bin_path().join("zig")
-    };
-
-    let zls_shim = if cfg!(windows) {
-        app.bin_path().join("zls.exe")
-    } else {
-        app.bin_path().join("zls")
-    };
+    use crate::app::toolchain::ToolchainManager;
+    use crate::types::Shim;
+    
+    let zig_shim = app.bin_path().join(Shim::Zig.executable_name());
+    let zls_shim = app.bin_path().join(Shim::Zls.executable_name());
 
     let has_zig_shim = zig_shim.exists();
     let has_zls_shim = zls_shim.exists();
@@ -476,14 +470,14 @@ pub async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crate::Resu
         return Ok(());
     }
 
-    // Check if config.toml exists
-    let config_path = app.path().join("config.toml");
-    if !config_path.exists() {
+    // Check if active.json exists (contains serialized ZigInstall)
+    let active_path = app.path().join("active.json");
+    if !active_path.exists() {
         if has_zig_shim || has_zls_shim {
             if dry_run {
-                println!("Would skip shim regeneration - config.toml not found");
+                println!("Would skip shim regeneration - no active version configured");
             } else {
-                println!("⚠ config.toml not found - cannot regenerate shims");
+                println!("⚠ No active version configured - cannot regenerate shims");
                 println!("  Run 'zv use <version>' to set up configuration");
             }
         }
@@ -492,18 +486,36 @@ pub async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crate::Resu
 
     if dry_run {
         if has_zig_shim {
-            println!("Would regenerate zig shim based on config.toml");
+            println!("Would regenerate zig shim based on active version");
         }
         if has_zls_shim {
-            println!("Would regenerate zls shim based on config.toml");
+            println!("Would regenerate zls shim based on active version");
         }
     } else {
-        // TODO: Implement actual shim regeneration based on config.toml reading
-        // For now, just notify the user
+        // Actually regenerate shims using the toolchain manager
         if has_zig_shim || has_zls_shim {
-            println!("⚠ Shim regeneration based on config.toml is not yet implemented");
-            println!("  This feature will read config.toml and regenerate hardlinks");
-            println!("  Run 'zv use <version>' to ensure shims are properly configured");
+            println!("Regenerating shims based on active version...");
+            
+            match ToolchainManager::new(app.path()).await {
+                Ok(mut toolchain) => {
+                    if let Some(active_install) = toolchain.get_active_install() {
+                        // Use the existing deploy_shims method from toolchain manager
+                        if let Err(e) = toolchain.deploy_shims(active_install).await {
+                            println!("⚠ Failed to regenerate shims: {}", e);
+                            println!("  Run 'zv use <version>' to ensure shims are properly configured");
+                        } else {
+                            println!("✓ Successfully regenerated shims for version {}", active_install.version);
+                        }
+                    } else {
+                        println!("⚠ No active installation found");
+                        println!("  Run 'zv use <version>' to set up configuration");
+                    }
+                }
+                Err(e) => {
+                    println!("⚠ Failed to initialize toolchain manager: {}", e);
+                    println!("  Run 'zv use <version>' to ensure shims are properly configured");
+                }
+            }
         }
     }
 

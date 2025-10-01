@@ -399,7 +399,7 @@ impl ToolchainManager {
     }
 
     /// Deploys or updates the proxy shims (zig, zls) in bin/ that link to zv
-    async fn deploy_shims(&self, install: &ZigInstall) -> Result<()> {
+    pub async fn deploy_shims(&self, install: &ZigInstall) -> Result<()> {
         // First validate that zv binary exists
         let zv_path = self.validate_zv_binary()?;
 
