@@ -98,9 +98,11 @@ impl App {
                 .map_err(ZvError::Io)
                 .wrap_err("Creation of bin directory failed")?;
         }
-
+        let toolchain_manager = ToolchainManager::new(&zv_base_path).await?;
         // Check for existing ZV zig/zls shims in bin directory
-        zig = utils::detect_shim(&bin_path, Shim::Zig);
+        zig = toolchain_manager
+            .get_active_install()
+            .map(|zig_install| zig_install.path.join(Shim::Zig.executable_name()));
         zls = utils::detect_shim(&bin_path, Shim::Zls);
 
         let versions_path = zv_base_path.join("versions");
@@ -129,7 +131,7 @@ impl App {
             bin_path,
             download_cache,
             env_path,
-            toolchain_manager: ToolchainManager::new(zv_base_path.as_path()).await?,
+            toolchain_manager,
             zv_base_path,
             versions_path,
             shell: shell,

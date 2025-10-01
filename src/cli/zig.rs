@@ -143,6 +143,7 @@ async fn find_default_zig() -> crate::Result<PathBuf> {
         .await
         {
             if let Some(zig_path) = app.zv_zig() {
+                tracing::trace!(target: "zig", "Using zv-managed zig at {}", zig_path.display());
                 return Ok(zig_path);
             }
         }

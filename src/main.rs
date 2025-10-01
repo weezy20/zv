@@ -42,7 +42,6 @@ async fn main() -> Result<()> {
     init_tracing()?;
 
     let program_name = get_program_name()?;
-
     match program_name.as_str() {
         "zv" => cli::zv_main().await,
         "zig" => cli::zig_main().await,
