@@ -357,13 +357,44 @@ impl ToolchainManager {
         Ok(())
     }
     /// Validates that the zv binary exists in the bin directory
+    /// Similar to setup logic - checks existence and warns about checksum mismatches but continues
     fn validate_zv_binary(&self) -> Result<PathBuf> {
-        use crate::app::utils::detect_shim;
-        
-        let zv_path = detect_shim(&self.bin_path, Shim::Zv)
-            .ok_or_else(|| eyre!("zv binary not found in bin directory: {}", self.bin_path.display()))?;
-        
-        tracing::debug!(target: TARGET, zv_path = %zv_path.display(), "Validated zv binary");
+        use crate::tools::files_have_same_hash;
+
+        let zv_path = self.bin_path.join(Shim::Zv.executable_name());
+
+        // Check if zv binary exists
+        if !zv_path.exists() {
+            return Err(eyre!(
+                "zv binary not found in bin directory: {}",
+                self.bin_path.display()
+            ));
+        }
+
+        // Get current executable for comparison
+        let current_exe =
+            std::env::current_exe().wrap_err("Failed to get current executable path")?;
+
+        // Compare checksums like setup does
+        match files_have_same_hash(&current_exe, &zv_path) {
+            Ok(true) => {
+                tracing::debug!(target: TARGET, zv_path = %zv_path.display(), "Validated zv binary (checksum match)");
+            }
+            Ok(false) => {
+                tracing::warn!(target: TARGET,
+                    current_exe = %current_exe.display(),
+                    zv_path = %zv_path.display(),
+                    "zv versions mismatch (checksum) - created zig/zls installations may not perform correctly. Please run `zv setup`"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(target: TARGET,
+                    "zv versions mismatch (checksum comparison failed: {}) - created zig/zls installations may not perform correctly. Please run `zv setup`", e
+                );
+            }
+        }
+
+        tracing::debug!(target: TARGET, zv_path = %zv_path.display(), "Using zv binary from bin directory");
         Ok(zv_path)
     }
 
@@ -371,7 +402,7 @@ impl ToolchainManager {
     async fn deploy_shims(&self, install: &ZigInstall) -> Result<()> {
         // First validate that zv binary exists
         let zv_path = self.validate_zv_binary()?;
-        
+
         tracing::debug!(target: TARGET, install_path = %install.path.display(), "Deploying shims for installation");
 
         // Create shims for zig and zls
@@ -385,11 +416,11 @@ impl ToolchainManager {
     /// Creates a single shim (hard link or symlink) to the zv binary
     async fn create_shim(&self, zv_path: &Path, shim: Shim) -> Result<()> {
         let shim_path = self.bin_path.join(shim.executable_name());
-        
-        tracing::trace!(target: TARGET, 
-            shim = shim.executable_name(), 
-            zv_path = %zv_path.display(), 
-            shim_path = %shim_path.display(), 
+
+        tracing::trace!(target: TARGET,
+            shim = shim.executable_name(),
+            zv_path = %zv_path.display(),
+            shim_path = %shim_path.display(),
             "Creating shim"
         );
 
@@ -404,10 +435,10 @@ impl ToolchainManager {
             fs::remove_file(&shim_path).await?;
         }
 
-        tracing::info!(target: TARGET, 
+        tracing::info!(target: TARGET,
             shim = shim.executable_name(),
-            "Creating shim {} -> {}", 
-            shim_path.display(), 
+            "Creating shim {} -> {}",
+            shim_path.display(),
             zv_path.display()
         );
 
@@ -445,8 +476,8 @@ impl ToolchainManager {
             return Ok(false);
         }
 
-        let zv_handle = Handle::from_path(zv_path)
-            .wrap_err("Failed to create handle for zv binary")?;
+        let zv_handle =
+            Handle::from_path(zv_path).wrap_err("Failed to create handle for zv binary")?;
 
         // Check for hard links
         if let Ok(shim_handle) = Handle::from_path(shim_path) {
