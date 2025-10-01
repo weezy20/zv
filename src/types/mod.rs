@@ -48,6 +48,7 @@ impl std::fmt::Display for ArchiveExt {
 /// Enum representing the type of shim to detect
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shim {
+    Zv,
     Zig,
     Zls,
 }
@@ -56,6 +57,13 @@ impl Shim {
     /// Returns the executable name for this shim
     pub fn executable_name(&self) -> &'static str {
         match self {
+            Shim::Zv => {
+                if cfg!(target_os = "windows") {
+                    "zv.exe"
+                } else {
+                    "zv"
+                }
+            }
             Shim::Zig => {
                 if cfg!(target_os = "windows") {
                     "zig.exe"
