@@ -409,7 +409,7 @@ impl ToolchainManager {
         self.create_shim(&zv_path, Shim::Zig).await?;
         self.create_shim(&zv_path, Shim::Zls).await?;
 
-        tracing::info!(target: TARGET, "Successfully deployed shims for version {}", install.version);
+        tracing::info!(target: TARGET, "Successfully deployed zig for version {}", install.version);
         Ok(())
     }
 

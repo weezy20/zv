@@ -394,7 +394,7 @@ impl App {
                 .download_version(&semver_version, &zig_tarball, download_artifact)
                 .await?
         } else {
-            tracing::info!(target: "zv", "--force-ziglang: Using ziglang.org as download source");
+            tracing::trace!(target: "zv", "Using ziglang.org as download source");
             self.network
                 .as_mut()
                 .unwrap()

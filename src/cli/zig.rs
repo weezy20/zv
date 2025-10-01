@@ -101,18 +101,34 @@ async fn find_zig_for_version(zig_version: &ZigVersion) -> crate::Result<PathBuf
     if let Some(p) = app.check_installed(&resolved_version) {
         Ok(p)
     } else {
-        if let Err(e) = app.install_release(true).await {
-            tracing::warn!("Failed to install zig version {}: {}", resolved_version, e);
-            tracing::warn!("Retrying with community mirrors...");
-        }
-        match app.install_release(false).await {
-            Ok(zig_exe) => Ok(zig_exe),
-            Err(e) => bail!(
-                "Failed to download & install zig version {}: {}",
-                resolved_version,
-                e
-            ),
-        }
+        // Try installing with ziglang.org first, then fallback to mirrors
+        let zig_exe = match app.install_release(true).await {
+            Ok(path) => path,
+            Err(e) => {
+                tracing::warn!("Failed to install zig version {}: {}", resolved_version, e);
+                tracing::warn!("Retrying with community mirrors...");
+                
+                // We need to re-resolve the version since install_release consumed to_install
+                let resolved_version_retry = resolve_zig_version(&mut app, &zig_version).await
+                    .map_err(|e| {
+                        match e {
+                            ZvError::ZigVersionResolveError(err) => {
+                                ZvError::ZigVersionResolveError(eyre!(
+                                    "Failed to resolve version '{}' for retry: {}. Try running 'zv sync' to update the index or 'zv list' to see available versions.",
+                                    zig_version, err
+                                ))
+                            }
+                            _ => e,
+                        }
+                    })?;
+                
+                app.install_release(false).await.map_err(|e| {
+                    eyre!("Failed to download & install zig version {}: {}", resolved_version_retry, e)
+                })?
+            }
+        };
+        
+        Ok(zig_exe)
     }
 }
 
