@@ -108,6 +108,33 @@ impl ZvNetwork {
         }
         Ok(self.mirror_manager.as_mut().unwrap())
     }
+
+    /// Force refresh the Zig index from network
+    pub async fn sync_zig_index(&mut self) -> Result<(), ZvError> {
+        self.index_manager
+            .ensure_loaded(CacheStrategy::AlwaysRefresh)
+            .await?;
+        Ok(())
+    }
+
+    /// Force refresh the community mirrors list from network
+    pub async fn sync_mirrors(&mut self) -> Result<usize, ZvError> {
+        self.ensure_mirror_manager().await?;
+        
+        if let Some(mirror_manager) = self.mirror_manager.as_mut() {
+            mirror_manager.load_mirrors(CacheStrategy::AlwaysRefresh).await
+                .map_err(ZvError::NetworkError)?;
+            
+            let mirror_count = mirror_manager.all_mirrors_mut().await
+                .map(|mirrors| mirrors.len())
+                .unwrap_or(0);
+            
+            return Ok(mirror_count);
+        }
+        
+        Ok(0)
+    }
+
     pub fn versions_path(&self) -> PathBuf {
         self.base_path.join("versions")
     }
