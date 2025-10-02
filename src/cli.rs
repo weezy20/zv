@@ -4,6 +4,7 @@ use crate::{
 };
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::eyre;
+use std::str::FromStr;
 use yansi::Paint;
 mod clean;
 mod init;
@@ -16,6 +17,35 @@ mod zls;
 
 pub use zig::zig_main;
 pub use zls::zls_main;
+
+/// Represents the target for a clean operation
+#[derive(Debug, Clone)]
+pub enum CleanTarget {
+    All,
+    Downloads,
+    Versions(Vec<ZigVersion>),
+}
+
+/// Parse clean target string into CleanTarget enum
+fn parse_clean_target(s: &str) -> Result<CleanTarget, String> {
+    match s.to_lowercase().as_str() {
+        "all" => Ok(CleanTarget::All),
+        "downloads" => Ok(CleanTarget::Downloads),
+        _ => {
+            // Try parsing as comma-separated version list
+            let versions: Result<Vec<ZigVersion>, _> = s
+                .split(',')
+                .map(|v| ZigVersion::from_str(v.trim()))
+                .collect();
+
+            match versions {
+                Ok(vers) if !vers.is_empty() => Ok(CleanTarget::Versions(vers)),
+                Ok(_) => Err("No valid versions provided".to_string()),
+                Err(e) => Err(format!("Invalid version format: {}", e)),
+            }
+        }
+    }
+}
 
 pub async fn zv_main() -> super::Result<()> {
     let zv_cli = <ZvCli as clap::Parser>::parse();
@@ -106,7 +136,42 @@ pub enum Commands {
 
     /// Clean up Zig installations. Non-zv managed installations will not be affected.
     #[clap(name = "clean", alias = "rm")]
-    Clean { what: Option<String> },
+    Clean {
+        /// Clean all versions except the specified ones (comma-separated)
+        #[arg(
+            long = "except",
+            value_delimiter = ',',
+            value_parser = clap::value_parser!(ZigVersion),
+            help = "Clean all except specified versions (comma-separated)",
+            long_help = "Clean all installed versions except the ones specified.\n\
+                         Accepts comma-separated list of versions.\n\
+                         Examples: --except 0.13.0,0.14.0 or --except master"
+        )]
+        except: Vec<ZigVersion>,
+
+        /// Clean outdated master versions, keeping only the latest
+        #[arg(
+            long = "outdated",
+            help = "Clean outdated master versions (keeps latest)",
+            long_help = "Clean outdated master versions, keeping only the latest.\n\
+                         If used with a target 'master', cleans master versions.\n\
+                         If used alone, defaults to cleaning master versions."
+        )]
+        outdated: bool,
+
+        /// Target to clean: 'all', 'downloads', version(s), or 'master'
+        #[arg(
+            value_parser = parse_clean_target,
+            help = "What to clean: 'all', 'downloads', version(s), or omit for all",
+            long_help = "Specify what to clean:\n\
+                         • all          - Clean everything\n\
+                         • downloads    - Clean downloads directory only\n\
+                         • <version>    - Clean specific version (e.g., 0.13.0, master)\n\
+                         • <v1,v2,...>  - Clean multiple versions (comma-separated)\n\
+                         • master       - Clean all master versions (use with --outdated to keep latest)"
+        )]
+        target: Option<CleanTarget>,
+    },
 
     /// Setup shell environment for zv (required to make zig binaries available in $PATH)
     ///
@@ -190,7 +255,11 @@ impl Commands {
                 }
             },
             Commands::List => list::list_versions(&mut app).await,
-            Commands::Clean { what } => clean::clean(&app, what).await,
+            Commands::Clean {
+                except,
+                outdated,
+                target,
+            } => clean::clean(&mut app, target, except, outdated).await,
             Commands::Setup {
                 dry_run,
                 default_version,
