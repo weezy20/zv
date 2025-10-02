@@ -64,7 +64,7 @@ impl ToolchainManager {
         Ok(toolchain_manager)
     }
     /// Scan installations in `versions_path` and return a sorted list of found [ZigInstall]s
-    fn scan_installations(versions_path: &Path) -> Result<Vec<ZigInstall>> {
+    pub(crate) fn scan_installations(versions_path: &Path) -> Result<Vec<ZigInstall>> {
         use walkdir::WalkDir;
 
         let mut out = Vec::new();
@@ -522,5 +522,10 @@ impl ToolchainManager {
                 (i.version.clone(), active, i.is_master)
             })
             .collect()
+    }
+
+    /// Get all installed versions with their installation details
+    pub fn get_installations(&self) -> &[ZigInstall] {
+        &self.installations
     }
 }

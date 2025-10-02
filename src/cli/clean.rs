@@ -1,91 +1,516 @@
-use crate::App;
-use walkdir::WalkDir;
+use crate::app::toolchain::ToolchainManager;
+use crate::cli::CleanTarget;
+use crate::{App, ResolvedZigVersion, ZigVersion};
 use yansi::Paint;
 
-pub async fn clean(app: &App, what: Option<String>) -> crate::Result<()> {
-    match what.as_deref().unwrap_or("all") {
-        "bin" => clean_bin(app).await,
-        "all" => clean_all(app).await,
-        _ => {
+pub async fn clean(
+    app: &mut App,
+    target: Option<CleanTarget>,
+    except: Vec<ZigVersion>,
+    outdated: bool,
+) -> crate::Result<()> {
+    // Handle --outdated flag
+    // If --outdated is specified without a target or with 'master', clean outdated master versions
+    if outdated {
+        let should_clean_outdated = match &target {
+            None => true, // `zv clean --outdated`
+            Some(CleanTarget::Versions(versions)) => {
+                // `zv clean master --outdated` or similar
+                versions
+                    .iter()
+                    .any(|ver| matches!(ver, ZigVersion::Master(_)))
+            }
+            Some(CleanTarget::All) | Some(CleanTarget::Downloads) => false,
+        };
+
+        if should_clean_outdated {
+            return clean_outdated_master(app).await;
+        } else {
             eprintln!(
-                "{} Unknown clean target: {}. Use 'bin', 'versions', or 'all'.",
-                Paint::red("✗"),
-                what.expect("validated by unwrap_or")
+                "{} --outdated flag can only be used where clean target is 'master'",
+                Paint::red("✗")
             );
-            Ok(())
+            eprintln!(
+                "{} Usage: zv clean --outdated  OR  zv clean master --outdated",
+                Paint::yellow("ℹ")
+            );
+            return Ok(());
         }
+    }
+
+    // Handle --except flag
+    if !except.is_empty() {
+        return clean_except_versions(app, &except).await;
+    }
+
+    // Handle target-based cleaning
+    match target {
+        None => clean_all(app).await,
+        Some(CleanTarget::All) => clean_all(app).await,
+        Some(CleanTarget::Downloads) => clean_downloads_only(app).await,
+        Some(CleanTarget::Versions(versions)) => clean_specific_versions(app, &versions).await,
     }
 }
 
-/// Clean up executables from the bin directory, keeping only zv/zv.exe
-pub async fn clean_bin(app: &App) -> crate::Result<()> {
-    let bin_path = app.bin_path();
-    let zv_exe_name = if cfg!(windows) { "zv.exe" } else { "zv" };
+/// Clean specific versions from the comma-separated list
+async fn clean_specific_versions(app: &mut App, versions: &[ZigVersion]) -> crate::Result<()> {
+    // Format the version list for display
+    let version_list: Vec<String> = versions
+        .iter()
+        .map(|v| match v {
+            ZigVersion::Semver(ver) => ver.to_string(),
+            ZigVersion::Master(Some(ver)) => format!("master/{}", ver),
+            ZigVersion::Master(None) => "master".to_string(),
+            _ => format!("{:?}", v),
+        })
+        .collect();
 
-    println!("{}", Paint::cyan("Cleaning bin directory...").bold());
+    let versions_display = if version_list.len() == 1 {
+        version_list[0].clone()
+    } else {
+        version_list.join(", ")
+    };
 
-    if !bin_path.exists() {
+    println!(
+        "{}",
+        Paint::cyan(&format!("Removing version(s): {}", versions_display)).bold()
+    );
+
+    // Get all installed versions with their paths using scan_installations
+    let installations = ToolchainManager::scan_installations(&app.versions_path)?;
+    let active_install = app.toolchain_manager.get_active_install();
+
+    let mut removed_count = 0;
+    let mut not_found_count = 0;
+    let mut failed_count = 0;
+    let mut active_version_removed = false;
+
+    for version in versions {
+        // Find if this version is actually installed
+        let installation = installations.iter().find(|install| {
+            match version {
+                ZigVersion::Semver(target_v) => !install.is_master && &install.version == target_v,
+                ZigVersion::Master(Some(target_v)) => {
+                    install.is_master && &install.version == target_v
+                }
+                ZigVersion::Master(None) => install.is_master, // Match any master version
+                _ => false,
+            }
+        });
+
+        match installation {
+            Some(install) => {
+                // Check if we're removing the currently active version
+                let is_active = active_install.map_or(false, |active| {
+                    active.version == install.version && active.is_master == install.is_master
+                });
+
+                if is_active {
+                    active_version_removed = true;
+                    let display_name = if install.is_master {
+                        format!("master/{}", install.version)
+                    } else {
+                        install.version.to_string()
+                    };
+                    println!(
+                        "{} Warning: Removing currently active version: {}",
+                        Paint::yellow("⚠"),
+                        display_name
+                    );
+                }
+
+                match tokio::fs::remove_dir_all(&install.path).await {
+                    Ok(()) => {
+                        removed_count += 1;
+                        let display_name = if install.is_master {
+                            format!("master/{}", install.version)
+                        } else {
+                            install.version.to_string()
+                        };
+                        println!("{} Removed: {}", Paint::red("✗"), display_name);
+                    }
+                    Err(e) => {
+                        failed_count += 1;
+                        let display_name = if install.is_master {
+                            format!("master/{}", install.version)
+                        } else {
+                            install.version.to_string()
+                        };
+                        eprintln!(
+                            "{} Failed to remove {}: {}",
+                            Paint::red("✗"),
+                            display_name,
+                            e
+                        );
+                    }
+                }
+            }
+            None => {
+                not_found_count += 1;
+                let display_name = match version {
+                    ZigVersion::Semver(v) => v.to_string(),
+                    ZigVersion::Master(Some(v)) => format!("master/{}", v),
+                    ZigVersion::Master(None) => "master".to_string(),
+                    _ => format!("{:?}", version),
+                };
+                println!("{} Version {} not found", Paint::yellow("⚠"), display_name);
+            }
+        }
+    }
+
+    // Handle active version removal by automatically selecting a new active version
+    if active_version_removed {
+        handle_active_version_removal(app).await?;
+    }
+
+    // Provide summary feedback
+    let mut summary_parts = Vec::new();
+    if removed_count > 0 {
+        summary_parts.push(format!("{} removed", removed_count));
+    }
+    if not_found_count > 0 {
+        summary_parts.push(format!("{} not found", not_found_count));
+    }
+    if failed_count > 0 {
+        summary_parts.push(format!("{} failed", failed_count));
+    }
+
+    let summary = if summary_parts.is_empty() {
+        "No versions processed".to_string()
+    } else {
+        summary_parts.join(", ")
+    };
+
+    let icon = if failed_count > 0 {
+        Paint::yellow("⚠")
+    } else {
+        Paint::green("✓")
+    };
+
+    println!("{} Cleanup completed: {}", icon, summary);
+
+    Ok(())
+}
+
+/// Clean all versions except the specified ones
+async fn clean_except_versions(app: &mut App, except_versions: &[ZigVersion]) -> crate::Result<()> {
+    // Format the except version list for display
+    let except_list: Vec<String> = except_versions
+        .iter()
+        .map(|v| match v {
+            ZigVersion::Semver(ver) => ver.to_string(),
+            ZigVersion::Master(Some(ver)) => format!("master/{}", ver),
+            ZigVersion::Master(None) => "master".to_string(),
+            _ => format!("{:?}", v),
+        })
+        .collect();
+
+    let except_display = if except_list.len() == 1 {
+        except_list[0].clone()
+    } else {
+        except_list.join(", ")
+    };
+
+    println!(
+        "{}",
+        Paint::cyan(&format!("Removing all versions except: {}", except_display)).bold()
+    );
+
+    // Get all installed versions using scan_installations
+    let installations = ToolchainManager::scan_installations(&app.versions_path)?;
+    let active_install = app.toolchain_manager.get_active_install();
+    let mut removed_count = 0;
+    let mut kept_count = 0;
+    let mut failed_count = 0;
+    let mut active_version_removed = false;
+
+    // Track which except versions were actually found
+    let mut found_except_versions = std::collections::HashSet::new();
+
+    for install in &installations {
+        let should_keep = except_versions.iter().any(|except_ver| {
+            let matches = match except_ver {
+                ZigVersion::Semver(v) => !install.is_master && v == &install.version,
+                ZigVersion::Master(Some(v)) => install.is_master && v == &install.version,
+                ZigVersion::Master(None) => install.is_master,
+                _ => false,
+            };
+
+            if matches {
+                found_except_versions.insert(except_ver.clone());
+            }
+
+            matches
+        });
+
+        if should_keep {
+            kept_count += 1;
+            let display_name = if install.is_master {
+                format!("master/{}", install.version)
+            } else {
+                install.version.to_string()
+            };
+            println!("{} Kept: {}", Paint::green("✓"), display_name);
+        } else {
+            // Check if we're removing the currently active version
+            let is_active = active_install.map_or(false, |active| {
+                active.version == install.version && active.is_master == install.is_master
+            });
+
+            if is_active {
+                active_version_removed = true;
+                let display_name = if install.is_master {
+                    format!("master/{}", install.version)
+                } else {
+                    install.version.to_string()
+                };
+                println!(
+                    "{} Warning: Removing currently active version: {}",
+                    Paint::yellow("⚠"),
+                    display_name
+                );
+            }
+
+            match tokio::fs::remove_dir_all(&install.path).await {
+                Ok(()) => {
+                    removed_count += 1;
+                    let display_name = if install.is_master {
+                        format!("master/{}", install.version)
+                    } else {
+                        install.version.to_string()
+                    };
+                    println!("{} Removed: {}", Paint::red("✗"), display_name);
+                }
+                Err(e) => {
+                    failed_count += 1;
+                    let display_name = if install.is_master {
+                        format!("master/{}", install.version)
+                    } else {
+                        install.version.to_string()
+                    };
+                    eprintln!(
+                        "{} Failed to remove {}: {}",
+                        Paint::red("✗"),
+                        display_name,
+                        e
+                    );
+                }
+            }
+        }
+    }
+
+    // Report non-existent versions in --except list (Requirement 4.3)
+    for except_ver in except_versions {
+        if !found_except_versions.contains(except_ver) {
+            let display_name = match except_ver {
+                ZigVersion::Semver(v) => v.to_string(),
+                ZigVersion::Master(Some(v)) => format!("master/{}", v),
+                ZigVersion::Master(None) => "master".to_string(),
+                _ => format!("{:?}", except_ver),
+            };
+            println!(
+                "{} Version {} not found (specified in --except)",
+                Paint::yellow("⚠"),
+                display_name
+            );
+        }
+    }
+
+    // Report when no cleanup was needed (Requirement 4.4)
+    if removed_count == 0 && failed_count == 0 {
         println!(
-            "{} Bin directory doesn't exist: {}",
+            "{} No cleanup needed - all installed versions were in the --except list",
+            Paint::green("✓")
+        );
+    } else {
+        // Provide summary feedback
+        let mut summary_parts = Vec::new();
+        if removed_count > 0 {
+            summary_parts.push(format!("{} removed", removed_count));
+        }
+        if kept_count > 0 {
+            summary_parts.push(format!("{} kept", kept_count));
+        }
+        if failed_count > 0 {
+            summary_parts.push(format!("{} failed", failed_count));
+        }
+
+        let summary = summary_parts.join(", ");
+        let icon = if failed_count > 0 {
+            Paint::yellow("⚠")
+        } else {
+            Paint::green("✓")
+        };
+
+        println!("{} Cleanup completed: {}", icon, summary);
+    }
+
+    // Handle active version removal by automatically selecting a new active version
+    if active_version_removed {
+        handle_active_version_removal(app).await?;
+    }
+
+    Ok(())
+}
+
+/// Clean outdated master versions, keeping only the latest
+async fn clean_outdated_master(app: &mut App) -> crate::Result<()> {
+    println!(
+        "{}",
+        Paint::cyan("Removing outdated master versions...").bold()
+    );
+
+    let master_path = app.versions_path.join("master");
+    if !master_path.exists() {
+        println!("{} No master directory found", Paint::yellow("⚠"));
+        return Ok(());
+    }
+
+    // Get all master installations using scan_installations
+    let installations = ToolchainManager::scan_installations(&app.versions_path)?;
+    let active_install = app.toolchain_manager.get_active_install();
+    let mut master_installs: Vec<_> = installations
+        .into_iter()
+        .filter(|install| install.is_master)
+        .collect();
+
+    if master_installs.is_empty() {
+        println!("{} No master versions found", Paint::yellow("⚠"));
+        return Ok(());
+    }
+
+    // Sort to find the latest (highest version)
+    master_installs.sort_by(|a, b| a.version.cmp(&b.version));
+    let latest_master = master_installs.last().unwrap();
+
+    let mut removed_count = 0;
+    let mut active_version_removed = false;
+
+    // Remove all master versions except the latest
+    for install in &master_installs {
+        if install.version != latest_master.version {
+            // Check if we're removing the currently active version
+            let is_active = active_install.map_or(false, |active| {
+                active.version == install.version && active.is_master == install.is_master
+            });
+
+            if is_active {
+                active_version_removed = true;
+                println!(
+                    "{} Warning: Removing currently active version: master/{}",
+                    Paint::yellow("⚠"),
+                    install.version
+                );
+            }
+
+            match tokio::fs::remove_dir_all(&install.path).await {
+                Ok(()) => {
+                    removed_count += 1;
+                    println!(
+                        "{} Removed outdated: master/{}",
+                        Paint::red("✗"),
+                        install.version
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "{} Failed to remove master/{}: {}",
+                        Paint::red("✗"),
+                        install.version,
+                        e
+                    );
+                }
+            }
+        }
+    }
+
+    if removed_count == 0 {
+        println!(
+            "{} No outdated master versions to remove",
+            Paint::green("✓")
+        );
+    } else {
+        println!(
+            "{} Removed {} outdated master version(s), kept latest: master/{}",
+            Paint::green("✓"),
+            removed_count,
+            latest_master.version
+        );
+    }
+
+    // Handle active version removal by automatically selecting a new active version
+    if active_version_removed {
+        handle_active_version_removal(app).await?;
+    }
+
+    Ok(())
+}
+
+/// Clean downloads directory only
+async fn clean_downloads_only(app: &mut App) -> crate::Result<()> {
+    let downloads_path = app.download_cache();
+    println!("{}", Paint::cyan("Cleaning downloads directory...").bold());
+
+    // Check if downloads directory exists
+    if !downloads_path.exists() {
+        println!(
+            "{} Downloads directory doesn't exist: {}",
             Paint::yellow("⚠"),
-            bin_path.display()
+            downloads_path.display()
         );
         return Ok(());
     }
 
-    let mut cleaned_count = 0;
-
-    // Use walkdir to iterate through files in the bin directory
-    for entry in WalkDir::new(&bin_path)
-        .max_depth(1) // Only look at files directly in bin_path, not subdirectories
-        .into_iter()
-        .filter_map(|e| e.ok()) // Skip entries with errors
-        .filter(|e| e.file_type().is_file())
-    // Only process files
-    {
-        let path = entry.path();
-
-        // Skip if it's the zv executable
-        if let Some(filename) = path.file_name() {
-            if filename == zv_exe_name {
-                continue;
-            }
+    // Remove the entire downloads directory
+    match tokio::fs::remove_dir_all(&downloads_path).await {
+        Ok(()) => {
+            println!("{} Removed downloads directory", Paint::red("✗"));
         }
-
-        // Remove the file
-        match std::fs::remove_file(path) {
-            Ok(()) => {
-                cleaned_count += 1;
-                println!(
-                    "{} Removed: {}",
-                    Paint::red("✗"),
-                    path.file_name().unwrap().to_string_lossy()
-                );
-            }
-            Err(e) => {
-                eprintln!(
-                    "{} Failed to remove {}: {}",
-                    Paint::red("✗"),
-                    path.display(),
-                    e
-                );
-            }
+        Err(e) => {
+            eprintln!(
+                "{} Failed to remove downloads directory: {}",
+                Paint::red("✗"),
+                e
+            );
+            return Err(color_eyre::eyre::eyre!(
+                "Failed to remove downloads directory: {}",
+                e
+            ));
         }
     }
 
-    println!(
-        "{} Cleaned {} executable(s) from bin directory",
-        Paint::green("✓"),
-        cleaned_count
-    );
+    // Recreate downloads directory with tmp subfolder
+    match tokio::fs::create_dir_all(&downloads_path.join("tmp")).await {
+        Ok(()) => {
+            println!(
+                "{} Successfully cleaned downloads directory",
+                Paint::green("✓")
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "{} Failed to recreate downloads/tmp directory: {}",
+                Paint::yellow("⚠"),
+                e
+            );
+            return Err(color_eyre::eyre::eyre!(
+                "Failed to recreate downloads directory: {}",
+                e
+            ));
+        }
+    }
+
     Ok(())
 }
 
-/// Clean up all Zig installations from the versions directory
-pub async fn clean_versions(app: &App) -> crate::Result<()> {
+/// Clean up all contents of the versions directory (for clean_all command)
+pub async fn clean_all_versions(app: &mut App) -> crate::Result<()> {
     let versions_path = &app.versions_path;
 
-    println!("{}", Paint::cyan("Cleaning versions directory...").bold());
+    println!(
+        "{}",
+        Paint::cyan("Removing all versions...").bold()
+    );
 
     if !versions_path.exists() {
         println!(
@@ -96,185 +521,216 @@ pub async fn clean_versions(app: &App) -> crate::Result<()> {
         return Ok(());
     }
 
-    let mut cleaned_count = 0;
-    let mut failed_count = 0;
-
-    // Use walkdir to iterate through directories in versions_path
-    for entry in WalkDir::new(versions_path)
-        .max_depth(2) // Look at versions/* and versions/master/*
-        .min_depth(1) // Skip the versions_path itself
-        .into_iter()
-        .filter_map(|e| e.ok()) // Skip entries with errors
-        .filter(|e| e.file_type().is_dir())
-    // Only process directories
-    {
-        let path = entry.path();
-        let depth = entry.depth();
-
-        // Skip temporary directories (from failed installations)
-        if let Some(filename) = path.file_name() {
-            if filename.to_string_lossy().ends_with(".tmp") {
-                continue;
-            }
+    // Remove the entire versions directory
+    match tokio::fs::remove_dir_all(versions_path).await {
+        Ok(()) => {
+            println!("{} Removed versions directory", Paint::red("✗"));
         }
-
-        // We want to remove:
-        // - Depth 1: versions/0.13.0, versions/0.12.0, etc. (but not versions/master)
-        // - Depth 2: versions/master/0.14.0-dev.123, etc.
-        let should_remove = match depth {
-            1 => {
-                // Don't remove the master directory itself
-                path.file_name() != Some(std::ffi::OsStr::new("master"))
-            }
-            2 => {
-                // Remove any directory inside versions/master/
-                path.parent()
-                    .and_then(|p| p.file_name())
-                    .map(|name| name == "master")
-                    .unwrap_or(false)
-            }
-            _ => false,
-        };
-
-        if should_remove {
-            match tokio::fs::remove_dir_all(path).await {
-                Ok(()) => {
-                    cleaned_count += 1;
-                    let display_path = if depth == 2 {
-                        // For master builds, show master/version
-                        format!("master/{}", path.file_name().unwrap().to_string_lossy())
-                    } else {
-                        // For regular builds, show just the version
-                        path.file_name().unwrap().to_string_lossy().to_string()
-                    };
-                    println!("{} Removed: {}", Paint::red("✗"), display_path);
-                }
-                Err(e) => {
-                    failed_count += 1;
-                    eprintln!(
-                        "{} Failed to remove {}: {}",
-                        Paint::red("✗"),
-                        path.display(),
-                        e
-                    );
-                }
-            }
+        Err(e) => {
+            eprintln!(
+                "{} Failed to remove versions directory: {}",
+                Paint::red("✗"),
+                e
+            );
+            return Err(color_eyre::eyre::eyre!(
+                "Failed to remove versions directory: {}",
+                e
+            ));
         }
     }
 
-    if failed_count > 0 {
-        println!(
-            "{} Cleaned {} installation(s), {} failed",
-            Paint::yellow("⚠"),
-            cleaned_count,
-            failed_count
-        );
-    } else {
-        println!(
-            "{} Cleaned {} Zig installation(s) from versions directory",
-            Paint::green("✓"),
-            cleaned_count
-        );
+    // Recreate the versions directory
+    match tokio::fs::create_dir(versions_path).await {
+        Ok(()) => {
+            println!(
+                "{} Successfully cleaned versions directory",
+                Paint::green("✓")
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "{} Failed to recreate versions directory: {}",
+                Paint::yellow("⚠"),
+                e
+            );
+            return Err(color_eyre::eyre::eyre!(
+                "Failed to recreate versions directory: {}",
+                e
+            ));
+        }
     }
 
     Ok(())
 }
 
-pub fn clean_downloads(app: &App) {
+pub async fn clean_downloads(app: &mut App) -> crate::Result<()> {
     let downloads_path = app.download_cache();
     println!("{}", Paint::cyan("Cleaning downloads directory...").bold());
 
-    match std::fs::read_dir(&downloads_path) {
-        Ok(entries) => {
-            let mut removed_count = 0;
-            let mut failed_count = 0;
+    if !downloads_path.exists() {
+        println!("{} Downloads directory doesn't exist", Paint::yellow("⚠"));
+        return Ok(());
+    }
 
-            for entry in entries.flatten() {
-                let path = entry.path();
-
-                // Special handling for tmp folder - clean its contents but keep the folder
-                if path.is_dir() && path.file_name().and_then(|n| n.to_str()) == Some("tmp") {
-                    for entry in WalkDir::new(&path).min_depth(1).contents_first(true) {
-                        if let Ok(entry) = entry {
-                            let entry_path = entry.path();
-                            let result = if entry_path.is_dir() {
-                                std::fs::remove_dir(entry_path)
-                            } else {
-                                std::fs::remove_file(entry_path)
-                            };
-
-                            match result {
-                                Ok(_) => removed_count += 1,
-                                Err(e) => {
-                                    eprintln!(
-                                        "{} Failed to remove {}: {}",
-                                        Paint::red("✗"),
-                                        entry_path.display(),
-                                        e
-                                    );
-                                    failed_count += 1;
-                                }
-                            }
-                        }
-                    }
-                    continue;
-                }
-
-                // Remove everything else normally
-                let result = if path.is_dir() {
-                    std::fs::remove_dir_all(&path)
-                } else {
-                    std::fs::remove_file(&path)
-                };
-
-                match result {
-                    Ok(_) => removed_count += 1,
-                    Err(e) => {
-                        eprintln!(
-                            "{} Failed to remove {}: {}",
-                            Paint::red("✗"),
-                            path.display(),
-                            e
-                        );
-                        failed_count += 1;
-                    }
-                }
-            }
-
-            if failed_count == 0 {
-                println!(
-                    "{} Cleaned downloads directory ({} items removed)",
-                    Paint::green("✓"),
-                    removed_count
-                );
-            } else {
-                println!(
-                    "{} Partially cleaned downloads directory ({} removed, {} failed)",
-                    Paint::yellow("⚠"),
-                    removed_count,
-                    failed_count
-                );
-            }
+    // Remove the entire downloads directory
+    match tokio::fs::remove_dir_all(&downloads_path).await {
+        Ok(()) => {
+            println!("{} Removed downloads directory", Paint::red("✗"));
         }
         Err(e) => {
             eprintln!(
-                "{} Failed to read downloads directory: {}",
+                "{} Failed to remove downloads directory: {}",
                 Paint::red("✗"),
                 e
             );
+            return Err(color_eyre::eyre::eyre!(
+                "Failed to remove downloads directory: {}",
+                e
+            ));
         }
     }
+
+    // Recreate downloads directory with tmp subfolder
+    match tokio::fs::create_dir_all(&downloads_path.join("tmp")).await {
+        Ok(()) => {
+            println!(
+                "{} Successfully cleaned downloads directory",
+                Paint::green("✓")
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "{} Failed to recreate downloads/tmp directory: {}",
+                Paint::yellow("⚠"),
+                e
+            );
+            return Err(color_eyre::eyre::eyre!(
+                "Failed to recreate downloads directory: {}",
+                e
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 /// Clean up both bin and versions directories
-pub async fn clean_all(app: &App) -> crate::Result<()> {
+pub async fn clean_all(app: &mut App) -> crate::Result<()> {
     println!("{}", Paint::cyan("Performing full cleanup...").bold());
 
-    clean_bin(app).await?;
+    // Note: bin directory cleanup has been removed - shims are managed by 'zv use <version>'
+
+    // Clean all contents of versions/ directory (enhanced functionality)
+    clean_all_versions(app).await?;
     println!(); // Add spacing
-    clean_versions(app).await?;
-    clean_downloads(app);
+
+    // Clean downloads/ directory and recreate with tmp subfolder
+    clean_downloads(app).await?;
     println!();
+
     println!("{}", Paint::green("Full cleanup completed!").bold());
+    Ok(())
+}
+
+/// Handle active version removal by automatically selecting a new active version
+/// Priority: highest stable > highest master > none
+async fn handle_active_version_removal(app: &mut App) -> crate::Result<()> {
+    println!();
+    println!(
+        "{} The currently active Zig version was removed.",
+        Paint::yellow("⚠")
+    );
+
+    // Get all remaining installed versions
+    let installations = ToolchainManager::scan_installations(&app.versions_path)?;
+
+    if installations.is_empty() {
+        println!(
+            "{} No Zig versions remain installed. Run 'zv use <version>' to install and activate a version.",
+            Paint::cyan("ℹ")
+        );
+        return Ok(());
+    }
+
+    // Find the best replacement version using priority: highest stable > highest master > none
+    let mut stable_versions: Vec<_> = installations
+        .iter()
+        .filter(|install| !install.is_master)
+        .collect();
+    let mut master_versions: Vec<_> = installations
+        .iter()
+        .filter(|install| install.is_master)
+        .collect();
+
+    // Sort by version (highest first)
+    stable_versions.sort_by(|a, b| b.version.cmp(&a.version));
+    master_versions.sort_by(|a, b| b.version.cmp(&a.version));
+
+    let new_active = if let Some(highest_stable) = stable_versions.first() {
+        // Use highest stable version
+        Some((highest_stable, false)) // false = not master
+    } else if let Some(highest_master) = master_versions.first() {
+        // Use highest master version if no stable versions exist
+        Some((highest_master, true)) // true = is master
+    } else {
+        None
+    };
+
+    match new_active {
+        Some((install, is_master)) => {
+            let display_name = if is_master {
+                format!("master/{}", install.version)
+            } else {
+                install.version.to_string()
+            };
+
+            println!(
+                "{} Automatically setting new active version: {}",
+                Paint::cyan("→"),
+                display_name
+            );
+
+            // Create ResolvedZigVersion for the new active version
+            let resolved_version = if is_master {
+                ResolvedZigVersion::Master(install.version.clone())
+            } else {
+                ResolvedZigVersion::Semver(install.version.clone())
+            };
+
+            // Use app's set_active_version method with the installation path to skip scanning
+            match app
+                .set_active_version(&resolved_version, Some(install.path.clone()))
+                .await
+            {
+                Ok(()) => {
+                    println!(
+                        "{} Successfully set active version to: {}",
+                        Paint::green("✓"),
+                        display_name
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "{} Failed to set active version to {}: {}",
+                        Paint::red("✗"),
+                        display_name,
+                        e
+                    );
+                    println!(
+                        "{} Run 'zv use {}' to manually set the active version.",
+                        Paint::cyan("ℹ"),
+                        display_name
+                    );
+                }
+            }
+        }
+        None => {
+            println!(
+                "{} No Zig versions remain installed. Run 'zv use <version>' to install and activate a version.",
+                Paint::cyan("ℹ")
+            );
+        }
+    }
+
     Ok(())
 }
