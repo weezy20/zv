@@ -96,8 +96,9 @@ zv list  | ls                          # List installed Zig versions
 zv clean | rm                          # Remove Zig versions interactively. Additionally cleans up downloads cache, temporary download artifacts.
 zv clean | rm <version | all>          # Clean up all zv-managed installations using `all` or just a single one (e.g., zv clean 0.14).
 zv clean 0.14,0.14.0                   # Clean up multiple Zig installations using a comma-separated list.
-zv clean --except <version>            # Clean up every version except the version mentioned as argument to --except <version>
+zv clean --except <version,*>          # Clean up every version except the version mentioned as argument to --except <version> where <version> maybe a comma separated list of ZigVersions. E.g. (zv clean --except 0.14.1,master@0.16.0-dev.565+f50c64797,stable@0.15.1)
 zv rm master                           # Clean up the `master` branch toolchain.
+zv rm master --outdated                # Clean up any older master versions in the master folder that don't match latest `master`
 zv setup                               # Set up shell environment for zv with interactive prompts (use --no-interactive for automation)
 zv sync                                # Resync community mirrors list from [ziglang.org/download/community-mirrors.txt]; also force resync of index to fetch latest nightly builds.
 zv help                                # Detailed instructions for zv. Use `--help` for long help or `-h` for short help with a subcommand.
