@@ -218,7 +218,7 @@ impl Commands {
                 )
                 .await
             }
-            Commands::Sync => todo!(),
+            Commands::Sync => sync::sync(&mut app).await,
         }
     }
 }
