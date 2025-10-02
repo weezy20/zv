@@ -1,9 +1,6 @@
 use crate::app::toolchain::ToolchainManager;
 use crate::cli::CleanTarget;
 use crate::{App, ResolvedZigVersion, ZigVersion};
-use std::collections::HashSet;
-use std::str::FromStr;
-use walkdir::WalkDir;
 use yansi::Paint;
 
 pub async fn clean(
