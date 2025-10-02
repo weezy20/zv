@@ -405,9 +405,9 @@ impl ToolchainManager {
 
         tracing::debug!(target: TARGET, install_path = %install.path.display(), "Deploying shims for installation");
 
-        // Create shims for zig and zls
         self.create_shim(&zv_path, Shim::Zig).await?;
-        self.create_shim(&zv_path, Shim::Zls).await?;
+        // TODO: ZLS support is unimplemented
+        // self.create_shim(&zv_path, Shim::Zls).await?;
 
         tracing::info!(target: TARGET, "Successfully deployed zig for version {}", install.version);
         Ok(())
