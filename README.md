@@ -126,5 +126,7 @@ I hope you enjoy using it! ♥
 
 ---
 
+### Tips:
+- If you prefer some mirrors to others, you can put it as `rank = 1` on your preferred mirrors (Default is rank 1 for all mirros) or lower the rank of mirrors that you don't want. `rank` is a range from 1..255, lower is better and more preferred when doing random selection. The mirrors file is generated at `<ZV_DIR>/mirrors.toml`
 
-If you prefer some mirrors to others, you can put it as `rank = 1` on your preferred mirrors (Default is rank 1 for all mirros) or lower the rank of mirrors that you don't want. `rank` is a range from 1..255, lower is better and more preferred when doing random selection. The mirrors file is generated at `<ZV_DIR>/mirrors.toml`
+- Currently `zv use master` will only install the master as present in zig-index. This means that older master installations still remain under the masters folder and can be selected via `zv use master@<older master version>` which can be obtained via `zv ls`. Note, installing older master versions like this doesn't work because for `master` we exclusively consult the information in the zig-index. However, there's no reason this can't be supported in the future with a separate `dev@<version>` syntax.

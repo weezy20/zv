@@ -97,11 +97,12 @@ pub async fn resolve_zig_version(
                 app.to_install = Some(master_release);
                 Ok(ResolvedZigVersion::Master(v.clone()))
             } else {
-                Err(ZvError::ZigVersionResolveError(eyre!(
-                    "Master version mismatch: requested {}, but master is {}",
+                tracing::warn!(
+                    "Master version mismatch: requested {}, but master is at {}",
                     v,
                     index_master_version
-                )))
+                );
+                Ok(ResolvedZigVersion::Master(v.clone()))
             }
         }
 
