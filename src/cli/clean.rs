@@ -27,7 +27,7 @@ pub async fn clean(
             return clean_outdated_master(app).await;
         } else {
             eprintln!(
-                "{} --outdated flag can only be used without a target or with 'master'",
+                "{} --outdated flag can only be used where clean target is 'master'",
                 Paint::red("✗")
             );
             eprintln!(
@@ -73,7 +73,7 @@ async fn clean_specific_versions(app: &mut App, versions: &[ZigVersion]) -> crat
 
     println!(
         "{}",
-        Paint::cyan(&format!("Cleaning versions: {}", versions_display)).bold()
+        Paint::cyan(&format!("Removing version(s): {}", versions_display)).bold()
     );
 
     // Get all installed versions with their paths using scan_installations
@@ -213,7 +213,7 @@ async fn clean_except_versions(app: &mut App, except_versions: &[ZigVersion]) ->
 
     println!(
         "{}",
-        Paint::cyan(&format!("Cleaning all versions except: {}", except_display)).bold()
+        Paint::cyan(&format!("Removing all versions except: {}", except_display)).bold()
     );
 
     // Get all installed versions using scan_installations
@@ -357,7 +357,7 @@ async fn clean_except_versions(app: &mut App, except_versions: &[ZigVersion]) ->
 async fn clean_outdated_master(app: &mut App) -> crate::Result<()> {
     println!(
         "{}",
-        Paint::cyan("Cleaning outdated master versions...").bold()
+        Paint::cyan("Removing outdated master versions...").bold()
     );
 
     let master_path = app.versions_path.join("master");
@@ -509,7 +509,7 @@ pub async fn clean_all_versions(app: &mut App) -> crate::Result<()> {
 
     println!(
         "{}",
-        Paint::cyan("Cleaning all versions directory contents...").bold()
+        Paint::cyan("Removing all versions...").bold()
     );
 
     if !versions_path.exists() {
@@ -568,10 +568,7 @@ pub async fn clean_downloads(app: &mut App) -> crate::Result<()> {
     println!("{}", Paint::cyan("Cleaning downloads directory...").bold());
 
     if !downloads_path.exists() {
-        println!(
-            "{} Downloads directory doesn't exist",
-            Paint::yellow("⚠")
-        );
+        println!("{} Downloads directory doesn't exist", Paint::yellow("⚠"));
         return Ok(());
     }
 
@@ -700,8 +697,11 @@ async fn handle_active_version_removal(app: &mut App) -> crate::Result<()> {
                 ResolvedZigVersion::Semver(install.version.clone())
             };
 
-            // Use app's set_active_version method
-            match app.set_active_version(&resolved_version, None).await {
+            // Use app's set_active_version method with the installation path to skip scanning
+            match app
+                .set_active_version(&resolved_version, Some(install.path.clone()))
+                .await
+            {
                 Ok(()) => {
                     println!(
                         "{} Successfully set active version to: {}",
