@@ -22,49 +22,53 @@ It also doubles as a project template starter, providing multiple variants of a 
 
 ## Installation
 
+**Step 1:** Install the binary from crates.io or GitHub
 ```sh
 # From crates.io
 cargo install zv
+
+# OR from GitHub
+cargo install --git https://github.com/weezy20/zv --locked
 ```
 
+**Step 2:** Preview setup changes (optional but recommended)
 ```sh
-# From GitHub
-cargo install --git --locked https://github.com/weezy20/zv
+$HOME/.cargo/bin/zv setup --dry-run
+# OR shorthand:
+$HOME/.cargo/bin/zv setup -d
 ```
+
+**Step 3:** Run setup to install `zv` to `ZV_DIR/bin` and configure your shell
+```sh
+$HOME/.cargo/bin/zv setup
+```
+This self-installs `zv` to `ZV_DIR/bin` (default: `$HOME/.zv/bin` on Unix, `%USERPROFILE%\.zv\bin` on Windows) and adds it to your PATH.
+
+**Step 4:** Remove the cargo binary (optional cleanup)
+```sh
+cargo uninstall zv
+```
+From now on, use the `zv` installed in `ZV_DIR/bin`.
+
+
+## Updating `zv`
+
+Repeat the installation steps above, or if you have the repo cloned:
+```sh
+# Update from your local clone
+cargo run --release -- setup
+```
+This replaces your existing `ZV_DIR/bin/zv` installation.
 
 ## Usage
 
-All `zv` data lives in `ZV_DIR`, including Zig versions, temporary downloads, cache files, and `zv` itself, which you can set as a custom path.
+All `zv` data lives in `ZV_DIR`, including Zig versions, downloads, cache files, and the `zv` binary itself.
 
-If not set, the default zv directory is `$HOME/.zv` on Unix-like systems and `$USERPROFILE/.zv` on Windows. `zv` is aware of emulated shells and WSL, so it always picks the correct default location for `ZV_DIR`.
+**Default locations:**
+- Unix/Linux/macOS: `$HOME/.zv`
+- Windows: `%USERPROFILE%\.zv`
 
-```sh
-# Run zv setup as a one-time step to set up directories and environment zv needs.
-# Interactive mode is enabled by default, providing clear prompts about system changes.
-# Interactive mode is automatically disabled in CI environments or when TTY is not available.
-
-# First, preview changes:
-zv setup --dry-run | zv setup -d
-
-# Then, once you're happy, run:
-zv setup # This applies those changes with interactive prompts and self-installs zv from your current invocation to <ZV_DIR>/bin in case versions mismatch
-
-# For automation or CI environments:
-zv setup --no-interactive
-
-# To get help about a particular subcommand:
-zv <subcommand> -h (short help) | --help (long help)
-# E.g.:
-zv setup --help
-
-# To check out zv stats:
-zv
-```
-
-Once `zv setup` is finished, you can remove the cargo-installed binary if you used cargo: `cargo uninstall zv`.
-`zv` will automatically install itself in `ZV_DIR/bin` after making sure that has been included in your `PATH`, so there's no need for a second binary.
-
-Upgrading can be done the same way. You install `zv` from cargo or build it yourself and run `zv setup` to find and replace your existing installation. This is only temporary until `zv upgrade` is implemented, after which this won't be required.
+You can customize this by setting the `ZV_DIR` environment variable.
 
 ## Use `zv` for project creation:
 
