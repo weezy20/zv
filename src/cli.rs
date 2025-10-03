@@ -400,20 +400,23 @@ fn print_welcome_message(app: App) {
     }
 
     // Current active Zig version
-    let active_zig = app.get_active_version();
+    let active_zig: Option<ZigVersion> = app.get_active_version();
+
+    let active_zig_str = active_zig.as_ref().map_or_else(|| "none".to_string(), |v| v.to_string());
+    let help_text = if active_zig.is_none() {
+        format!(
+            " (use {} to set one | or run {} to get started)",
+            Paint::blue("zv use <version>"),
+            Paint::blue("zv setup")
+        )
+    } else {
+        String::new()
+    };
 
     println!(
-        "Current active Zig: {}{opt}",
-        Paint::yellow(&active_zig.map_or_else(|| "none".to_string(), |v| v.to_string())),
-        opt = if active_zig.is_none() {
-            &format!(
-                " (use {} to set one | or run {} to get started)",
-                Paint::blue("zv use <version>"),
-                Paint::blue("zv setup")
-            )
-        } else {
-            ""
-        }
+        "Current active Zig: {}{}",
+        Paint::yellow(&active_zig_str),
+        help_text
     );
     println!();
 

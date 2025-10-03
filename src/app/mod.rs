@@ -186,29 +186,34 @@ impl App {
     /// Force refresh the Zig index from network
     pub async fn sync_zig_index(&mut self) -> Result<(), ZvError> {
         self.ensure_network().await?;
-        
+
         if let Some(network) = self.network.as_mut() {
             network.sync_zig_index().await?;
         }
-        
+
         Ok(())
     }
 
     /// Force refresh the community mirrors list from network
     pub async fn sync_mirrors(&mut self) -> Result<usize, ZvError> {
         self.ensure_network_with_mirrors().await?;
-        
+
         if let Some(network) = self.network.as_mut() {
             return network.sync_mirrors().await;
         }
-        
+
         Ok(0)
     }
 
     /// Get the current active Zig version
-    pub fn get_active_version(&self) -> Option<&ZigVersion> {
-        // self.active_version.as_ref()
-        None
+    pub fn get_active_version(&self) -> Option<ZigVersion> {
+        self.toolchain_manager.get_active_install().map(|zi| {
+            if zi.is_master {
+                ZigVersion::Master(Some(zi.version.clone()))
+            } else {
+                ZigVersion::Semver(zi.version.clone())
+            }
+        })
     }
 
     /// Get the app's base path
