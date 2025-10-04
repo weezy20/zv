@@ -187,7 +187,7 @@ pub enum Commands {
             help = "Preview changes without applying them"
         )]
         dry_run: bool,
-        /// Optional: Specify a specific zig version to set up. By default we don't install any version.
+        /// Optional: Specify a specific zig version to set up. By default, no version is installed.
         #[arg(
             long,
             alias = "version",
