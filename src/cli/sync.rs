@@ -11,6 +11,7 @@
 //! - Automatic shim regeneration when binary is updated
 
 use crate::Shim;
+use std::path::Path;
 
 pub async fn sync(app: &mut crate::App) -> crate::Result<()> {
     use yansi::Paint;
@@ -41,9 +42,7 @@ pub async fn sync(app: &mut crate::App) -> crate::Result<()> {
 
 /// Public API for checking and updating the zv binary
 /// This can be called from setup, sync, or other commands
-///
-/// Returns true if the binary was updated (requiring shim regeneration)
-pub async fn check_and_update_zv_binary(app: &crate::App, quiet: bool) -> crate::Result<bool> {
+pub async fn check_and_update_zv_binary(app: &crate::App, quiet: bool) -> crate::Result<()> {
     check_and_update_zv_binary_impl(app, quiet, true).await
 }
 
@@ -51,7 +50,7 @@ async fn check_and_update_zv_binary_impl(
     app: &crate::App,
     quiet: bool,
     prompt_on_downgrade: bool,
-) -> crate::Result<bool> {
+) -> crate::Result<()> {
     use crate::tools::{fetch_zv_dir, files_have_same_hash};
     use color_eyre::eyre::{Context, eyre};
     use std::process::Command;
@@ -74,7 +73,7 @@ async fn check_and_update_zv_binary_impl(
         if !quiet {
             println!("  {} zv binary installed", "✓".green());
         }
-        return Ok(true);
+        return Ok(());
     }
 
     // Compare checksums
@@ -83,7 +82,7 @@ async fn check_and_update_zv_binary_impl(
             if !quiet {
                 println!("  {} zv binary is up to date", "✓".green());
             }
-            return Ok(false);
+            return Ok(());
         }
         Ok(false) => {
             // Checksums differ - need to compare versions
@@ -111,7 +110,7 @@ async fn check_and_update_zv_binary_impl(
                             if !quiet {
                                 println!("  {} zv binary updated", "✓".green());
                             }
-                            return Ok(true);
+                            return Ok(());
                         }
                         Ordering::Less => {
                             if !quiet {
@@ -128,7 +127,7 @@ async fn check_and_update_zv_binary_impl(
                                 if !quiet {
                                     println!("  {} Skipping zv binary update", "→".blue());
                                 }
-                                return Ok(false);
+                                return Ok(());
                             }
 
                             if !quiet {
@@ -157,7 +156,7 @@ async fn check_and_update_zv_binary_impl(
                                     }
                                 );
                             }
-                            return Ok(true);
+                            return Ok(());
                         }
                         Ordering::Equal => {
                             // Same version but different checksum - just update
@@ -173,7 +172,7 @@ async fn check_and_update_zv_binary_impl(
                             if !quiet {
                                 println!("  {} zv binary updated", "✓".green());
                             }
-                            return Ok(true);
+                            return Ok(());
                         }
                     }
                 }
@@ -194,7 +193,7 @@ async fn check_and_update_zv_binary_impl(
                     if !quiet {
                         println!("  {} zv binary updated", "✓".green());
                     }
-                    return Ok(true);
+                    return Ok(());
                 }
             }
         }
@@ -210,7 +209,7 @@ async fn check_and_update_zv_binary_impl(
             if !quiet {
                 println!("  {} zv binary updated", "✓".green());
             }
-            return Ok(true);
+            return Ok(());
         }
     }
 }
@@ -270,34 +269,31 @@ fn prompt_user_to_downgrade() -> crate::Result<bool> {
 }
 
 /// Copy the binary and regenerate shims
+/// This ensures the shims point to the correct binary
 async fn copy_binary_and_regenerate_shims(
-    source: &std::path::Path,
-    target: &std::path::Path,
+    source: &Path,
+    target: &Path,
     app: &crate::App,
 ) -> crate::Result<()> {
     use color_eyre::eyre::Context;
-
-    // Create bin directory if it doesn't exist
+    
+    // Ensure the bin directory exists using app's canonical path
     tokio::fs::create_dir_all(app.bin_path())
         .await
-        .wrap_err("Failed to create bin directory")?;
+        .with_context(|| format!("Failed to create directory {}", app.bin_path().display()))?;
 
-    // Copy the binary
     tokio::fs::copy(source, target)
         .await
-        .wrap_err("Failed to copy zv binary")?;
+        .with_context(|| format!("Failed to copy zv binary from {} to {}", source.display(), target.display()))?;
 
-    // Regenerate shims if there's an active installation
-    if let Some(active_install) = app.toolchain_manager.get_active_install() {
-        tracing::debug!(target: "zv::cli::sync", "Regenerating shims for active installation");
-        // Clone the install to avoid borrow issues
-        let install = active_install.clone();
-        // Access the toolchain manager mutably through App's field
-        let toolchain = &app.toolchain_manager;
-        toolchain
-            .deploy_shims(&install)
+
+    // Regenerate shims to ensure they point to the correct zv binary
+    let toolchain_manager = &app.toolchain_manager;
+    if let Some(install) = toolchain_manager.get_active_install() {
+        toolchain_manager
+            .deploy_shims(install, true)
             .await
-            .wrap_err("Failed to regenerate shims")?;
+            .with_context(|| "Failed to regenerate shims after updating zv binary")?;
     }
 
     Ok(())

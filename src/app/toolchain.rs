@@ -318,7 +318,7 @@ impl ToolchainManager {
             .ok_or_else(|| eyre!("Version {} is not installed", version))?;
 
         tracing::debug!(target: TARGET, install_path = %install.path.display(), "Found installation, deploying shims");
-        self.deploy_shims(install).await?;
+        self.deploy_shims(install, false).await?;
 
         let json = serde_json::to_vec(&install)
             .wrap_err("Failed to serialize Zig install for active file")?;
@@ -348,7 +348,7 @@ impl ToolchainManager {
             is_master: rzv.is_master(),
         };
         tracing::debug!(target: TARGET, "Deploying shims");
-        self.deploy_shims(&zig_install).await?;
+        self.deploy_shims(&zig_install, false).await?;
         let json = serde_json::to_vec(&zig_install)
             .wrap_err("Failed to serialize Zig install for active file")?;
         fs::write(&self.active_file, json).await?;
@@ -399,9 +399,13 @@ impl ToolchainManager {
     }
 
     /// Deploys or updates the proxy shims (zig, zls) in bin/ that link to zv
-    pub async fn deploy_shims(&self, install: &ZigInstall) -> Result<()> {
-        // First validate that zv binary exists
-        let zv_path = self.validate_zv_binary()?;
+    pub async fn deploy_shims(&self, install: &ZigInstall, skip_zv_bin_check: bool) -> Result<()> {
+        let zv_path = if !skip_zv_bin_check {
+            // Validate that zv binary exists
+            self.validate_zv_binary()?
+        } else {
+            self.bin_path.join(Shim::Zv.executable_name())
+        };
 
         tracing::debug!(target: TARGET, install_path = %install.path.display(), "Deploying shims for installation");
 

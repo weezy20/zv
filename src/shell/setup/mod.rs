@@ -355,7 +355,7 @@ pub async fn post_setup_actions(context: &SetupContext) -> crate::Result<()> {
         
         // Use the centralized check_and_update_zv_binary from sync module
         // This will copy the binary AND regenerate shims if needed
-        let _updated = crate::cli::sync::check_and_update_zv_binary(&context.app, true).await
+        crate::cli::sync::check_and_update_zv_binary(&context.app, true).await
             .with_context(|| "Failed to update zv binary")?;
         
         // Note: Shim regeneration is now handled inside check_and_update_zv_binary
