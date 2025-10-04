@@ -91,6 +91,8 @@ $HOME/.cargo/bin/zv setup
 Or from source:
 ```sh
 cargo run --release -- setup
+# or if you already have ZV_DIR/bin in path
+cargo run --release -- sync
 ```
 
 This self-installs `zv` to `ZV_DIR/bin` (default: `$HOME/.zv/bin` on Unix, `%USERPROFILE%\.zv\bin` on Windows) and adds it to your PATH.
