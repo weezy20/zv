@@ -1,8 +1,6 @@
-#![allow(unused, warnings)]
 use color_eyre::{
     Result,
     config::{HookBuilder, Theme},
-    eyre::Context,
 };
 use tracing_subscriber::prelude::*;
 

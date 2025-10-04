@@ -258,7 +258,7 @@ fn prompt_user_to_downgrade() -> crate::Result<bool> {
         return Ok(false);
     }
 
-    // Use dialoguer for better UX - default is NO (false)
+    // Default is NO (false) for downgrades
     let proceed = Confirm::new()
         .with_prompt("  Do you want to replace it with the older version?")
         .default(false)
