@@ -1,4 +1,4 @@
-use super::{OsFlavor, Shell, ShellContext, ShellType, path_utils::*};
+use super::{OsFlavor, Shell, ShellContext, ShellType};
 
 /// Generate PowerShell environment setup script
 /// This function is now a wrapper around the Shell::generate_env_content method

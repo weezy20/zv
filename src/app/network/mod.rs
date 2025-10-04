@@ -1,21 +1,17 @@
 use crate::app::constants::ZIG_DOWNLOAD_INDEX_JSON;
-use crate::app::toolchain::ToolchainManager;
 use crate::app::utils::{remove_files, zv_agent, verify_checksum, ProgressHandle};
-use crate::app::{FETCH_TIMEOUT_SECS, MAX_RETRIES};
-use crate::{NetErr, ZigVersion, ZvError, tools};
-use color_eyre::eyre::{Result, WrapErr, bail, eyre};
+use crate::app::FETCH_TIMEOUT_SECS;
+use crate::{NetErr, ZvError};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 use futures::StreamExt;
-use reqwest::Url;
-use sha2::{Digest, Sha256};
-use std::sync::{Arc, LazyLock};
+use sha2::Digest;
 use std::{
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use crate::types::{ResolvedZigVersion, TargetTriple};
-use std::collections::{BTreeMap, HashMap};
-use tokio::io::AsyncWriteExt;
+use std::collections::HashMap;
 use yansi::Paint;
 mod mirror;
 use mirror::*;

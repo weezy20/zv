@@ -4,8 +4,8 @@
 //! 3. Cache Layer (CacheZigIndex, CacheZigRelease, CacheArtifact) - for TOML serialization
 
 use crate::app::INDEX_TTL_DAYS;
-use crate::app::utils::{host_target, zig_tarball};
-use crate::types::{ResolvedZigVersion, TargetTriple, ZigVersion};
+use crate::app::utils::host_target;
+use crate::types::{ResolvedZigVersion, TargetTriple};
 use chrono::{DateTime, Utc};
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -13,7 +13,6 @@ use serde::{
 };
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
-use std::str::FromStr;
 
 /// Raw JSON representation from ziglang.org
 #[derive(Debug, Deserialize)]

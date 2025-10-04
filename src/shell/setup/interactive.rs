@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use dialoguer::{
     Select,
-    theme::{ColorfulTheme, Theme},
+    theme::Theme,
 };
 use yansi::Paint;
 

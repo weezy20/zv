@@ -4,15 +4,14 @@ pub(crate) mod toolchain;
 pub(crate) mod utils;
 use crate::app::network::{ZigDownload, ZigRelease};
 use crate::app::utils::{remove_files, zig_tarball};
-use crate::tools::canonicalize;
 use crate::types::*;
 mod minisign;
-use crate::{Shell, path_utils};
+use crate::path_utils;
 use color_eyre::eyre::{Context as _, eyre};
 pub use network::CacheStrategy;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 use toolchain::ToolchainManager;
 
 /// 21 days default TTL for index

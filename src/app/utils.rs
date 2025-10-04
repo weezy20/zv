@@ -1,5 +1,5 @@
 use crate::{
-    ZigVersion, ZvError,
+    ZvError,
     tools::canonicalize,
     types::{ArchiveExt, Shim},
 };

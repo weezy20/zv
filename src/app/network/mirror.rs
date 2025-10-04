@@ -46,7 +46,6 @@
 use std::{
     convert::TryFrom,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 use super::{CacheStrategy, TARGET};
@@ -60,7 +59,7 @@ use crate::{
     },
 };
 use chrono::{DateTime, Utc};
-use color_eyre::eyre::{Result, WrapErr, bail, eyre};
+use color_eyre::eyre::{Result, bail};
 use rand::{Rng, prelude::IndexedRandom};
 use reqwest::Client;
 use semver::Version;

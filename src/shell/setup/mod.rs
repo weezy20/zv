@@ -1,4 +1,3 @@
-use crate::{app::App, tools::files_have_same_hash};
 use color_eyre::eyre::Context;
 use yansi::Paint;
 

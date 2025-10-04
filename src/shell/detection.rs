@@ -1,6 +1,6 @@
 use super::ShellType;
 use crate::tools::is_tty;
-use sysinfo::{Pid, Process, System};
+use sysinfo::System;
 
 /// Get the parent process name using sysinfo
 pub fn get_parent_process_name() -> Option<String> {

@@ -2,7 +2,7 @@ use crate::shell::setup::{
     SetupContext, execute_setup, post_setup_actions, pre_setup_checks,
     InteractiveSetup, apply_user_choices, handle_interactive_error, is_recoverable_interactive_error
 };
-use crate::{App, Shell, ZigVersion};
+use crate::{App, ZigVersion};
 use color_eyre::eyre::Context as _;
 use yansi::Paint;
 
