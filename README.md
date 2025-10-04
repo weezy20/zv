@@ -22,7 +22,35 @@ It also doubles as a project template starter, providing multiple variants of a 
 
 ## Installation
 
-**Step 1:** Install the binary from crates.io or GitHub
+
+**Quick install script (Recommended):**
+
+Linux/macOS:
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/weezy20/zv/releases/latest/download/zv-installer.sh | sh
+```
+
+Windows (PowerShell):
+```powershell
+irm https://github.com/weezy20/zv/releases/latest/download/zv-installer.ps1 | iex
+```
+
+**HomeBrew:**
+```sh
+brew install weezy20/tap/zv
+```
+
+**NPM:**
+```sh
+npm install -g @weezy20/zv
+```
+
+<details>
+<summary><b>Cargo (crates.io or build from source)</b></summary>
+
+**Step 1:** Install the binary from crates.io or build from source
+
+Using `cargo install`:
 ```sh
 # From crates.io
 cargo install zv
@@ -31,27 +59,58 @@ cargo install zv
 cargo install --git https://github.com/weezy20/zv --locked
 ```
 
+Or build from source (clone the repo first):
+```sh
+# Build release binary (creates target/release/zv)
+cargo build --release
+```
+
 **Step 2:** Preview setup changes (optional but recommended)
+
+Using `cargo installed binary`:
 ```sh
 $HOME/.cargo/bin/zv setup --dry-run
 # OR shorthand:
 $HOME/.cargo/bin/zv setup -d
 ```
 
+Or from source:
+```sh
+cargo run --release -- setup --dry-run
+# OR shorthand:
+cargo run --release -- setup -d
+```
+
 **Step 3:** Run setup to install `zv` to `ZV_DIR/bin` and configure your shell
+
+Using `cargo installed binary`:
 ```sh
 $HOME/.cargo/bin/zv setup
 ```
+
+Or from source:
+```sh
+cargo run --release -- setup
+```
+
 This self-installs `zv` to `ZV_DIR/bin` (default: `$HOME/.zv/bin` on Unix, `%USERPROFILE%\.zv\bin` on Windows) and adds it to your PATH.
 
-**Step 4:** Remove the cargo binary (optional cleanup)
+**Step 4:** Remove the cargo binary (optional cleanup - only if you used `cargo install`)
 ```sh
 cargo uninstall zv
 ```
+
 From now on, use the `zv` installed in `ZV_DIR/bin`.
 
+</details>
 
-## Updating `zv`
+---
+
+> **Note:** Run `zv setup` after installation to self-install `zv` to `ZV_DIR/bin` (default: `$HOME/.zv/bin` on Unix, `%USERPROFILE%\.zv\bin` on Windows).
+
+## Updating `zv` 
+
+>Note: `zv update` is coming soon.
 
 Repeat the installation steps above, or if you have the repo cloned:
 ```sh
