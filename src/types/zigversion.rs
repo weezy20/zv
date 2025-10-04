@@ -131,7 +131,7 @@ impl FromStr for ZigVersion {
                     };
                 }
                 // Parse as direct semver if it starts with a digit
-                if s.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                if s.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                     Self::parse_normalized_version(s).map(ZigVersion::Semver)
                 } else {
                     Err(ZvError::General(eyre!(

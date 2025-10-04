@@ -13,16 +13,15 @@ use std::time::Duration;
 /// Checks if a file is a valid zv shim by comparing it with the current executable
 fn is_zv_shim(shim_path: &Path, current_exe_handle: &Handle) -> bool {
     // First check for hard links using same-file crate
-    if let Ok(shim_handle) = Handle::from_path(shim_path) {
-        if shim_handle == *current_exe_handle {
+    if let Ok(shim_handle) = Handle::from_path(shim_path)
+        && shim_handle == *current_exe_handle {
             tracing::debug!("Found ZV shim (hard link) at {:?}", shim_path);
             return true;
         }
-    }
 
     // Check for symlinks
-    if shim_path.is_symlink() {
-        if let Ok(target) = std::fs::read_link(shim_path) {
+    if shim_path.is_symlink()
+        && let Ok(target) = std::fs::read_link(shim_path) {
             // Handle both absolute and relative symlink targets
             let resolved_target = if target.is_absolute() {
                 canonicalize(&target)
@@ -37,15 +36,13 @@ fn is_zv_shim(shim_path: &Path, current_exe_handle: &Handle) -> bool {
 
             if let Ok(resolved_target) = resolved_target {
                 // Compare the resolved target with current exe using same-file
-                if let Ok(target_handle) = Handle::from_path(&resolved_target) {
-                    if target_handle == *current_exe_handle {
+                if let Ok(target_handle) = Handle::from_path(&resolved_target)
+                    && target_handle == *current_exe_handle {
                         tracing::debug!("Found ZV shim (symlink) at {:?}", shim_path);
                         return true;
                     }
-                }
             }
         }
-    }
 
     false
 }
@@ -141,9 +138,9 @@ pub fn zig_tarball(
         ArchiveExt::TarXz
     };
     if semver_version.le(&semver::Version::new(0, 14, 0)) {
-        return Some(format!("zig-{os}-{arch}-{semver_version}.{ext}"));
+        Some(format!("zig-{os}-{arch}-{semver_version}.{ext}"))
     } else {
-        return Some(format!("zig-{arch}-{os}-{semver_version}.{ext}"));
+        Some(format!("zig-{arch}-{os}-{semver_version}.{ext}"))
     }
 }
 
@@ -350,8 +347,8 @@ pub async fn remove_files(paths: &[impl AsRef<Path>]) {
         match tokio::fs::metadata(path_ref).await {
             Ok(metadata) => {
                 // File exists, attempt to remove it
-                if metadata.is_file() {
-                    if let Err(e) = tokio::fs::remove_file(path_ref).await {
+                if metadata.is_file()
+                    && let Err(e) = tokio::fs::remove_file(path_ref).await {
                         // Only log error if it's not a "file not found" error
                         // (in case file was deleted between metadata check and removal)
                         if e.kind() != std::io::ErrorKind::NotFound {
@@ -363,7 +360,6 @@ pub async fn remove_files(paths: &[impl AsRef<Path>]) {
                             );
                         }
                     }
-                }
             }
             Err(e) => {
                 // If error is "not found", skip this file

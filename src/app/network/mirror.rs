@@ -141,7 +141,7 @@ impl Mirror {
         expected_size: u64,
         progress_handle: &ProgressHandle,
     ) -> Result<()> {
-        const TARGET: &'static str = "zv::network::mirror::download";
+        const TARGET: &str = "zv::network::mirror::download";
         tracing::debug!(target: TARGET, "Starting download with mirror: {} (rank: {})", self.base_url, self.rank);
 
         // Get download URLs
@@ -350,9 +350,7 @@ impl Mirror {
 
     pub fn demote(&mut self) {
         // Higher rank = worse
-        if self.rank < u8::MAX {
-            self.rank += 1;
-        }
+        self.rank = self.rank.saturating_add(1);
     }
 }
 
@@ -439,7 +437,7 @@ impl MirrorsIndex {
 
     /// Save mirrors index to disk
     pub async fn save(&self, path: impl AsRef<Path>) -> Result<(), CfgErr> {
-        let content = toml::to_string_pretty(self).map_err(|e| CfgErr::SerializeFail(e.into()))?;
+        let content = toml::to_string_pretty(self).map_err(|e| CfgErr::SerializeFail(e))?;
 
         tokio::fs::write(path, content)
             .await
@@ -581,9 +579,8 @@ impl MirrorManager {
             .filter(|line| !line.trim().is_empty()) // Skip empty lines
             .filter_map(|line| {
                 Mirror::try_from(line.trim())
-                    .map_err(|e| {
+                    .inspect_err(|&e| {
                         tracing::warn!(target: TARGET, "Failed to parse mirror '{}': {}", line, e);
-                        e
                     })
                     .ok()
             })

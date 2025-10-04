@@ -82,7 +82,7 @@ async fn check_and_update_zv_binary_impl(
             if !quiet {
                 println!("  {} zv binary is up to date", "✓".green());
             }
-            return Ok(());
+            Ok(())
         }
         Ok(false) => {
             // Checksums differ - need to compare versions
@@ -110,7 +110,7 @@ async fn check_and_update_zv_binary_impl(
                             if !quiet {
                                 println!("  {} zv binary updated", "✓".green());
                             }
-                            return Ok(());
+                            Ok(())
                         }
                         Ordering::Less => {
                             if !quiet {
@@ -156,7 +156,7 @@ async fn check_and_update_zv_binary_impl(
                                     }
                                 );
                             }
-                            return Ok(());
+                            Ok(())
                         }
                         Ordering::Equal => {
                             // Same version but different checksum - just update
@@ -172,7 +172,7 @@ async fn check_and_update_zv_binary_impl(
                             if !quiet {
                                 println!("  {} zv binary updated", "✓".green());
                             }
-                            return Ok(());
+                            Ok(())
                         }
                     }
                 }
@@ -193,7 +193,7 @@ async fn check_and_update_zv_binary_impl(
                     if !quiet {
                         println!("  {} zv binary updated", "✓".green());
                     }
-                    return Ok(());
+                    Ok(())
                 }
             }
         }
@@ -209,7 +209,7 @@ async fn check_and_update_zv_binary_impl(
             if !quiet {
                 println!("  {} zv binary updated", "✓".green());
             }
-            return Ok(());
+            Ok(())
         }
     }
 }

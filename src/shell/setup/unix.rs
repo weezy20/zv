@@ -293,11 +293,7 @@ pub async fn check_zv_dir_permanent_unix(shell: &Shell, zv_dir: &Path) -> crate:
             Some(path.trim_matches('"').trim_matches('\''))
         } else if let Some(path) = trimmed.strip_prefix("setenv ZV_DIR ") {
             Some(path.trim_matches('"').trim_matches('\''))
-        } else if let Some(path) = trimmed.strip_prefix("$env.ZV_DIR = ") {
-            Some(path.trim_matches('"').trim_matches('\''))
-        } else {
-            None
-        };
+        } else { trimmed.strip_prefix("$env.ZV_DIR = ").map(|path| path.trim_matches('"').trim_matches('\'')) };
 
         if let Some(path) = exported_path {
             // Compare normalized paths

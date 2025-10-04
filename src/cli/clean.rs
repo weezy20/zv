@@ -101,7 +101,7 @@ async fn clean_specific_versions(app: &mut App, versions: &[ZigVersion]) -> crat
         match installation {
             Some(install) => {
                 // Check if we're removing the currently active version
-                let is_active = active_install.map_or(false, |active| {
+                let is_active = active_install.is_some_and(|active| {
                     active.version == install.version && active.is_master == install.is_master
                 });
 
@@ -253,7 +253,7 @@ async fn clean_except_versions(app: &mut App, except_versions: &[ZigVersion]) ->
             println!("{} Kept: {}", Paint::green("✓"), display_name);
         } else {
             // Check if we're removing the currently active version
-            let is_active = active_install.map_or(false, |active| {
+            let is_active = active_install.is_some_and(|active| {
                 active.version == install.version && active.is_master == install.is_master
             });
 
@@ -390,7 +390,7 @@ async fn clean_outdated_master(app: &mut App) -> crate::Result<()> {
     for install in &master_installs {
         if install.version != latest_master.version {
             // Check if we're removing the currently active version
-            let is_active = active_install.map_or(false, |active| {
+            let is_active = active_install.is_some_and(|active| {
                 active.version == install.version && active.is_master == install.is_master
             });
 
@@ -669,12 +669,7 @@ async fn handle_active_version_removal(app: &mut App) -> crate::Result<()> {
     let new_active = if let Some(highest_stable) = stable_versions.first() {
         // Use highest stable version
         Some((highest_stable, false)) // false = not master
-    } else if let Some(highest_master) = master_versions.first() {
-        // Use highest master version if no stable versions exist
-        Some((highest_master, true)) // true = is master
-    } else {
-        None
-    };
+    } else { master_versions.first().map(|highest_master| (highest_master, true)) };
 
     match new_active {
         Some((install, is_master)) => {

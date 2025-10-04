@@ -3,7 +3,7 @@ use color_eyre::eyre::{Context, eyre};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
-const TARGET: &'static str = "zv::app::toolchain";
+const TARGET: &str = "zv::app::toolchain";
 
 /// An entry representing an installed Zig version
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,13 +86,13 @@ impl ToolchainManager {
             let depth = entry.depth();
 
             // case 1: depth 1 bare semver  ->  versions/0.13.0
-            if depth == 1 {
-                if let Some(ver) = path
+            if depth == 1
+                && let Some(ver) = path
                     .file_name()
                     .and_then(|s| s.to_str())
                     .and_then(|s| s.parse::<semver::Version>().ok())
                 {
-                    let zig_bin = path.join(&zig_exe);
+                    let zig_bin = path.join(zig_exe);
                     if zig_bin.is_file() {
                         out.push(ZigInstall {
                             version: ver,
@@ -101,18 +101,16 @@ impl ToolchainManager {
                         });
                     }
                 }
-            }
 
             // case 2: depth 2 inside master  ->  versions/master/0.13.0
             if depth == 2
                 && path.parent().unwrap().file_name() == Some(std::ffi::OsStr::new("master"))
-            {
-                if let Some(ver) = path
+                && let Some(ver) = path
                     .file_name()
                     .and_then(|s| s.to_str())
                     .and_then(|s| s.parse::<semver::Version>().ok())
                 {
-                    let zig_bin = path.join(&zig_exe);
+                    let zig_bin = path.join(zig_exe);
                     if zig_bin.is_file() {
                         out.push(ZigInstall {
                             version: ver,
@@ -121,7 +119,6 @@ impl ToolchainManager {
                         });
                     }
                 }
-            }
         }
 
         out.sort_by(|a, b| a.version.cmp(&b.version));
@@ -218,8 +215,8 @@ impl ToolchainManager {
                             return Err(e.into());
                         }
                     } else {
-                        if let Some(p) = out.parent() {
-                            if let Err(e) = fs::create_dir_all(p).await {
+                        if let Some(p) = out.parent()
+                            && let Err(e) = fs::create_dir_all(p).await {
                                 progress_handle
                                     .finish_with_error(
                                         "Failed to create parent directory during extraction",
@@ -227,7 +224,6 @@ impl ToolchainManager {
                                     .await;
                                 return Err(e.into());
                             }
-                        }
                         let mut w = match std::fs::File::create(&out) {
                             Ok(w) => w,
                             Err(e) => {
@@ -484,28 +480,25 @@ impl ToolchainManager {
             Handle::from_path(zv_path).wrap_err("Failed to create handle for zv binary")?;
 
         // Check for hard links
-        if let Ok(shim_handle) = Handle::from_path(shim_path) {
-            if shim_handle == zv_handle {
+        if let Ok(shim_handle) = Handle::from_path(shim_path)
+            && shim_handle == zv_handle {
                 return Ok(true);
             }
-        }
 
         // Check for symlinks
-        if shim_path.is_symlink() {
-            if let Ok(target) = std::fs::read_link(shim_path) {
+        if shim_path.is_symlink()
+            && let Ok(target) = std::fs::read_link(shim_path) {
                 let resolved_target = if target.is_absolute() {
                     target
                 } else {
                     shim_path.parent().unwrap_or(shim_path).join(&target)
                 };
 
-                if let Ok(target_handle) = Handle::from_path(&resolved_target) {
-                    if target_handle == zv_handle {
+                if let Ok(target_handle) = Handle::from_path(&resolved_target)
+                    && target_handle == zv_handle {
                         return Ok(true);
                     }
-                }
             }
-        }
 
         Ok(false)
     }
@@ -522,7 +515,7 @@ impl ToolchainManager {
                 let active = self
                     .active_install
                     .as_ref()
-                    .map_or(false, |a| a.version == i.version);
+                    .is_some_and(|a| a.version == i.version);
                 (i.version.clone(), active, i.is_master)
             })
             .collect()

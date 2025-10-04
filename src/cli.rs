@@ -222,7 +222,7 @@ impl Commands {
             Commands::Init { project_name, zig } => {
                 use crate::{Template, TemplateType};
                 if zig {
-                    return init::init_project(
+                    init::init_project(
                         Template::new(
                             project_name,
                             TemplateType::Zig(app.zv_zig().ok_or_else(|| {
@@ -239,7 +239,7 @@ impl Commands {
                             })?),
                         ),
                         &app,
-                    );
+                    )
                 } else {
                     init::init_project(Template::new(project_name, TemplateType::Embedded), &app)
                 }
@@ -330,7 +330,7 @@ fn print_welcome_message(app: App) {
                 } else {
                     format!(
                         "{} {}",
-                        Paint::red("Not in PATH.").to_string(),
+                        Paint::red("Not in PATH."),
                         "Run ".to_string()
                             + &Paint::blue("zv setup").to_string()
                             + " to set ZV in PATH & install a default Zig version"

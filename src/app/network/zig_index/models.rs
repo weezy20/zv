@@ -390,7 +390,7 @@ impl ZigIndex {
     /// Get all available target platforms for a specific version (backward compatibility)
     pub fn get_targets_for_version(&self, version: &str) -> Vec<String> {
         // Try to find the version in the index by string matching
-        for (resolved_version, _) in self.releases() {
+        for resolved_version in self.releases().keys() {
             let version_string = match resolved_version {
                 ResolvedZigVersion::Semver(v) => v.to_string(),
                 ResolvedZigVersion::Master(v) => v.to_string(),

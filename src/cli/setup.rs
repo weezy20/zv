@@ -143,11 +143,10 @@ fn should_use_interactive(context: &SetupContext) -> bool {
     }
 
     // Don't use interactive mode if TERM is dumb
-    if let Ok(term) = std::env::var("TERM") {
-        if term == "dumb" {
+    if let Ok(term) = std::env::var("TERM")
+        && term == "dumb" {
             return false;
         }
-    }
 
     // Check if TTY is available for interactive prompts
     crate::tools::supports_interactive_prompts()

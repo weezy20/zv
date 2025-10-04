@@ -169,7 +169,7 @@ impl ZvNetwork {
         // Ensure mirror manager is loaded first. This is already done in app.install_release() so it's an error to not have it loaded
         // Also, we make sure of this by limiting visibility of this function to app module only
         if self.mirror_manager.is_none() {
-            Err(NetErr::EmptyMirrors).map_err(ZvError::NetworkError)?;
+            Err(ZvError::NetworkError(NetErr::EmptyMirrors))?;
         }
         let mirror_manager = self.mirror_manager.as_mut().unwrap();
         let temp_dir = self.download_cache.join("tmp");
@@ -426,8 +426,7 @@ impl ZvNetwork {
                     .index_manager
                     .ensure_loaded(CacheStrategy::RespectTtl)
                     .await
-                {
-                    if let Some(cached_master) =
+                    && let Some(cached_master) =
                         index.get_master_version().and_then(|cached_master| {
                             semver::Version::parse(&cached_master.version_string())
                                 .ok()
@@ -441,7 +440,6 @@ impl ZvNetwork {
                         );
                         return Ok(cached_master);
                     }
-                }
 
                 tracing::debug!(
                     target: "zv::network::fetch_master_version",

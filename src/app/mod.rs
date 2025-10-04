@@ -133,7 +133,7 @@ impl App {
             toolchain_manager,
             zv_base_path,
             versions_path,
-            shell: shell,
+            shell,
             to_install: None,
         };
         Ok(app)
@@ -314,7 +314,7 @@ impl App {
             .unwrap()
             .fetch_master_version()
             .await?;
-        return Ok(zig_release);
+        Ok(zig_release)
     }
     /// Fetch latest stable and returns a [ZigRelease]
     pub async fn fetch_latest_version(
@@ -328,7 +328,7 @@ impl App {
             .unwrap()
             .fetch_latest_stable_version(cache_strategy)
             .await?;
-        return Ok(zig_release);
+        Ok(zig_release)
     }
     /// Validate if a semver version exists in the index and returns a [ZigRelease]
     pub async fn validate_semver(
@@ -370,7 +370,7 @@ impl App {
             "Starting installation"
         );
 
-        let zig_tarball = zig_tarball(&semver_version, None).ok_or_else(|| {
+        let zig_tarball = zig_tarball(semver_version, None).ok_or_else(|| {
             eyre!(
                 "Could not determine tarball name for Zig version {}",
                 zig_release.version_string()
@@ -423,7 +423,7 @@ impl App {
             self.network
                 .as_mut()
                 .unwrap()
-                .download_version(&semver_version, &zig_tarball, download_artifact)
+                .download_version(semver_version, &zig_tarball, download_artifact)
                 .await?
         } else {
             tracing::trace!(target: "zv", "Using ziglang.org as download source");
@@ -449,7 +449,7 @@ impl App {
 
         let zig_exe = self
             .toolchain_manager
-            .install_version(&tarball_path, &semver_version, ext, is_master)
+            .install_version(&tarball_path, semver_version, ext, is_master)
             .await?;
         tracing::info!(
             target: TARGET,

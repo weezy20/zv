@@ -186,7 +186,7 @@ impl Template {
                 // Mark as created BEFORE attempting write, so it gets cleaned up on failure
                 file_statuses.push(FileStatus::Created(file_path));
 
-                if let Err(e) = write_file(&file_statuses.last().unwrap().path(), content) {
+                if let Err(e) = write_file(file_statuses.last().unwrap().path(), content) {
                     // Rollback all files created in this batch (including the one that just failed)
                     self.rollback_created_files(&file_statuses);
                     return Err(e);
@@ -233,11 +233,10 @@ impl Template {
 
         let output = app
             .spawn_zig_with_guard(&zig_path, &["init"], Some(target_dir))
-            .map_err(|e| {
+            .inspect_err(|e| {
                 if self.context.as_ref().unwrap().created_new_dir {
                     let _ = rda::remove_dir_all(target_dir);
                 }
-                e
             })?;
 
         if !output.status.success() {
@@ -338,7 +337,7 @@ fn parse_zig_output_line(line: &str) -> Option<(fn(PathBuf) -> FileStatus, &str)
     let line = line.trim();
 
     // Find the last colon and extract the file path after it
-    let file_path = line.split(':').last()?.trim();
+    let file_path = line.split(':').next_back()?.trim();
 
     // Skip empty paths or lines that don't look like file paths
     if file_path.is_empty()
