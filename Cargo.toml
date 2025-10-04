@@ -5,6 +5,7 @@ edition = "2024"
 description = "Ziglang Version Manager and Project Starter"
 license = "MIT"
 authors = ["Abhishek Shah <abhishekshah3@gmail.com>"]
+homepage = "https://github.com/weezy20/zv"
 repository = "https://github.com/weezy20/zv"
 keywords = [
     "ziglang",
@@ -101,6 +102,11 @@ strip = true
 inherits = "release"
 lto = "fat"
 codegen-units = 1
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
 
 [dev-dependencies]
 serde_test = "1.0.177"
