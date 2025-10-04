@@ -64,14 +64,14 @@ async fn check_and_update_zv_binary_impl(
     // If target doesn't exist, copy current binary
     if !target_exe.exists() {
         if !quiet {
-            println!(
-                "  {} zv binary not found in ZV_DIR/bin, installing...",
+            tracing::info!(
+                "  {} zv binary not found in <ZV_DIR>/bin, installing...",
                 "→".blue()
             );
         }
         copy_binary_and_regenerate_shims(&current_exe, &target_exe, app).await?;
         if !quiet {
-            println!("  {} zv binary installed", "✓".green());
+            tracing::info!("  {} zv binary installed", "✓".green());
         }
         return Ok(());
     }
@@ -276,16 +276,19 @@ async fn copy_binary_and_regenerate_shims(
     app: &crate::App,
 ) -> crate::Result<()> {
     use color_eyre::eyre::Context;
-    
+
     // Ensure the bin directory exists using app's canonical path
     tokio::fs::create_dir_all(app.bin_path())
         .await
         .with_context(|| format!("Failed to create directory {}", app.bin_path().display()))?;
 
-    tokio::fs::copy(source, target)
-        .await
-        .with_context(|| format!("Failed to copy zv binary from {} to {}", source.display(), target.display()))?;
-
+    tokio::fs::copy(source, target).await.with_context(|| {
+        format!(
+            "Failed to copy zv binary from {} to {}",
+            source.display(),
+            target.display()
+        )
+    })?;
 
     // Regenerate shims to ensure they point to the correct zv binary
     let toolchain_manager = &app.toolchain_manager;
