@@ -1,12 +1,10 @@
+use crate::App;
 use crate::shell::setup::{
-    SetupContext, execute_setup, post_setup_actions, pre_setup_checks,
-    InteractiveSetup, apply_user_choices, handle_interactive_error, is_recoverable_interactive_error
+    InteractiveSetup, SetupContext, apply_user_choices, execute_setup, handle_interactive_error,
+    is_recoverable_interactive_error, post_setup_actions, pre_setup_checks,
 };
-use crate::{App, ZigVersion};
 use color_eyre::eyre::Context as _;
 use yansi::Paint;
-
-use super::r#use::use_version;
 
 /// Main setup_shell function that orchestrates the three-phase setup process
 /// This is the public interface that maintains backward compatibility and supports interactive mode
@@ -16,8 +14,6 @@ pub async fn setup_shell(
     using_env_var: bool,
     dry_run: bool,
     no_interactive: bool,
-    default_version: Option<ZigVersion>,
-    force_ziglang: bool,
 ) -> crate::Result<()> {
     // Check if shell environment is already set up
     if app.source_set {
@@ -73,7 +69,7 @@ pub async fn setup_shell(
     // Phase 2: Interactive confirmation (default behavior) or fallback to existing behavior
     let final_requirements = if should_use_interactive(&context) {
         let interactive_setup = InteractiveSetup::new(context.clone(), requirements.clone());
-        
+
         match interactive_setup.run_interactive_flow().await {
             Ok(user_choices) => {
                 // Interactive flow succeeded, apply user choices
@@ -123,20 +119,11 @@ pub async fn setup_shell(
             "Restart your shell or run the appropriate source command to apply changes immediately"
         );
     }
-
-    // If a default version was specified, set it as the active version
-    if let Some(version) = default_version {
-        if !dry_run {
-            println!("\nSetting default version to {}...", Paint::cyan(&version.to_string()));
-            use_version(version, app, force_ziglang).await?;
-        }
-    }
-
     Ok(())
 }
 
 /// Determine if interactive mode should be used based on context and environment
-/// 
+///
 /// Interactive mode is automatically disabled when:
 /// - `--no-interactive` flag is provided
 /// - CI environment is detected (CI environment variable is set)
@@ -155,9 +142,10 @@ fn should_use_interactive(context: &SetupContext) -> bool {
 
     // Don't use interactive mode if TERM is dumb
     if let Ok(term) = std::env::var("TERM")
-        && term == "dumb" {
-            return false;
-        }
+        && term == "dumb"
+    {
+        return false;
+    }
 
     // Check if TTY is available for interactive prompts
     crate::tools::supports_interactive_prompts()

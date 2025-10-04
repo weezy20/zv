@@ -187,14 +187,6 @@ pub enum Commands {
             help = "Preview changes without applying them"
         )]
         dry_run: bool,
-        /// Optional: Specify a specific zig version to set up. By default, no version is installed.
-        #[arg(
-            long,
-            alias = "version",
-            short = 'v',
-            value_parser = clap::value_parser!(ZigVersion),
-        )]
-        default_version: Option<ZigVersion>,
         /// Disable interactive prompts and use default choices for automation
         #[arg(
             long = "no-interactive",
@@ -204,13 +196,6 @@ pub enum Commands {
                          when TERM=dumb, or when TTY is not available."
         )]
         no_interactive: bool,
-        /// Force using ziglang.org for download of initial zigversion -v <zigversion>
-        #[arg(
-            long = "force-ziglang",
-            short = 'f',
-            help = "Force using ziglang.org for download of initial zigversion -v <zigversion>"
-        )]
-        force_ziglang: bool,
     },
 
     /// Synchronize index, mirrors list and metadata for zv.
@@ -263,20 +248,8 @@ impl Commands {
             } => clean::clean(&mut app, target, except, outdated).await,
             Commands::Setup {
                 dry_run,
-                default_version,
                 no_interactive,
-                force_ziglang,
-            } => {
-                setup::setup_shell(
-                    &mut app,
-                    using_env,
-                    dry_run,
-                    no_interactive,
-                    default_version,
-                    force_ziglang,
-                )
-                .await
-            }
+            } => setup::setup_shell(&mut app, using_env, dry_run, no_interactive).await,
             Commands::Sync => sync::sync(&mut app).await,
         }
     }
