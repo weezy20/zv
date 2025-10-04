@@ -10,7 +10,7 @@ mod clean;
 mod init;
 mod list;
 mod setup;
-pub mod sync;  // Make sync public so other modules can use check_and_update_zv_binary
+pub mod sync; // Make sync public so other modules can use check_and_update_zv_binary
 mod r#use;
 mod zig;
 mod zls;
@@ -187,20 +187,14 @@ pub enum Commands {
             help = "Preview changes without applying them"
         )]
         dry_run: bool,
-        /// Optional: Specify a specific zig version to set up. By default it set's up the latest active version.
+        /// Optional: Specify a specific zig version to set up. By default we don't install any version.
         #[arg(
             long,
             alias = "version",
             short = 'v',
             value_parser = clap::value_parser!(ZigVersion),
-            help = "Specify a specific zig version to set up. By default it set's up the latest active version."
         )]
         default_version: Option<ZigVersion>,
-        #[arg(
-            long = "no-zig",
-            help = "Skip installing default zig compiler toolchain"
-        )]
-        no_zig: bool,
         /// Disable interactive prompts and use default choices for automation
         #[arg(
             long = "no-interactive",
@@ -263,27 +257,14 @@ impl Commands {
             Commands::Setup {
                 dry_run,
                 default_version,
-                no_zig,
                 no_interactive,
             } => {
-                // Validate that no_zig and default_version are not both specified
-                if no_zig && default_version.is_some() {
-                    error(
-                        "The '--no-zig' and '--version' options cannot be used together as they're contradictory.",
-                    );
-                    std::process::exit(2);
-                }
-
                 setup::setup_shell(
                     &mut app,
                     using_env,
                     dry_run,
                     no_interactive,
-                    (!no_zig).then(|| {
-                        default_version.unwrap_or_else(|| {
-                            ZigVersion::placeholder_for_variant("latest").expect("valid zigversion")
-                        })
-                    }),
+                    default_version,
                 )
                 .await
             }
@@ -402,7 +383,9 @@ fn print_welcome_message(app: App) {
     // Current active Zig version
     let active_zig: Option<ZigVersion> = app.get_active_version();
 
-    let active_zig_str = active_zig.as_ref().map_or_else(|| "none".to_string(), |v| v.to_string());
+    let active_zig_str = active_zig
+        .as_ref()
+        .map_or_else(|| "none".to_string(), |v| v.to_string());
     let help_text = if active_zig.is_none() {
         format!(
             " (use {} to set one | or run {} to get started)",
