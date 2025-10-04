@@ -348,175 +348,24 @@ pub async fn post_setup_actions(context: &SetupContext) -> crate::Result<()> {
 
     if context.dry_run {
         println!("{}", Paint::cyan("→ Post-Setup Actions (Dry Run)"));
+        println!("  Would check and update zv binary if needed");
+        println!("  Would regenerate shims if binary was updated");
     } else {
         println!("{}", Paint::green("→ Post-Setup Actions"));
+        
+        // Use the centralized check_and_update_zv_binary from sync module
+        // This will copy the binary AND regenerate shims if needed
+        let _updated = crate::cli::sync::check_and_update_zv_binary(&context.app, true).await
+            .with_context(|| "Failed to update zv binary")?;
+        
+        // Note: Shim regeneration is now handled inside check_and_update_zv_binary
+        // via copy_binary_and_regenerate_shims
     }
-
-    // Copy zv binary to bin directory if needed
-    copy_zv_binary_if_needed(&context.app, context.dry_run)
-        .await
-        .with_context(|| "Failed to copy zv binary")?;
-
-    // Regenerate shims if needed
-    regenerate_shims_if_needed(&context.app, context.dry_run)
-        .await
-        .with_context(|| "Failed to regenerate shims")?;
 
     if context.dry_run {
         println!("{}", Paint::cyan("← Post-Setup Actions Complete"));
     } else {
         println!("{}", Paint::green("← Post-Setup Actions Complete"));
-    }
-
-    Ok(())
-}
-
-/// Copy the current zv binary to the bin directory if needed
-pub async fn copy_zv_binary_if_needed(app: &App, dry_run: bool) -> crate::Result<()> {
-    use yansi::Paint;
-
-    let current_exe = std::env::current_exe().map_err(|e| {
-        crate::ZvError::shell_post_setup_action_failed(&format!(
-            "Failed to get current executable path: {}",
-            e
-        ))
-    })?;
-
-    let target_exe = if cfg!(windows) {
-        app.bin_path().join("zv.exe")
-    } else {
-        app.bin_path().join("zv")
-    };
-
-    // Check if target exists and compare hashes
-    if target_exe.exists() {
-        match files_have_same_hash(&current_exe, &target_exe) {
-            Ok(true) => {
-                if !dry_run {
-                    println!("✓ zv binary present ({})", Paint::green(&target_exe.display()));
-                }
-                return Ok(());
-            }
-            Ok(false) => {
-                if dry_run {
-                    println!("Would update zv binary in bin directory (checksum mismatch)");
-                } else {
-                    println!("Updating zv binary in bin directory (checksum mismatch)...");
-                }
-            }
-            Err(e) => {
-                if !dry_run {
-                    println!(
-                        "⚠ Warning: checksum comparison failed: {}, will copy anyway",
-                        e
-                    );
-                }
-            }
-        }
-    } else {
-        if dry_run {
-            println!("Would copy zv binary to bin directory");
-        } else {
-            println!("Copying zv binary to bin directory...");
-        }
-    }
-
-    if !dry_run {
-        // Create bin directory if it doesn't exist
-        tokio::fs::create_dir_all(app.bin_path())
-            .await
-            .map_err(|e| {
-                crate::ZvError::shell_post_setup_action_failed(&format!(
-                    "Failed to create bin directory: {}",
-                    e
-                ))
-            })?;
-
-        // Copy the current executable to the target location
-        tokio::fs::copy(&current_exe, &target_exe)
-            .await
-            .map_err(|e| {
-                crate::ZvError::shell_post_setup_action_failed(&format!(
-                    "Failed to copy zv binary to bin directory: {}",
-                    e
-                ))
-            })?;
-
-        println!(
-            "✓ Copied {} to {}",
-            Paint::green(&current_exe.display().to_string()),
-            Paint::green(&target_exe.display().to_string())
-        );
-    }
-
-    Ok(())
-}
-
-/// Regenerate hardlinks/shims for zig and zls if they exist and active version is available
-pub async fn regenerate_shims_if_needed(app: &App, dry_run: bool) -> crate::Result<()> {
-    use crate::app::toolchain::ToolchainManager;
-    use crate::types::Shim;
-    
-    let zig_shim = app.bin_path().join(Shim::Zig.executable_name());
-    let zls_shim = app.bin_path().join(Shim::Zls.executable_name());
-
-    let has_zig_shim = zig_shim.exists();
-    let has_zls_shim = zls_shim.exists();
-
-    if !has_zig_shim && !has_zls_shim {
-        if !dry_run {
-            println!("No pre-existing zig/zls shims found - nothing to regenerate");
-        }
-        return Ok(());
-    }
-
-    // Check if active.json exists (contains serialized ZigInstall)
-    let active_path = app.path().join("active.json");
-    if !active_path.exists() {
-        if has_zig_shim || has_zls_shim {
-            if dry_run {
-                println!("Would skip shim regeneration - no active version configured");
-            } else {
-                println!("⚠ No active version configured - cannot regenerate shims");
-                println!("  Run 'zv use <version>' to set up configuration");
-            }
-        }
-        return Ok(());
-    }
-
-    if dry_run {
-        if has_zig_shim {
-            println!("Would regenerate zig shim based on active version");
-        }
-        if has_zls_shim {
-            println!("Would regenerate zls shim based on active version");
-        }
-    } else {
-        // Actually regenerate shims using the toolchain manager
-        if has_zig_shim || has_zls_shim {
-            println!("Regenerating shims based on active version...");
-            
-            match ToolchainManager::new(app.path()).await {
-                Ok(mut toolchain) => {
-                    if let Some(active_install) = toolchain.get_active_install() {
-                        // Use the existing deploy_shims method from toolchain manager
-                        if let Err(e) = toolchain.deploy_shims(active_install).await {
-                            println!("⚠ Failed to regenerate shims: {}", e);
-                            println!("  Run 'zv use <version>' to ensure shims are properly configured");
-                        } else {
-                            println!("✓ Successfully regenerated shims for version {}", active_install.version);
-                        }
-                    } else {
-                        println!("⚠ No active installation found");
-                        println!("  Run 'zv use <version>' to set up configuration");
-                    }
-                }
-                Err(e) => {
-                    println!("⚠ Failed to initialize toolchain manager: {}", e);
-                    println!("  Run 'zv use <version>' to ensure shims are properly configured");
-                }
-            }
-        }
     }
 
     Ok(())

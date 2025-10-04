@@ -10,7 +10,7 @@ mod clean;
 mod init;
 mod list;
 mod setup;
-mod sync;
+pub mod sync;  // Make sync public so other modules can use check_and_update_zv_binary
 mod r#use;
 mod zig;
 mod zls;

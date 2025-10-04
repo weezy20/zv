@@ -110,13 +110,16 @@ From now on, use the `zv` installed in `ZV_DIR/bin`.
 
 ## Updating `zv` 
 
->Note: `zv update` is coming soon.
-
-Repeat the installation steps above, or if you have the repo cloned:
+If you have the repo cloned or are using cargo-installed binary:
 ```sh
 # Update from your local clone
 cargo run --release -- setup
 ```
+If you have the quick install script you should have a `zv-update` command available:
+```sh
+zv-update # fetches latest release.
+```
+If you used `zv-update` your `ZV_DIR/bin/zv` might still be on the older version. Just run `zv setup` or `zv sync` to update the binary in `ZV_DIR/bin`.
 This replaces your existing `ZV_DIR/bin/zv` installation.
 
 ## Usage

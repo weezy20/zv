@@ -146,9 +146,9 @@ impl App {
         version: &'b ResolvedZigVersion,
         installed_path: Option<PathBuf>,
     ) -> crate::Result<()> {
-        // Copy zv binary to bin directory if needed (same as setup)
-        self.copy_zv_binary_if_needed().await
-            .wrap_err("Failed to copy zv binary")?;
+        // Copy zv binary to bin directory if needed and regenerate shims
+        crate::cli::sync::check_and_update_zv_binary(self, false).await
+            .wrap_err("Failed to update zv binary")?;
 
         if let Some(p) = installed_path {
             return self
@@ -238,74 +238,6 @@ impl App {
     /// Path to zv zig binary
     pub fn zv_zig(&self) -> Option<PathBuf> {
         self.zig.clone()
-    }
-
-    /// Copy the current zv binary to the bin directory if needed
-    /// This ensures the zv binary is available for shim deployment
-    async fn copy_zv_binary_if_needed(&self) -> crate::Result<()> {
-        use crate::tools::files_have_same_hash;
-
-        let current_exe = std::env::current_exe().map_err(|e| {
-            ZvError::shell_post_setup_action_failed(&format!(
-                "Failed to get current executable path: {}",
-                e
-            ))
-        })?;
-
-        let target_exe = if cfg!(windows) {
-            self.bin_path.join("zv.exe")
-        } else {
-            self.bin_path.join("zv")
-        };
-
-        // Check if target exists and compare hashes
-        if target_exe.exists() {
-            match files_have_same_hash(&current_exe, &target_exe) {
-                Ok(true) => {
-                    tracing::debug!("zv binary present and up to date: {}", target_exe.display());
-                    return Ok(());
-                }
-                Ok(false) => {
-                    tracing::info!("Updating zv binary in bin directory (checksum mismatch)...");
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Checksum comparison failed: {}, will copy anyway",
-                        e
-                    );
-                }
-            }
-        } else {
-            tracing::info!("Copying zv binary to bin directory...");
-        }
-
-        // Create bin directory if it doesn't exist
-        tokio::fs::create_dir_all(&self.bin_path)
-            .await
-            .map_err(|e| {
-                ZvError::shell_post_setup_action_failed(&format!(
-                    "Failed to create bin directory: {}",
-                    e
-                ))
-            })?;
-
-        // Copy the current executable to the target location
-        tokio::fs::copy(&current_exe, &target_exe)
-            .await
-            .map_err(|e| {
-                ZvError::shell_post_setup_action_failed(&format!(
-                    "Failed to copy zv binary to bin directory: {}",
-                    e
-                ))
-            })?;
-
-        tracing::debug!(
-            "Copied {} to {}",
-            current_exe.display(),
-            target_exe.display()
-        );
-
-        Ok(())
     }
 
     /// Spawn a zig process with recursion guard management
