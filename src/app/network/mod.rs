@@ -19,7 +19,7 @@ mod zig_index;
 pub use zig_index::*;
 mod download;
 pub use download::*;
-pub use {ZigRelease, ZigIndex, NetworkZigRelease, ArtifactInfo};
+pub use {ZigRelease, NetworkZigRelease, ArtifactInfo};
 /// Cache strategy for index loading
 #[derive(Debug, Clone, Copy)]
 pub enum CacheStrategy {
