@@ -108,7 +108,7 @@ From now on, use the `zv` installed in `ZV_DIR/bin`.
 
 ---
 
-> **Note:** Run `zv setup` after installation to self-install `zv` to `ZV_DIR/bin` (default: `$HOME/.zv/bin` on Unix, `%USERPROFILE%\.zv\bin` on Windows).
+> **Note:** Run `zv setup` after installation to self-install `zv` to `ZV_DIR/bin` (default: `$HOME/.zv/bin` on Unix, `%USERPROFILE%\.zv\bin` on Windows). Without this step you might not expect `zv` to work correctly because the installer scripts do not download `zv` to `ZV_DIR/bin` at the moment.
 
 ## Updating `zv` 
 
