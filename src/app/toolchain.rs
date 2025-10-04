@@ -358,14 +358,21 @@ impl ToolchainManager {
     fn validate_zv_binary(&self) -> Result<PathBuf> {
         use crate::tools::files_have_same_hash;
 
-        let zv_path = self.bin_path.join(Shim::Zv.executable_name());
+        let zv_bin_path = self.bin_path.join(Shim::Zv.executable_name());
 
         // Check if zv binary exists
-        if !zv_path.exists() {
+        if !zv_bin_path.exists() {
             return Err(eyre!(
                 "zv binary not found in bin directory: {}",
                 self.bin_path.display()
-            ));
+            ))
+            .inspect_err(|_| {
+                println!(
+                    "Run {} or {} to synchronize zv with ZV_DIR/bin/zv",
+                    yansi::Paint::cyan("zv setup"),
+                    yansi::Paint::cyan("zv sync")
+                )
+            });
         }
 
         // Get current executable for comparison
@@ -373,14 +380,14 @@ impl ToolchainManager {
             std::env::current_exe().wrap_err("Failed to get current executable path")?;
 
         // Compare checksums like setup does
-        match files_have_same_hash(&current_exe, &zv_path) {
+        match files_have_same_hash(&current_exe, &zv_bin_path) {
             Ok(true) => {
-                tracing::debug!(target: TARGET, zv_path = %zv_path.display(), "Validated zv binary (checksum match)");
+                tracing::debug!(target: TARGET, zv_path = %zv_bin_path.display(), "Validated zv binary (checksum match)");
             }
             Ok(false) => {
                 tracing::warn!(target: TARGET,
                     current_exe = %current_exe.display(),
-                    zv_path = %zv_path.display(),
+                    zv_path = %zv_bin_path.display(),
                     "zv versions mismatch (checksum) - created zig/zls installations may not perform correctly. Please run `zv setup`"
                 );
             }
@@ -391,8 +398,8 @@ impl ToolchainManager {
             }
         }
 
-        tracing::debug!(target: TARGET, zv_path = %zv_path.display(), "Using zv binary from bin directory");
-        Ok(zv_path)
+        tracing::debug!(target: TARGET, zv_path = %zv_bin_path.display(), "Using zv binary from bin directory");
+        Ok(zv_bin_path)
     }
 
     /// Deploys or updates the proxy shims (zig, zls) in bin/ that link to zv

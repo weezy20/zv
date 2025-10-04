@@ -1,4 +1,5 @@
 use std::path::Path;
+use yansi::Paint;
 /// Windows PATH Manager for registry-based PATH management
 #[cfg(windows)]
 pub struct WindowsPathManager {

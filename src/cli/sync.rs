@@ -53,7 +53,7 @@ async fn check_and_update_zv_binary_impl(
 ) -> crate::Result<()> {
     use crate::tools::files_have_same_hash;
     use color_eyre::eyre::Context;
-    
+
     use yansi::Paint;
 
     let zv_dir_bin = app.bin_path();
@@ -64,14 +64,11 @@ async fn check_and_update_zv_binary_impl(
     // If target doesn't exist, copy current binary
     if !target_exe.exists() {
         if !quiet {
-            tracing::info!(
-                "  {} zv binary not found in <ZV_DIR>/bin, installing...",
-                "→".blue()
-            );
+            tracing::info!("zv binary not found in <ZV_DIR>/bin, installing...",);
         }
         copy_binary_and_regenerate_shims(&current_exe, &target_exe, app).await?;
         if !quiet {
-            tracing::info!("  {} zv binary installed", "✓".green());
+            tracing::info!("zv binary installed");
         }
         return Ok(());
     }
