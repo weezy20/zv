@@ -437,7 +437,7 @@ impl MirrorsIndex {
 
     /// Save mirrors index to disk
     pub async fn save(&self, path: impl AsRef<Path>) -> Result<(), CfgErr> {
-        let content = toml::to_string_pretty(self).map_err(|e| CfgErr::SerializeFail(e))?;
+        let content = toml::to_string_pretty(self).map_err(CfgErr::SerializeFail)?;
 
         tokio::fs::write(path, content)
             .await
