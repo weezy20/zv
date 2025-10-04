@@ -3293,7 +3293,7 @@ dependencies = [
 
 [[package]]
 name = "zv"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "cfg-if",

@@ -3,7 +3,7 @@ use color_eyre::eyre::{Context, eyre};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
-const TARGET: &'static str = "zv::app::toolchain";
+const TARGET: &str = "zv::app::toolchain";
 
 /// An entry representing an installed Zig version
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,40 +86,37 @@ impl ToolchainManager {
             let depth = entry.depth();
 
             // case 1: depth 1 bare semver  ->  versions/0.13.0
-            if depth == 1 {
-                if let Some(ver) = path
+            if depth == 1
+                && let Some(ver) = path
                     .file_name()
                     .and_then(|s| s.to_str())
                     .and_then(|s| s.parse::<semver::Version>().ok())
-                {
-                    let zig_bin = path.join(&zig_exe);
-                    if zig_bin.is_file() {
-                        out.push(ZigInstall {
-                            version: ver,
-                            path: path.to_path_buf(),
-                            is_master: false,
-                        });
-                    }
+            {
+                let zig_bin = path.join(zig_exe);
+                if zig_bin.is_file() {
+                    out.push(ZigInstall {
+                        version: ver,
+                        path: path.to_path_buf(),
+                        is_master: false,
+                    });
                 }
             }
 
             // case 2: depth 2 inside master  ->  versions/master/0.13.0
             if depth == 2
                 && path.parent().unwrap().file_name() == Some(std::ffi::OsStr::new("master"))
-            {
-                if let Some(ver) = path
+                && let Some(ver) = path
                     .file_name()
                     .and_then(|s| s.to_str())
                     .and_then(|s| s.parse::<semver::Version>().ok())
-                {
-                    let zig_bin = path.join(&zig_exe);
-                    if zig_bin.is_file() {
-                        out.push(ZigInstall {
-                            version: ver,
-                            path: path.to_path_buf(),
-                            is_master: true,
-                        });
-                    }
+            {
+                let zig_bin = path.join(zig_exe);
+                if zig_bin.is_file() {
+                    out.push(ZigInstall {
+                        version: ver,
+                        path: path.to_path_buf(),
+                        is_master: true,
+                    });
                 }
             }
         }
@@ -174,26 +171,26 @@ impl ToolchainManager {
         // extract archive
         match ext {
             ArchiveExt::TarXz => {
-                progress_handle
+                let _ = progress_handle
                     .start(format!("Extracting {archive_name}"))
                     .await;
                 let xz = xz2::read::XzDecoder::new(std::io::Cursor::new(bytes));
                 let mut ar = tar::Archive::new(xz);
                 if let Err(e) = ar.unpack(&archive_tmp) {
-                    progress_handle
+                    let _ = progress_handle
                         .finish_with_error("Failed to extract tar.xz archive")
                         .await;
                     return Err(e.into());
                 }
             }
             ArchiveExt::Zip => {
-                progress_handle
+                let _ = progress_handle
                     .start(format!("Extracting {archive_name}"))
                     .await;
                 let mut ar = match zip::ZipArchive::new(std::io::Cursor::new(bytes)) {
                     Ok(ar) => ar,
                     Err(e) => {
-                        progress_handle
+                        let _ = progress_handle
                             .finish_with_error("Failed to open zip archive")
                             .await;
                         return Err(e.into());
@@ -203,7 +200,7 @@ impl ToolchainManager {
                     let mut file = match ar.by_index(i) {
                         Ok(file) => file,
                         Err(e) => {
-                            progress_handle
+                            let _ = progress_handle
                                 .finish_with_error("Failed to read zip entry")
                                 .await;
                             return Err(e.into());
@@ -212,33 +209,33 @@ impl ToolchainManager {
                     let out = archive_tmp.join(file.name());
                     if file.is_dir() {
                         if let Err(e) = fs::create_dir_all(&out).await {
-                            progress_handle
+                            let _ = progress_handle
                                 .finish_with_error("Failed to create directory during extraction")
                                 .await;
                             return Err(e.into());
                         }
                     } else {
-                        if let Some(p) = out.parent() {
-                            if let Err(e) = fs::create_dir_all(p).await {
-                                progress_handle
-                                    .finish_with_error(
-                                        "Failed to create parent directory during extraction",
-                                    )
-                                    .await;
-                                return Err(e.into());
-                            }
+                        if let Some(p) = out.parent()
+                            && let Err(e) = fs::create_dir_all(p).await
+                        {
+                            let _ = progress_handle
+                                .finish_with_error(
+                                    "Failed to create parent directory during extraction",
+                                )
+                                .await;
+                            return Err(e.into());
                         }
                         let mut w = match std::fs::File::create(&out) {
                             Ok(w) => w,
                             Err(e) => {
-                                progress_handle
+                                let _ = progress_handle
                                     .finish_with_error("Failed to create file during extraction")
                                     .await;
                                 return Err(e.into());
                             }
                         };
                         if let Err(e) = std::io::copy(&mut file, &mut w) {
-                            progress_handle
+                            let _ = progress_handle
                                 .finish_with_error("Failed to write file during extraction")
                                 .await;
                             return Err(e.into());
@@ -247,7 +244,7 @@ impl ToolchainManager {
                 }
             }
         }
-        progress_handle.finish("Extraction complete").await;
+        let _ = progress_handle.finish("Extraction complete").await;
         // strip wrapper directory
         let mut entries = fs::read_dir(&archive_tmp).await?;
         let mut top_dirs = Vec::new();
@@ -318,7 +315,7 @@ impl ToolchainManager {
             .ok_or_else(|| eyre!("Version {} is not installed", version))?;
 
         tracing::debug!(target: TARGET, install_path = %install.path.display(), "Found installation, deploying shims");
-        self.deploy_shims(install).await?;
+        self.deploy_shims(install, false).await?;
 
         let json = serde_json::to_vec(&install)
             .wrap_err("Failed to serialize Zig install for active file")?;
@@ -348,7 +345,7 @@ impl ToolchainManager {
             is_master: rzv.is_master(),
         };
         tracing::debug!(target: TARGET, "Deploying shims");
-        self.deploy_shims(&zig_install).await?;
+        self.deploy_shims(&zig_install, false).await?;
         let json = serde_json::to_vec(&zig_install)
             .wrap_err("Failed to serialize Zig install for active file")?;
         fs::write(&self.active_file, json).await?;
@@ -399,9 +396,13 @@ impl ToolchainManager {
     }
 
     /// Deploys or updates the proxy shims (zig, zls) in bin/ that link to zv
-    pub async fn deploy_shims(&self, install: &ZigInstall) -> Result<()> {
-        // First validate that zv binary exists
-        let zv_path = self.validate_zv_binary()?;
+    pub async fn deploy_shims(&self, install: &ZigInstall, skip_zv_bin_check: bool) -> Result<()> {
+        let zv_path = if !skip_zv_bin_check {
+            // Validate that zv binary exists
+            self.validate_zv_binary()?
+        } else {
+            self.bin_path.join(Shim::Zv.executable_name())
+        };
 
         tracing::debug!(target: TARGET, install_path = %install.path.display(), "Deploying shims for installation");
 
@@ -480,26 +481,26 @@ impl ToolchainManager {
             Handle::from_path(zv_path).wrap_err("Failed to create handle for zv binary")?;
 
         // Check for hard links
-        if let Ok(shim_handle) = Handle::from_path(shim_path) {
-            if shim_handle == zv_handle {
-                return Ok(true);
-            }
+        if let Ok(shim_handle) = Handle::from_path(shim_path)
+            && shim_handle == zv_handle
+        {
+            return Ok(true);
         }
 
         // Check for symlinks
-        if shim_path.is_symlink() {
-            if let Ok(target) = std::fs::read_link(shim_path) {
-                let resolved_target = if target.is_absolute() {
-                    target
-                } else {
-                    shim_path.parent().unwrap_or(shim_path).join(&target)
-                };
+        if shim_path.is_symlink()
+            && let Ok(target) = std::fs::read_link(shim_path)
+        {
+            let resolved_target = if target.is_absolute() {
+                target
+            } else {
+                shim_path.parent().unwrap_or(shim_path).join(&target)
+            };
 
-                if let Ok(target_handle) = Handle::from_path(&resolved_target) {
-                    if target_handle == zv_handle {
-                        return Ok(true);
-                    }
-                }
+            if let Ok(target_handle) = Handle::from_path(&resolved_target)
+                && target_handle == zv_handle
+            {
+                return Ok(true);
             }
         }
 
@@ -518,14 +519,9 @@ impl ToolchainManager {
                 let active = self
                     .active_install
                     .as_ref()
-                    .map_or(false, |a| a.version == i.version);
+                    .is_some_and(|a| a.version == i.version);
                 (i.version.clone(), active, i.is_master)
             })
             .collect()
-    }
-
-    /// Get all installed versions with their installation details
-    pub fn get_installations(&self) -> &[ZigInstall] {
-        &self.installations
     }
 }

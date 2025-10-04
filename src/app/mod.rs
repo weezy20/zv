@@ -4,15 +4,14 @@ pub(crate) mod toolchain;
 pub(crate) mod utils;
 use crate::app::network::{ZigDownload, ZigRelease};
 use crate::app::utils::{remove_files, zig_tarball};
-use crate::tools::canonicalize;
 use crate::types::*;
 mod minisign;
-use crate::{Shell, path_utils};
+use crate::path_utils;
 use color_eyre::eyre::{Context as _, eyre};
 pub use network::CacheStrategy;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 use toolchain::ToolchainManager;
 
 /// 21 days default TTL for index
@@ -62,6 +61,7 @@ pub struct App {
     /// <ZV_DIR>/bin/zig - Zv managed zig executable if any
     zig: Option<PathBuf>,
     /// <ZV_DIR>/bin/zls - Zv managed zls executable if any
+    #[allow(dead_code)]
     zls: Option<PathBuf>,
     /// <ZV_DIR>/versions - Installed versions
     pub(crate) versions_path: PathBuf,
@@ -90,8 +90,6 @@ impl App {
         /* path is canonicalized in tools::fetch_zv_dir() so we don't need to do that here */
         let bin_path = zv_base_path.join("bin");
         let download_cache = zv_base_path.as_path().join("downloads");
-        let mut zig = None;
-        let mut zls = None;
 
         if !bin_path.try_exists().unwrap_or_default() {
             std::fs::create_dir_all(&bin_path)
@@ -100,10 +98,10 @@ impl App {
         }
         let toolchain_manager = ToolchainManager::new(&zv_base_path).await?;
         // Check for existing ZV zig/zls shims in bin directory
-        zig = toolchain_manager
+        let zig = toolchain_manager
             .get_active_install()
             .map(|zig_install| zig_install.path.join(Shim::Zig.executable_name()));
-        zls = utils::detect_shim(&bin_path, Shim::Zls);
+        let zls = utils::detect_shim(&bin_path, Shim::Zls);
 
         let versions_path = zv_base_path.join("versions");
         if !versions_path.try_exists().unwrap_or(false) {
@@ -134,7 +132,7 @@ impl App {
             toolchain_manager,
             zv_base_path,
             versions_path,
-            shell: shell,
+            shell,
             to_install: None,
         };
         Ok(app)
@@ -146,6 +144,10 @@ impl App {
         version: &'b ResolvedZigVersion,
         installed_path: Option<PathBuf>,
     ) -> crate::Result<()> {
+        // Copy zv binary to bin directory if needed and regenerate shims
+        crate::cli::sync::check_and_update_zv_binary(self, false).await
+            .wrap_err("Failed to update zv binary")?;
+
         if let Some(p) = installed_path {
             return self
                 .toolchain_manager
@@ -311,7 +313,7 @@ impl App {
             .unwrap()
             .fetch_master_version()
             .await?;
-        return Ok(zig_release);
+        Ok(zig_release)
     }
     /// Fetch latest stable and returns a [ZigRelease]
     pub async fn fetch_latest_version(
@@ -325,7 +327,7 @@ impl App {
             .unwrap()
             .fetch_latest_stable_version(cache_strategy)
             .await?;
-        return Ok(zig_release);
+        Ok(zig_release)
     }
     /// Validate if a semver version exists in the index and returns a [ZigRelease]
     pub async fn validate_semver(
@@ -367,7 +369,7 @@ impl App {
             "Starting installation"
         );
 
-        let zig_tarball = zig_tarball(&semver_version, None).ok_or_else(|| {
+        let zig_tarball = zig_tarball(semver_version, None).ok_or_else(|| {
             eyre!(
                 "Could not determine tarball name for Zig version {}",
                 zig_release.version_string()
@@ -420,7 +422,7 @@ impl App {
             self.network
                 .as_mut()
                 .unwrap()
-                .download_version(&semver_version, &zig_tarball, download_artifact)
+                .download_version(semver_version, &zig_tarball, download_artifact)
                 .await?
         } else {
             tracing::trace!(target: "zv", "Using ziglang.org as download source");
@@ -446,7 +448,7 @@ impl App {
 
         let zig_exe = self
             .toolchain_manager
-            .install_version(&tarball_path, &semver_version, ext, is_master)
+            .install_version(&tarball_path, semver_version, ext, is_master)
             .await?;
         tracing::info!(
             target: TARGET,

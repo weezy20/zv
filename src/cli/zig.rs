@@ -13,7 +13,7 @@ pub async fn zig_main() -> crate::Result<()> {
     args.remove(0); // drop program name
 
     // Check for +version override (only if it's the first argument)
-    let inline_version_override = if args.first().map_or(false, |arg| arg.starts_with('+')) {
+    let inline_version_override = if args.first().is_some_and(|arg| arg.starts_with('+')) {
         Some(args.remove(0).strip_prefix('+').unwrap().to_string())
     } else {
         None
@@ -86,7 +86,7 @@ async fn find_zig_for_version(zig_version: &ZigVersion) -> crate::Result<PathBuf
     .await?;
     // Resolve ZigVersion to a validated ResolvedZigVersion
     // This already does all the validation and fetching we need
-    let resolved_version = resolve_zig_version(&mut app, &zig_version).await
+    let resolved_version = resolve_zig_version(&mut app, zig_version).await
         .map_err(|e| {
             match e {
                 ZvError::ZigVersionResolveError(err) => {
@@ -109,7 +109,7 @@ async fn find_zig_for_version(zig_version: &ZigVersion) -> crate::Result<PathBuf
                 tracing::warn!("Retrying with community mirrors...");
                 
                 // We need to re-resolve the version since install_release consumed to_install
-                let resolved_version_retry = resolve_zig_version(&mut app, &zig_version).await
+                let resolved_version_retry = resolve_zig_version(&mut app, zig_version).await
                     .map_err(|e| {
                         match e {
                             ZvError::ZigVersionResolveError(err) => {
@@ -135,19 +135,16 @@ async fn find_zig_for_version(zig_version: &ZigVersion) -> crate::Result<PathBuf
 /// Find the default Zig executable (zv-managed or system)
 async fn find_default_zig() -> crate::Result<PathBuf> {
     // Try to get zv-managed zig first
-    if let Ok((zv_base_path, _)) = tools::fetch_zv_dir() {
-        if let Ok(app) = App::init(UserConfig {
+    if let Ok((zv_base_path, _)) = tools::fetch_zv_dir()
+        && let Ok(app) = App::init(UserConfig {
             zv_base_path,
             shell: None,
         })
         .await
-        {
-            if let Some(zig_path) = app.zv_zig() {
+            && let Some(zig_path) = app.zv_zig() {
                 tracing::trace!(target: "zig", "Using zv-managed zig at {}", zig_path.display());
                 return Ok(zig_path);
             }
-        }
-    }
     bail!("Could not find zig executable")
 }
 

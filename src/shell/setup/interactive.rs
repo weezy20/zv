@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use dialoguer::{
     Select,
-    theme::{ColorfulTheme, Theme},
+    theme::Theme,
 };
 use yansi::Paint;
 
@@ -237,12 +237,10 @@ impl InteractiveSetup {
             }
             Err(InteractiveError::DialoguerError(e)) => {
                 // Check if this is a user cancellation (Ctrl+C)
-                if let dialoguer::Error::IO(ref io_err) = e {
-                    if io_err.kind() == std::io::ErrorKind::Interrupted {
+                if matches!(e, dialoguer::Error::IO(ref io_err) if io_err.kind() == std::io::ErrorKind::Interrupted) {
                         let _ = self.handle_cancellation();
                         return Err(crate::ZvError::shell_user_cancelled_interactive().into());
                     }
-                }
                 Err(crate::ZvError::shell_interactive_prompt_failed(&format!("Dialoguer error: {}", e)).into())
             }
             Err(InteractiveError::NotAvailable { reason }) => {
@@ -287,13 +285,12 @@ impl InteractiveSetup {
         }
 
         // Check if TERM is set to something that supports interactive prompts
-        if let Ok(term) = std::env::var("TERM") {
-            if term == "dumb" {
+        if let Ok(term) = std::env::var("TERM")
+            && term == "dumb" {
                 return Err(InteractiveError::NotAvailable {
                     reason: "TERM=dumb does not support interactive prompts".to_string(),
                 });
             }
-        }
 
         // Check for non-interactive frontend
         if std::env::var("DEBIAN_FRONTEND").as_deref() == Ok("noninteractive") {
@@ -558,15 +555,12 @@ impl InteractiveSetup {
                 Paint::new("Method:").bold(),
                 Paint::dim("Shell profile modification")
             );
-            match &self.requirements.path_action {
-                super::PathAction::GenerateEnvFile { rc_file, .. } => {
-                    println!(
-                        "  {} {}",
-                        Paint::new("Profile:").bold(),
-                        Paint::dim(&rc_file.display())
-                    );
-                }
-                _ => {}
+            if let super::PathAction::GenerateEnvFile { rc_file, .. } = &self.requirements.path_action {
+                println!(
+                    "  {} {}",
+                    Paint::new("Profile:").bold(),
+                    Paint::dim(&rc_file.display())
+                );
             }
         }
 

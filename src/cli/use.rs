@@ -1,16 +1,11 @@
-use crate::{ResolvedZigVersion, ZigVersion, tools};
+use crate::{ResolvedZigVersion, ZigVersion};
 use crate::{
     Result, ZvError,
     app::{
         App, CacheStrategy,
-        network::{ZigIndex, ZigRelease},
-        utils::host_target,
     },
 };
 use color_eyre::eyre::{Context, eyre};
-use semver::Version;
-use semver::Version as SemverVersion;
-use std::path::PathBuf;
 use yansi::Paint;
 
 /// Main entry point for the use command

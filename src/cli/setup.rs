@@ -2,7 +2,7 @@ use crate::shell::setup::{
     SetupContext, execute_setup, post_setup_actions, pre_setup_checks,
     InteractiveSetup, apply_user_choices, handle_interactive_error, is_recoverable_interactive_error
 };
-use crate::{App, Shell, ZigVersion};
+use crate::{App, ZigVersion};
 use color_eyre::eyre::Context as _;
 use yansi::Paint;
 
@@ -14,7 +14,7 @@ pub async fn setup_shell(
     using_env_var: bool,
     dry_run: bool,
     no_interactive: bool,
-    default_version: Option<ZigVersion>,
+    _default_version: Option<ZigVersion>,
 ) -> crate::Result<()> {
     // Check if shell environment is already set up
     if app.source_set {
@@ -143,11 +143,10 @@ fn should_use_interactive(context: &SetupContext) -> bool {
     }
 
     // Don't use interactive mode if TERM is dumb
-    if let Ok(term) = std::env::var("TERM") {
-        if term == "dumb" {
+    if let Ok(term) = std::env::var("TERM")
+        && term == "dumb" {
             return false;
         }
-    }
 
     // Check if TTY is available for interactive prompts
     crate::tools::supports_interactive_prompts()

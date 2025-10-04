@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use std::path::{Path, PathBuf};
 
 mod detection;
@@ -226,11 +228,10 @@ impl Shell {
                 let mut fish_files = Vec::new();
 
                 // Try XDG_CONFIG_HOME/fish/conf.d/zv.fish
-                if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
-                    if !xdg_config.is_empty() {
+                if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME")
+                    && !xdg_config.is_empty() {
                         fish_files.push(PathBuf::from(xdg_config).join("fish/conf.d/zv.fish"));
                     }
-                }
 
                 // Always include ~/.config/fish/conf.d/zv.fish as fallback
                 fish_files.push(rc_file(".config/fish/conf.d/zv.fish"));
@@ -243,11 +244,10 @@ impl Shell {
                 let mut nu_files = Vec::new();
 
                 // Try XDG_CONFIG_HOME/nushell/config.nu
-                if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
-                    if !xdg_config.is_empty() {
+                if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME")
+                    && !xdg_config.is_empty() {
                         nu_files.push(PathBuf::from(xdg_config).join("nushell/config.nu"));
                     }
-                }
 
                 // Always include ~/.config/nushell/config.nu as fallback
                 nu_files.push(rc_file(".config/nushell/config.nu"));

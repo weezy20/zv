@@ -1,29 +1,22 @@
 use crate::app::constants::ZIG_DOWNLOAD_INDEX_JSON;
-use crate::app::toolchain::ToolchainManager;
 use crate::app::utils::{remove_files, zv_agent, verify_checksum, ProgressHandle};
-use crate::app::{FETCH_TIMEOUT_SECS, MAX_RETRIES};
-use crate::{NetErr, ZigVersion, ZvError, tools};
-use color_eyre::eyre::{Result, WrapErr, bail, eyre};
-use futures::StreamExt;
-use reqwest::Url;
-use sha2::{Digest, Sha256};
-use std::sync::{Arc, LazyLock};
+use crate::app::FETCH_TIMEOUT_SECS;
+use crate::{NetErr, ZvError};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 use std::{
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use crate::types::{ResolvedZigVersion, TargetTriple};
-use std::collections::{BTreeMap, HashMap};
-use tokio::io::AsyncWriteExt;
-use yansi::Paint;
+use std::collections::HashMap;
 mod mirror;
 use mirror::*;
 mod zig_index;
 pub use zig_index::*;
 mod download;
-pub use download::*;
-pub use {ZigRelease, ZigIndex, NetworkZigRelease, ArtifactInfo};
+use download::{stream_download_file, move_to_final_location};
+pub use {ZigRelease, NetworkZigRelease, ArtifactInfo};
 /// Cache strategy for index loading
 #[derive(Debug, Clone, Copy)]
 pub enum CacheStrategy {
@@ -134,16 +127,19 @@ impl ZvNetwork {
         
         Ok(0)
     }
-
+    #[allow(unused)]
     pub fn versions_path(&self) -> PathBuf {
         self.base_path.join("versions")
     }
+    #[allow(unused)]
     pub fn index_path(&self) -> PathBuf {
         self.base_path.join("index.toml")
     }
+    #[allow(unused)]
     pub fn mirrors_path(&self) -> PathBuf {
         self.base_path.join("mirrors.toml")
     }
+    #[allow(unused)]
     pub fn download_cache_path(&self) -> PathBuf {
         self.download_cache.clone()
     }
@@ -166,14 +162,13 @@ impl ZvNetwork {
         const TARGET: &str = "zv::network::download_version";
         tracing::debug!(target: TARGET,
             "Starting download: {zig_tarball} (version: {semver_version}, size: {size} bytes, checksum: {shasum})",shasum = download_artifact.shasum, size = download_artifact.size);
-;
 
         let (shasum, size) = (&download_artifact.shasum, download_artifact.size);
 
         // Ensure mirror manager is loaded first. This is already done in app.install_release() so it's an error to not have it loaded
         // Also, we make sure of this by limiting visibility of this function to app module only
         if self.mirror_manager.is_none() {
-            Err(NetErr::EmptyMirrors).map_err(ZvError::NetworkError)?;
+            Err(ZvError::NetworkError(NetErr::EmptyMirrors))?;
         }
         let mirror_manager = self.mirror_manager.as_mut().unwrap();
         let temp_dir = self.download_cache.join("tmp");
@@ -355,7 +350,7 @@ impl ZvNetwork {
         remove_files(&[
             temp_tarball_path.as_path(),
             temp_minisig_path.as_path(),
-        ]);
+        ]).await;
 
         let final_error = last_error.unwrap_or_else(|| {
             tracing::error!(target: TARGET, "No specific error recorded - this indicates a critical issue with mirror availability");
@@ -430,8 +425,7 @@ impl ZvNetwork {
                     .index_manager
                     .ensure_loaded(CacheStrategy::RespectTtl)
                     .await
-                {
-                    if let Some(cached_master) =
+                    && let Some(cached_master) =
                         index.get_master_version().and_then(|cached_master| {
                             semver::Version::parse(&cached_master.version_string())
                                 .ok()
@@ -445,7 +439,6 @@ impl ZvNetwork {
                         );
                         return Ok(cached_master);
                     }
-                }
 
                 tracing::debug!(
                     target: "zv::network::fetch_master_version",

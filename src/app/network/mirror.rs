@@ -46,22 +46,20 @@
 use std::{
     convert::TryFrom,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
+use super::download::download_file_with_retries_standalone;
 use super::{CacheStrategy, TARGET};
 use crate::{
     CfgErr, NetErr, ZvError,
     app::{
         MIRRORS_TTL_DAYS,
         constants::ZIG_COMMUNITY_MIRRORS,
-        network::download_file_with_retries_standalone,
         utils::{ProgressHandle, verify_checksum, zv_agent},
     },
 };
 use chrono::{DateTime, Utc};
-use color_eyre::eyre::{Result, WrapErr, bail, eyre};
-use rand::{Rng, prelude::IndexedRandom};
+use color_eyre::eyre::{Result, bail};
 use reqwest::Client;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -142,7 +140,7 @@ impl Mirror {
         expected_size: u64,
         progress_handle: &ProgressHandle,
     ) -> Result<()> {
-        const TARGET: &'static str = "zv::network::mirror::download";
+        const TARGET: &str = "zv::network::mirror::download";
         tracing::debug!(target: TARGET, "Starting download with mirror: {} (rank: {})", self.base_url, self.rank);
 
         // Get download URLs
@@ -334,6 +332,7 @@ impl Mirror {
     }
 
     /// Get the download URL with layout inverted
+    #[allow(unused)]
     pub fn get_alternate_url(&self, version: &Version, tarball: &str) -> String {
         let alternate = Mirror {
             base_url: self.base_url.clone(),
@@ -351,9 +350,7 @@ impl Mirror {
 
     pub fn demote(&mut self) {
         // Higher rank = worse
-        if self.rank < u8::MAX {
-            self.rank += 1;
-        }
+        self.rank = self.rank.saturating_add(1);
     }
 }
 
@@ -426,6 +423,7 @@ impl MirrorsIndex {
     }
 
     /// Load mirrors index from disk, failing if expired (RespectTtl strategy)
+    #[allow(unused)]
     pub async fn load_from_disk_expire_checked(path: impl AsRef<Path>) -> Result<Self, CfgErr> {
         let index = Self::load_from_disk(path.as_ref()).await?;
 
@@ -440,7 +438,7 @@ impl MirrorsIndex {
 
     /// Save mirrors index to disk
     pub async fn save(&self, path: impl AsRef<Path>) -> Result<(), CfgErr> {
-        let content = toml::to_string_pretty(self).map_err(|e| CfgErr::SerializeFail(e.into()))?;
+        let content = toml::to_string_pretty(self).map_err(CfgErr::SerializeFail)?;
 
         tokio::fs::write(path, content)
             .await
@@ -582,9 +580,8 @@ impl MirrorManager {
             .filter(|line| !line.trim().is_empty()) // Skip empty lines
             .filter_map(|line| {
                 Mirror::try_from(line.trim())
-                    .map_err(|e| {
+                    .inspect_err(|&e| {
                         tracing::warn!(target: TARGET, "Failed to parse mirror '{}': {}", line, e);
-                        e
                     })
                     .ok()
             })
@@ -680,10 +677,6 @@ impl MirrorManager {
         let mirrors = self.all_mirrors_mut().await?;
         mirrors.sort_by_key(|m| m.rank);
         Ok(&mut self.mirrors)
-    }
-    /// Get the mirrors.toml path
-    pub fn mirrors_toml(&self) -> &Path {
-        &self.cache_path
     }
     /// Save the current mirrors to disk (overwriting existing cache)
     /// If no mirrors are loaded, we return EmptyMirrors error

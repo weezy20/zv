@@ -2,17 +2,16 @@
 
 use super::models::{ArtifactInfo, CacheZigIndex, NetworkZigIndex, ZigIndex, ZigRelease};
 use crate::{
-    CfgErr, NetErr, ZigVersion, ZvError,
+    CfgErr, NetErr, ZvError,
     app::{
-        FETCH_TIMEOUT_SECS, INDEX_TTL_DAYS,
+        FETCH_TIMEOUT_SECS,
         constants::ZIG_DOWNLOAD_INDEX_JSON,
         network::{CacheStrategy, TARGET},
     },
     types::ResolvedZigVersion,
 };
-use chrono::{DateTime, Utc};
 use reqwest::Client;
-use std::{path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 
 // Backward compatibility wrapper for ZigRelease
 impl ZigRelease {
@@ -88,13 +87,6 @@ impl IndexManager {
             index: None,
             client,
         }
-    }
-
-    /// Returns a reference to the loaded `ZigIndex` if available.
-    ///
-    /// Note: Consider using `ensure_loaded` instead to guarantee the index is available.
-    pub fn get_index(&self) -> Option<&ZigIndex> {
-        self.index.as_ref()
     }
 
     /// Ensures the index is loaded based on the provided cache strategy.

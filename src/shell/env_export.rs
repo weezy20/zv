@@ -1,4 +1,4 @@
-use super::{Shell, generators::*, path_utils::*};
+use super::{Shell, path_utils::*};
 use crate::{ZvError, app::App};
 use color_eyre::eyre::eyre;
 use std::path::Path;
