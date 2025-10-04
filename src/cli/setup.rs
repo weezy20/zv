@@ -6,6 +6,8 @@ use crate::{App, ZigVersion};
 use color_eyre::eyre::Context as _;
 use yansi::Paint;
 
+use super::r#use::use_version;
+
 /// Main setup_shell function that orchestrates the three-phase setup process
 /// This is the public interface that maintains backward compatibility and supports interactive mode
 
@@ -15,6 +17,7 @@ pub async fn setup_shell(
     dry_run: bool,
     no_interactive: bool,
     default_version: Option<ZigVersion>,
+    force_ziglang: bool,
 ) -> crate::Result<()> {
     // Check if shell environment is already set up
     if app.source_set {
@@ -119,6 +122,14 @@ pub async fn setup_shell(
         println!(
             "Restart your shell or run the appropriate source command to apply changes immediately"
         );
+    }
+
+    // If a default version was specified, set it as the active version
+    if let Some(version) = default_version {
+        if !dry_run {
+            println!("\nSetting default version to {}...", Paint::cyan(&version.to_string()));
+            use_version(version, app, force_ziglang).await?;
+        }
     }
 
     Ok(())

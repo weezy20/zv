@@ -204,6 +204,13 @@ pub enum Commands {
                          when TERM=dumb, or when TTY is not available."
         )]
         no_interactive: bool,
+        /// Force using ziglang.org for download of initial zigversion -v <zigversion>
+        #[arg(
+            long = "force-ziglang",
+            short = 'f',
+            help = "Force using ziglang.org for download of initial zigversion -v <zigversion>"
+        )]
+        force_ziglang: bool,
     },
 
     /// Synchronize index, mirrors list and metadata for zv.
@@ -258,6 +265,7 @@ impl Commands {
                 dry_run,
                 default_version,
                 no_interactive,
+                force_ziglang,
             } => {
                 setup::setup_shell(
                     &mut app,
@@ -265,6 +273,7 @@ impl Commands {
                     dry_run,
                     no_interactive,
                     default_version,
+                    force_ziglang,
                 )
                 .await
             }
