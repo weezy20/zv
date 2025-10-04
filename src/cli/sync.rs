@@ -64,7 +64,10 @@ async fn check_and_update_zv_binary_impl(
     // If target doesn't exist, copy current binary
     if !target_exe.exists() {
         if !quiet {
-            tracing::info!("zv binary not found in <ZV_DIR>/bin, installing...",);
+            tracing::info!(
+                "zv binary not found in {}, installing...",
+                zv_dir_bin.display()
+            );
         }
         copy_binary_and_regenerate_shims(&current_exe, &target_exe, app).await?;
         if !quiet {
