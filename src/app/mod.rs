@@ -61,6 +61,7 @@ pub struct App {
     /// <ZV_DIR>/bin/zig - Zv managed zig executable if any
     zig: Option<PathBuf>,
     /// <ZV_DIR>/bin/zls - Zv managed zls executable if any
+    #[allow(dead_code)]
     zls: Option<PathBuf>,
     /// <ZV_DIR>/versions - Installed versions
     pub(crate) versions_path: PathBuf,
@@ -89,8 +90,6 @@ impl App {
         /* path is canonicalized in tools::fetch_zv_dir() so we don't need to do that here */
         let bin_path = zv_base_path.join("bin");
         let download_cache = zv_base_path.as_path().join("downloads");
-        let mut zig = None;
-        let mut zls = None;
 
         if !bin_path.try_exists().unwrap_or_default() {
             std::fs::create_dir_all(&bin_path)
@@ -99,10 +98,10 @@ impl App {
         }
         let toolchain_manager = ToolchainManager::new(&zv_base_path).await?;
         // Check for existing ZV zig/zls shims in bin directory
-        zig = toolchain_manager
+        let zig = toolchain_manager
             .get_active_install()
             .map(|zig_install| zig_install.path.join(Shim::Zig.executable_name()));
-        zls = utils::detect_shim(&bin_path, Shim::Zls);
+        let zls = utils::detect_shim(&bin_path, Shim::Zls);
 
         let versions_path = zv_base_path.join("versions");
         if !versions_path.try_exists().unwrap_or(false) {

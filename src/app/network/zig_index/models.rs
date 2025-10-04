@@ -291,35 +291,6 @@ impl ZigIndex {
         self.last_synced
     }
 
-    /// Get artifact information for a specific version and target
-    pub fn get_artifact(
-        &self,
-        version: &ResolvedZigVersion,
-        target: &TargetTriple,
-    ) -> Option<&ArtifactInfo> {
-        self.releases.get(version)?.artifacts.get(target)
-    }
-
-    /// Get artifact information for a specific version and the current host target
-    pub fn get_host_artifact(&self, version: &ResolvedZigVersion) -> Option<&ArtifactInfo> {
-        let host_target_str = host_target()?;
-        let target_triple = TargetTriple::from_key(&host_target_str)?;
-        self.get_artifact(version, &target_triple)
-    }
-
-    /// Get all available targets for a specific version
-    pub fn get_available_targets(&self, version: &ResolvedZigVersion) -> Vec<&TargetTriple> {
-        match self.releases.get(version) {
-            Some(release) => release.artifacts.keys().collect(),
-            None => Vec::new(),
-        }
-    }
-
-    /// Check if a version exists in the index
-    pub fn has_version(&self, version: &ResolvedZigVersion) -> bool {
-        self.releases.contains_key(version)
-    }
-
     /// Get the latest stable version
     /// Returns the highest semantic version that is not a pre-release
     pub fn get_latest_stable(&self) -> Option<&ResolvedZigVersion> {
@@ -366,7 +337,18 @@ impl ZigIndex {
 
         None
     }
+
+    /// Cache expired? (backward compatibility)
+    pub fn is_expired(&self) -> bool {
+        if let Some(last_synced) = self.last_synced() {
+            let age = Utc::now() - last_synced;
+            age.num_days() >= *INDEX_TTL_DAYS
+        } else {
+            true // If never synced, consider it expired
+        }
+    }
     /// Find the highest stable version in the index
+    #[allow(unused)]
     fn find_highest_stable_version(&self) -> Option<ResolvedZigVersion> {
         self.releases()
             .keys()
@@ -385,58 +367,6 @@ impl ZigIndex {
                 }
             })
             .max() // BTreeMap keys are ordered, so max() gives us the highest version
-    }
-
-    /// Get all available target platforms for a specific version (backward compatibility)
-    pub fn get_targets_for_version(&self, version: &str) -> Vec<String> {
-        // Try to find the version in the index by string matching
-        for resolved_version in self.releases().keys() {
-            let version_string = match resolved_version {
-                ResolvedZigVersion::Semver(v) => v.to_string(),
-                ResolvedZigVersion::Master(v) => v.to_string(),
-            };
-
-            if version_string == version || (version == "master" && resolved_version.is_master()) {
-                return self
-                    .get_available_targets(resolved_version)
-                    .into_iter()
-                    .map(|t| t.to_key())
-                    .collect();
-            }
-        }
-        Vec::new()
-    }
-
-    /// Cache expired? (backward compatibility)
-    pub fn is_expired(&self) -> bool {
-        if let Some(last_synced) = self.last_synced() {
-            let age = Utc::now() - last_synced;
-            age.num_days() >= *INDEX_TTL_DAYS
-        } else {
-            true // If never synced, consider it expired
-        }
-    }
-
-    /// Update the last_synced timestamp (backward compatibility)
-    pub fn update_sync_time(&mut self) {
-        // This method can't be implemented on the immutable ZigIndex
-        // The sync time is set during conversion from NetworkZigIndex
-        tracing::warn!(
-            "update_sync_time called on ZigIndex - this is a no-op. Sync time is set during network conversion."
-        );
-    }
-
-    /// Access to releases as string keys (backward compatibility)
-    pub fn releases_by_string(&self) -> std::collections::BTreeMap<String, &ZigRelease> {
-        let mut result = std::collections::BTreeMap::new();
-        for (version, release) in self.releases() {
-            let key = match version {
-                ResolvedZigVersion::Semver(v) => v.to_string(),
-                ResolvedZigVersion::Master(v) => v.to_string(),
-            };
-            result.insert(key, release);
-        }
-        result
     }
 }
 

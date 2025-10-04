@@ -237,8 +237,7 @@ impl InteractiveSetup {
             }
             Err(InteractiveError::DialoguerError(e)) => {
                 // Check if this is a user cancellation (Ctrl+C)
-                if let dialoguer::Error::IO(ref io_err) = e
-                    && io_err.kind() == std::io::ErrorKind::Interrupted {
+                if matches!(e, dialoguer::Error::IO(ref io_err) if io_err.kind() == std::io::ErrorKind::Interrupted) {
                         let _ = self.handle_cancellation();
                         return Err(crate::ZvError::shell_user_cancelled_interactive().into());
                     }

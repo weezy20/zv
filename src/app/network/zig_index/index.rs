@@ -89,13 +89,6 @@ impl IndexManager {
         }
     }
 
-    /// Returns a reference to the loaded `ZigIndex` if available.
-    ///
-    /// Note: Consider using `ensure_loaded` instead to guarantee the index is available.
-    pub fn get_index(&self) -> Option<&ZigIndex> {
-        self.index.as_ref()
-    }
-
     /// Ensures the index is loaded based on the provided cache strategy.
     ///
     /// This method handles loading the index from disk or fetching it from the network

@@ -3,8 +3,6 @@ use crate::app::utils::{remove_files, zv_agent, verify_checksum, ProgressHandle}
 use crate::app::FETCH_TIMEOUT_SECS;
 use crate::{NetErr, ZvError};
 use color_eyre::eyre::{Result, WrapErr, eyre};
-use futures::StreamExt;
-use sha2::Digest;
 use std::{
     path::{Path, PathBuf},
     time::Duration,
@@ -12,13 +10,12 @@ use std::{
 
 use crate::types::{ResolvedZigVersion, TargetTriple};
 use std::collections::HashMap;
-use yansi::Paint;
 mod mirror;
 use mirror::*;
 mod zig_index;
 pub use zig_index::*;
 mod download;
-pub use download::*;
+use download::{stream_download_file, move_to_final_location};
 pub use {ZigRelease, NetworkZigRelease, ArtifactInfo};
 /// Cache strategy for index loading
 #[derive(Debug, Clone, Copy)]
@@ -130,16 +127,19 @@ impl ZvNetwork {
         
         Ok(0)
     }
-
+    #[allow(unused)]
     pub fn versions_path(&self) -> PathBuf {
         self.base_path.join("versions")
     }
+    #[allow(unused)]
     pub fn index_path(&self) -> PathBuf {
         self.base_path.join("index.toml")
     }
+    #[allow(unused)]
     pub fn mirrors_path(&self) -> PathBuf {
         self.base_path.join("mirrors.toml")
     }
+    #[allow(unused)]
     pub fn download_cache_path(&self) -> PathBuf {
         self.download_cache.clone()
     }
@@ -162,7 +162,6 @@ impl ZvNetwork {
         const TARGET: &str = "zv::network::download_version";
         tracing::debug!(target: TARGET,
             "Starting download: {zig_tarball} (version: {semver_version}, size: {size} bytes, checksum: {shasum})",shasum = download_artifact.shasum, size = download_artifact.size);
-;
 
         let (shasum, size) = (&download_artifact.shasum, download_artifact.size);
 
@@ -351,7 +350,7 @@ impl ZvNetwork {
         remove_files(&[
             temp_tarball_path.as_path(),
             temp_minisig_path.as_path(),
-        ]);
+        ]).await;
 
         let final_error = last_error.unwrap_or_else(|| {
             tracing::error!(target: TARGET, "No specific error recorded - this indicates a critical issue with mirror availability");

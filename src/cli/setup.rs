@@ -14,7 +14,7 @@ pub async fn setup_shell(
     using_env_var: bool,
     dry_run: bool,
     no_interactive: bool,
-    default_version: Option<ZigVersion>,
+    _default_version: Option<ZigVersion>,
 ) -> crate::Result<()> {
     // Check if shell environment is already set up
     if app.source_set {

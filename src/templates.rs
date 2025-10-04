@@ -233,7 +233,7 @@ impl Template {
 
         let output = app
             .spawn_zig_with_guard(&zig_path, &["init"], Some(target_dir))
-            .inspect_err(|e| {
+            .inspect_err(|_e| {
                 if self.context.as_ref().unwrap().created_new_dir {
                     let _ = rda::remove_dir_all(target_dir);
                 }

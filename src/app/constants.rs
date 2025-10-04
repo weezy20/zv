@@ -1,4 +1,3 @@
-pub const ZIG_BASE_DOWNLOAD_URL: &str = "https://ziglang.org/download/";
 pub const ZIG_DOWNLOAD_INDEX_JSON: &str = "https://ziglang.org/download/index.json";
 
 pub const ZIG_COMMUNITY_MIRRORS: &str =

@@ -312,6 +312,7 @@ impl ProgressHandle {
     }
 
     /// Manually shutdown the progress bar (usually not needed due to Drop)
+    #[allow(unused)]
     pub async fn shutdown(mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.tx.send(ProgressMessage::Shutdown).await?;
 

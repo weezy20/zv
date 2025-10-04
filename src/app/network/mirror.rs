@@ -48,19 +48,18 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use super::download::download_file_with_retries_standalone;
 use super::{CacheStrategy, TARGET};
 use crate::{
     CfgErr, NetErr, ZvError,
     app::{
         MIRRORS_TTL_DAYS,
         constants::ZIG_COMMUNITY_MIRRORS,
-        network::download_file_with_retries_standalone,
         utils::{ProgressHandle, verify_checksum, zv_agent},
     },
 };
 use chrono::{DateTime, Utc};
 use color_eyre::eyre::{Result, bail};
-use rand::{Rng, prelude::IndexedRandom};
 use reqwest::Client;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -333,6 +332,7 @@ impl Mirror {
     }
 
     /// Get the download URL with layout inverted
+    #[allow(unused)]
     pub fn get_alternate_url(&self, version: &Version, tarball: &str) -> String {
         let alternate = Mirror {
             base_url: self.base_url.clone(),
@@ -423,6 +423,7 @@ impl MirrorsIndex {
     }
 
     /// Load mirrors index from disk, failing if expired (RespectTtl strategy)
+    #[allow(unused)]
     pub async fn load_from_disk_expire_checked(path: impl AsRef<Path>) -> Result<Self, CfgErr> {
         let index = Self::load_from_disk(path.as_ref()).await?;
 
@@ -676,10 +677,6 @@ impl MirrorManager {
         let mirrors = self.all_mirrors_mut().await?;
         mirrors.sort_by_key(|m| m.rank);
         Ok(&mut self.mirrors)
-    }
-    /// Get the mirrors.toml path
-    pub fn mirrors_toml(&self) -> &Path {
-        &self.cache_path
     }
     /// Save the current mirrors to disk (overwriting existing cache)
     /// If no mirrors are loaded, we return EmptyMirrors error
