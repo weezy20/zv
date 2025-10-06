@@ -44,7 +44,7 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
         Version::parse(&latest_release.version).wrap_err("Failed to parse latest version")?;
 
     println!(
-        "  {} Latest version:  {}",
+        "  {} Latest version from releases:  {}",
         "→".blue(),
         Paint::green(&latest_version)
     );
