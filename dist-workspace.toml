@@ -18,9 +18,10 @@ npm-scope = "@weezy20"
 # The npm package should have this name
 npm-package = "zv"
 # Path that installers should place binaries in
-install-path = ["~/.zv/bin"]
+install-path = "~/.zv/bin"
 # Publish jobs to run in CI
 publish-jobs = ["homebrew", "npm"]
 # Whether to install an updater program
 install-updater = false
+# The archive format to use for non-windows builds (defaults .tar.xz)
 unix-archive = ".tar.gz"
