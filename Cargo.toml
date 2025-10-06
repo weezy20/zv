@@ -33,13 +33,15 @@ chrono = { version = "0.4.41", features = ["serde"] }
 yansi = { version = "1.0.1", features = ["detect-tty", "detect-env"] }
 target-lexicon = "0.13.3"
 serde_json = "1.0.145"
-reqwest = { version = "0.12.23", features = ["stream"] }
+reqwest = { version = "0.12.23", features = [
+    "stream",
+    "rustls-tls",
+], default-features = false }
 toml = "0.9.7"
 toml_edit = "0.23.6"
 thiserror = "2.0.16"
 ahash = "0.8.12"
 walkdir = "2.5.0"
-# which = "8.0.0"
 same-file = "1.0.6"
 sysinfo = "0.37.0"
 dunce = "1.0.5"
