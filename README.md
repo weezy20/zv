@@ -108,23 +108,39 @@ From now on, use the `zv` installed in `ZV_DIR/bin`.
 
 ---
 
-> **Note:** Run `zv setup` after installation to self-install `zv` to `ZV_DIR/bin` (default: `$HOME/.zv/bin` on Unix, `%USERPROFILE%\.zv\bin` on Windows). Without this step you might not expect `zv` to work correctly because the installer scripts do not download `zv` to `ZV_DIR/bin` at the moment.
+> **Note:** The quick install scripts (shell/PowerShell), Homebrew, and npm all install `zv` directly to `ZV_DIR/bin` (default: `$HOME/.zv/bin` on Unix, `%USERPROFILE%\.zv\bin` on Windows) and configure your PATH automatically. You're ready to go! If you installed via cargo, see the instructions above for running `zv setup` or `zv sync`.
 
 ## Updating `zv` 
 
-If you have the repo cloned or are using cargo-installed binary:
+**Simple update (Recommended):**
 ```sh
-# Builds new version and simultaneously runs setup to update the binary in ZV_DIR/bin
-cargo run --release -- setup
-# Or you can also use sync
-cargo run --release -- sync # Recommended
+zv update
 ```
-If you have the quick install script you should have a `zv-update` command available:
+
+This command checks for new releases on GitHub and updates `zv` in place. It works whether you're running from `ZV_DIR/bin/zv` or from an external location (like cargo install). 
+
+**Options:**
 ```sh
-zv-update # fetches latest release and puts it in the default location for the method you used above
+zv update --force  # Force reinstall even if already on the latest version
 ```
-If you used `zv-update` your `ZV_DIR/bin/zv` might still be on the older version. Just run `zv setup` or `zv sync` with the newer `bin` to update the binary in `ZV_DIR/bin`. 
-This replaces your existing `ZV_DIR/bin/zv` installation. This is not strictly necessary but recommeneded to keep your `ZV_DIR/bin/zv` binary up to date.
+
+
+
+<details>
+<summary>Alternative update methods:</summary>
+
+If you have the repo cloned or are using a cargo-installed binary:
+```sh
+# Build new version and update the binary in ZV_DIR/bin
+cargo run --release -- sync
+
+# Or if you installed from crates.io, install it and sync
+cargo install zv --force
+zv sync
+# or if you already have ZV_DIR/bin in path
+~/.cargo/bin/zv sync # $CARGO_HOME/bin/zv sync
+```
+</details>
 
 ## Usage
 
@@ -170,7 +186,8 @@ zv clean --except <version,*>          # Clean up every version except the versi
 zv rm master                           # Clean up the `master` branch toolchain.
 zv rm master --outdated                # Clean up any older master versions in the master folder that don't match latest `master`
 zv setup                               # Set up shell environment for zv with interactive prompts (use --no-interactive for automation)
-zv sync                                # Resync community mirrors list from [ziglang.org/download/community-mirrors.txt]; also force resync of index to fetch latest nightly builds.
+zv sync                                # Resync community mirrors list from [ziglang.org/download/community-mirrors.txt]; also force resync of index to fetch latest nightly builds. Replaces `ZV_DIR/bin/zv` if outdated against current invocation.
+zv update                              # Update zv to the latest release only if present in GH Releases: https://github.com/weezy20/zv/releases
 zv help                                # Detailed instructions for zv. Use `--help` for long help or `-h` for short help with a subcommand.
 ```
 

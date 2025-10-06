@@ -9,6 +9,7 @@ use yansi::Paint;
 mod clean;
 mod init;
 mod list;
+mod update;
 mod setup;
 pub mod sync; // Make sync public so other modules can use check_and_update_zv_binary
 mod r#use;
@@ -197,8 +198,16 @@ pub enum Commands {
         )]
         no_interactive: bool,
     },
-
-    /// Synchronize index, mirrors list and metadata for zv.
+    /// Update zv to the latest release only if present in GH Releases:
+    Update {
+        #[arg(
+            long,
+            short = 'f',
+            help = "Force update even if the current version is the latest"
+        )]
+        force: bool,
+    },
+    /// Synchronize index, mirrors list and metadata for zv. Also replaces `ZV_DIR/bin/zv` if outdated against current invocation.
     Sync,
 }
 
@@ -251,6 +260,7 @@ impl Commands {
                 no_interactive,
             } => setup::setup_shell(&mut app, using_env, dry_run, no_interactive).await,
             Commands::Sync => sync::sync(&mut app).await,
+            Commands::Update { force } => update::update_zv(&mut app, force).await,
         }
     }
 }
