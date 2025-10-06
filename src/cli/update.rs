@@ -1,13 +1,13 @@
 //! Self-update command for zv binary using self_update crate
 //!
 //! Checks GitHub releases for newer versions and updates the binary if available.
-//! After successful update, regenerates shims for zig/zls.
+//! Intelligently handles updates whether zv is running from ZV_DIR/bin or elsewhere.
 
 use color_eyre::eyre::{Context, Result, bail};
 use semver::Version;
 use yansi::Paint;
 
-use crate::App;
+use crate::{App, tools};
 
 pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
     println!("{}", "Checking for zv updates...".cyan());
@@ -85,40 +85,124 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
             "✗".red()
         );
         println!("  • Build from source at https://github.com/weezy20/zv");
-        println!("  • You can try: cargo install zv");
-        println!("  • Then run: $CARGO_HOME/bin/zv sync to update bin @ ZV_DIR/bin/zv");
-        println!("  • Then uninstall cargo binary: cargo uninstall zv");
+        println!("  • You can try: {}", "cargo install zv".cyan().underline());
+        println!(
+            "  • Then run: {} to update bin @ ZV_DIR/bin/zv",
+            "$CARGO_HOME/bin/zv sync".cyan().underline()
+        );
+        println!(
+            "  • Then uninstall cargo binary: {}",
+            "cargo uninstall zv".cyan().underline()
+        );
         bail!("No release asset found for platform: {target} with extension {expected_extension}");
     }
 
-    println!("  {} Downloading and installing update...", "→".blue());
+    // Check if we're running from ZV_DIR/bin/zv or somewhere else
+    let current_exe = std::env::current_exe().wrap_err("Failed to get current executable path")?;
+    let (zv_dir, _) = tools::fetch_zv_dir()?;
+    let expected_zv_path = zv_dir
+        .join("bin")
+        .join(if cfg!(windows) { "zv.exe" } else { "zv" });
 
-    // Perform the update - this will:
-    // 1. Download the correct asset for this platform
-    // 2. Extract the binary
-    // 3. Replace the current binary (ZV_DIR/bin/zv)
-    let status = update_builder.build()?.update()?;
+    let running_from_zv_dir = tools::canonicalize(&current_exe)
+        .ok()
+        .and_then(|ce| {
+            tools::canonicalize(&expected_zv_path)
+                .ok()
+                .map(|ez| ce == ez)
+        })
+        .unwrap_or(false);
 
-    println!(
-        "  {} Updated successfully to version {}!",
-        "✓".green(),
-        status.version()
-    );
+    if running_from_zv_dir {
+        // Standard case: running from ZV_DIR/bin/zv
+        // Use self_update to replace the binary in place
+        println!("  {} Downloading and installing update...", "→".blue());
 
-    // Regenerate shims to ensure zig/zls symlinks point to the updated zv binary
-    // Since self_update replaced ZV_DIR/bin/zv in place, we need to regenerate
-    // the zig and zls shims that point to it
-    if let Some(install) = app.toolchain_manager.get_active_install() {
-        println!("  {} Regenerating shims...", "→".blue());
-        app.toolchain_manager
-            .deploy_shims(install, true)
-            .await
-            .wrap_err("Failed to regenerate shims after update")?;
-        println!("  {} Shims regenerated successfully", "✓".green());
+        update_builder.bin_install_path(&expected_zv_path.parent().unwrap());
+        let status = update_builder.build()?.update()?;
+
+        println!(
+            "  {} Updated successfully to version {}!",
+            "✓".green(),
+            status.version()
+        );
+
+        // Regenerate shims to ensure zig/zls symlinks point to the updated zv binary
+        if let Some(install) = app.toolchain_manager.get_active_install() {
+            println!("  {} Regenerating shims...", "→".blue());
+            app.toolchain_manager
+                .deploy_shims(install, true)
+                .await
+                .wrap_err("Failed to regenerate shims after update")?;
+            println!("  {} Shims regenerated successfully", "✓".green());
+        }
+    } else {
+        // Running from outside ZV_DIR (e.g., cargo install, custom location)
+        // Download to temp location and exec into `zv sync`
+        println!(
+            "  {} Running from outside ZV_DIR, downloading to temporary location...",
+            "→".blue()
+        );
+
+        let temp_dir = std::env::temp_dir().join(format!("zv-update-{}", std::process::id()));
+        std::fs::create_dir_all(&temp_dir)?;
+
+        // Download the binary to temp location
+        update_builder.bin_install_path(&temp_dir);
+        let status = update_builder.build()?.update()?;
+
+        let temp_binary = temp_dir.join(if cfg!(windows) { "zv.exe" } else { "zv" });
+
+        println!("  {} Downloaded version {}", "✓".green(), status.version());
+        println!(
+            "  {} Running sync to update ZV_DIR/bin/zv and regenerate shims...",
+            "→".blue()
+        );
+
+        // Exec into the new binary with sync command
+        // This will copy the new binary to ZV_DIR/bin/zv and regenerate shims
+        exec_new_binary_with_sync(&temp_binary)?;
+
+        // Never reached
+        unreachable!()
     }
 
     println!();
     println!("{}", "Update completed successfully!".green().bold());
 
     Ok(())
+}
+
+/// Replace the current process with the newly downloaded binary running `sync`
+fn exec_new_binary_with_sync(binary_path: &std::path::Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+
+        let err = std::process::Command::new(binary_path).arg("sync").exec();
+
+        // exec only returns on error
+        Err(err).wrap_err("Failed to exec into new binary for sync")
+    }
+
+    #[cfg(windows)]
+    {
+        use std::process::Stdio;
+
+        let mut child = std::process::Command::new(binary_path)
+            .arg("sync")
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .wrap_err("Failed to spawn new binary for sync")?;
+
+        let status = child.wait()?;
+
+        if !status.success() {
+            bail!("Sync command failed after update");
+        }
+
+        std::process::exit(0);
+    }
 }
