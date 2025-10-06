@@ -507,10 +507,7 @@ async fn clean_downloads_only(app: &mut App) -> crate::Result<()> {
 pub async fn clean_all_versions(app: &mut App) -> crate::Result<()> {
     let versions_path = &app.versions_path;
 
-    println!(
-        "{}",
-        Paint::cyan("Removing all versions...").bold()
-    );
+    println!("{}", Paint::cyan("Removing all versions...").bold());
 
     if !versions_path.exists() {
         println!(
@@ -669,7 +666,11 @@ async fn handle_active_version_removal(app: &mut App) -> crate::Result<()> {
     let new_active = if let Some(highest_stable) = stable_versions.first() {
         // Use highest stable version
         Some((highest_stable, false)) // false = not master
-    } else { master_versions.first().map(|highest_master| (highest_master, true)) };
+    } else {
+        master_versions
+            .first()
+            .map(|highest_master| (highest_master, true))
+    };
 
     match new_active {
         Some((install, is_master)) => {

@@ -105,9 +105,10 @@ fn will_use_interactive_mode(context: &SetupContext) -> bool {
 
     // Don't use interactive mode if TERM is dumb
     if let Ok(term) = std::env::var("TERM")
-        && term == "dumb" {
-            return false;
-        }
+        && term == "dumb"
+    {
+        return false;
+    }
 
     // Check if TTY is available for interactive prompts
     crate::tools::supports_interactive_prompts()
@@ -350,12 +351,13 @@ pub async fn post_setup_actions(context: &SetupContext) -> crate::Result<()> {
         println!("  Would regenerate shims if binary was updated");
     } else {
         println!("{}", Paint::green("→ Post-Setup Actions"));
-        
+
         // Use the centralized check_and_update_zv_binary from sync module
         // This will copy the binary AND regenerate shims if needed
-        crate::cli::sync::check_and_update_zv_binary(&context.app, true).await
+        crate::cli::sync::check_and_update_zv_binary(&context.app, true)
+            .await
             .with_context(|| "Failed to update zv binary")?;
-        
+
         // Note: Shim regeneration is now handled inside check_and_update_zv_binary
         // via copy_binary_and_regenerate_shims
     }

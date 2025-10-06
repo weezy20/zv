@@ -40,4 +40,3 @@ pub fn verify_minisign_signature(
         .map_err(|e| ZvError::MinisignError(eyre!("Signature verification failed: {e}")))?;
     Ok(())
 }
-

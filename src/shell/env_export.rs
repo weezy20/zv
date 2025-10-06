@@ -5,7 +5,10 @@ use std::path::Path;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 
 /// Write shell file content with proper line endings for cross-platform compatibility
-pub async fn write_shell_file_with_line_endings(file_path: &Path, content: &str) -> Result<(), ZvError> {
+pub async fn write_shell_file_with_line_endings(
+    file_path: &Path,
+    content: &str,
+) -> Result<(), ZvError> {
     let mut file = OpenOptions::new()
         .create(true)
         .write(true)
@@ -32,10 +35,12 @@ pub async fn write_shell_file_with_line_endings(file_path: &Path, content: &str)
     } else {
         "\r\n"
     };
-    
-    file.write_all(final_newline.as_bytes()).await.map_err(|e| {
-        ZvError::ZvExportError(eyre!(e).wrap_err("Failed to write newline to file"))
-    })?;
+
+    file.write_all(final_newline.as_bytes())
+        .await
+        .map_err(|e| {
+            ZvError::ZvExportError(eyre!(e).wrap_err("Failed to write newline to file"))
+        })?;
 
     Ok(())
 }
@@ -77,7 +82,7 @@ async fn write_env_file_if_needed(env_file: &Path, content: &str) -> Result<(), 
                 let normalized_existing = normalize_line_endings_for_comparison(&existing_content);
                 let normalized_new = normalize_line_endings_for_comparison(content);
                 normalized_existing.trim() != normalized_new.trim()
-            },
+            }
             Err(_) => {
                 tracing::warn!("Could not read existing env file, will overwrite");
                 true

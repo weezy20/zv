@@ -1,6 +1,6 @@
-use crate::app::constants::ZIG_DOWNLOAD_INDEX_JSON;
-use crate::app::utils::{remove_files, zv_agent, verify_checksum, ProgressHandle};
 use crate::app::FETCH_TIMEOUT_SECS;
+use crate::app::constants::ZIG_DOWNLOAD_INDEX_JSON;
+use crate::app::utils::{ProgressHandle, remove_files, verify_checksum, zv_agent};
 use crate::{NetErr, ZvError};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use std::{
@@ -15,8 +15,8 @@ use mirror::*;
 mod zig_index;
 pub use zig_index::*;
 mod download;
-use download::{stream_download_file, move_to_final_location};
-pub use {ZigRelease, NetworkZigRelease, ArtifactInfo};
+use download::{move_to_final_location, stream_download_file};
+pub use {ArtifactInfo, NetworkZigRelease, ZigRelease};
 /// Cache strategy for index loading
 #[derive(Debug, Clone, Copy)]
 pub enum CacheStrategy {
@@ -113,18 +113,22 @@ impl ZvNetwork {
     /// Force refresh the community mirrors list from network
     pub async fn sync_mirrors(&mut self) -> Result<usize, ZvError> {
         self.ensure_mirror_manager().await?;
-        
+
         if let Some(mirror_manager) = self.mirror_manager.as_mut() {
-            mirror_manager.load_mirrors(CacheStrategy::AlwaysRefresh).await
+            mirror_manager
+                .load_mirrors(CacheStrategy::AlwaysRefresh)
+                .await
                 .map_err(ZvError::NetworkError)?;
-            
-            let mirror_count = mirror_manager.all_mirrors_mut().await
+
+            let mirror_count = mirror_manager
+                .all_mirrors_mut()
+                .await
                 .map(|mirrors| mirrors.len())
                 .unwrap_or(0);
-            
+
             return Ok(mirror_count);
         }
-        
+
         Ok(0)
     }
     #[allow(unused)]
@@ -190,35 +194,33 @@ impl ZvNetwork {
         let mut last_error = None;
 
         // Clean up any existing temporary files from previous failed attempts
-        remove_files(&[
-            temp_tarball_path.as_path(),
-            temp_minisig_path.as_path()
-        ]).await;
-        let _ = mirror_manager.sort_by_rank().await.map_err(ZvError::NetworkError)?;
-        
+        remove_files(&[temp_tarball_path.as_path(), temp_minisig_path.as_path()]).await;
+        let _ = mirror_manager
+            .sort_by_rank()
+            .await
+            .map_err(ZvError::NetworkError)?;
+
         for attempt in 1..=max_retries {
             tracing::debug!(target: TARGET, "Download attempt {attempt}/{max_retries} for {zig_tarball} (expected size: {:.1} MB)", size as f64 / 1_048_576.0);
             // Select mirror based on attempt number
             let selected_mirror = {
-                    // For subsequent attempts, get ranked mirrors and select the best available
-                    match mirror_manager.get_random_mirror().await
-                    {
-                        Ok(ranked_mirror) => {
-                            ranked_mirror
-                        }
-                        Err(net_err) => {
-                            tracing::error!(target: TARGET, "Failed to get ranked mirror for attempt {attempt}: {net_err}");
-                            last_error = Some(ZvError::NetworkError(net_err));
-                            continue;
-                        }
+                // For subsequent attempts, get ranked mirrors and select the best available
+                match mirror_manager.get_random_mirror().await {
+                    Ok(ranked_mirror) => ranked_mirror,
+                    Err(net_err) => {
+                        tracing::error!(target: TARGET, "Failed to get ranked mirror for attempt {attempt}: {net_err}");
+                        last_error = Some(ZvError::NetworkError(net_err));
+                        continue;
                     }
+                }
             }; // end select_mirror
 
             tracing::trace!(target: TARGET, "Using mirror: {} (rank: {}) for attempt {}/{}", 
                          selected_mirror.base_url, selected_mirror.rank, attempt, max_retries);
 
             // Attempt download with this mirror
-            match selected_mirror.download(
+            match selected_mirror
+                .download(
                     &self.client,
                     semver_version,
                     zig_tarball,
@@ -228,7 +230,8 @@ impl ZvNetwork {
                     size,
                     &progress_handle,
                 )
-                .await {
+                .await
+            {
                 Ok(()) => {
                     // Download successful, move files to final location
                     match move_to_final_location(&temp_tarball_path, &final_tarball_path).await {
@@ -287,7 +290,7 @@ impl ZvNetwork {
                     };
 
                     // Update mirror ranking on disk
-                    if let Err(e) =  mirror_manager.save_index_to_disk().await {
+                    if let Err(e) = mirror_manager.save_index_to_disk().await {
                         tracing::debug!(target: TARGET, "Failed to update mirror ranking after successful download: {} - Rankings may not persist", e);
                     } else {
                         tracing::trace!(target: TARGET, "Successfully updated and persisted mirror rankings");
@@ -298,7 +301,7 @@ impl ZvNetwork {
                 Err(err) => {
                     tracing::warn!(target: TARGET, "Download attempt {}/{} failed with mirror {} (rank: {}): {}", 
                                  attempt, max_retries, selected_mirror.base_url, selected_mirror.rank, err);
-                    
+
                     // Demote the failed mirror and save rankings
                     let old_rank = selected_mirror.rank;
                     selected_mirror.demote();
@@ -313,10 +316,7 @@ impl ZvNetwork {
                     }
 
                     // Clean up temporary files after download
-                    remove_files(&[
-                        temp_tarball_path.as_path(),
-                        temp_minisig_path.as_path(),
-                    ]).await;
+                    remove_files(&[temp_tarball_path.as_path(), temp_minisig_path.as_path()]).await;
 
                     last_error = Some(err.into());
 
@@ -337,7 +337,10 @@ impl ZvNetwork {
         tracing::error!(target: TARGET, "All {} download attempts failed for {} - exhausted all retry options", max_retries, zig_tarball);
 
         // Ensure progress handle is properly finished with error context
-        match progress_handle.finish_with_error(&format!("Download failed after {} attempts", max_retries)).await {
+        match progress_handle
+            .finish_with_error(&format!("Download failed after {} attempts", max_retries))
+            .await
+        {
             Ok(()) => {
                 tracing::debug!(target: TARGET, "Progress handle finished with error message");
             }
@@ -347,10 +350,7 @@ impl ZvNetwork {
         }
 
         // Final cleanup attempt for any remaining temporary files
-        remove_files(&[
-            temp_tarball_path.as_path(),
-            temp_minisig_path.as_path(),
-        ]).await;
+        remove_files(&[temp_tarball_path.as_path(), temp_minisig_path.as_path()]).await;
 
         let final_error = last_error.unwrap_or_else(|| {
             tracing::error!(target: TARGET, "No specific error recorded - this indicates a critical issue with mirror availability");
@@ -358,8 +358,6 @@ impl ZvNetwork {
         });
         Err(final_error)
     }
-
-
 
     /// Checks if the given version is valid by checking it against the index
     pub async fn validate_semver(
@@ -432,13 +430,13 @@ impl ZvNetwork {
                                 .filter(|cached_version| *cached_version == partial_master_version)
                                 .map(|_| cached_master.clone())
                         })
-                    {
-                        tracing::debug!(
-                            target: "zv::network::fetch_master_version",
-                            "Partial fetch version matches cached version, using cache"
-                        );
-                        return Ok(cached_master);
-                    }
+                {
+                    tracing::debug!(
+                        target: "zv::network::fetch_master_version",
+                        "Partial fetch version matches cached version, using cache"
+                    );
+                    return Ok(cached_master);
+                }
 
                 tracing::debug!(
                     target: "zv::network::fetch_master_version",
@@ -560,7 +558,7 @@ impl ZvNetwork {
         expected_size: u64,
     ) -> Result<ZigDownload, ZvError> {
         const TARGET: &str = "zv::network::direct_download";
-        
+
         tracing::debug!(target: TARGET, "Starting direct download from ziglang.org");
         tracing::debug!(target: TARGET, "Tarball URL: {}", tarball_url);
         tracing::debug!(target: TARGET, "Minisig URL: {}", minisig_url);
@@ -577,7 +575,7 @@ impl ZvNetwork {
 
         let final_tarball_path = self.download_cache.join(zig_tarball);
         let final_minisig_path = self.download_cache.join(format!("{}.minisig", zig_tarball));
-        
+
         let progress_handle = ProgressHandle::spawn();
 
         // Phase 1: Download tarball directly from ziglang.org
@@ -603,7 +601,10 @@ impl ZvNetwork {
 
         // Phase 3: Download minisig file directly from ziglang.org
         tracing::debug!(target: TARGET, "Downloading signature file directly from {}", minisig_url);
-        if let Err(e) = progress_handle.update("Downloading signature file...").await {
+        if let Err(e) = progress_handle
+            .update("Downloading signature file...")
+            .await
+        {
             tracing::warn!(target: TARGET, "Failed to update progress for minisig download: {} - continuing", e);
         }
 
@@ -626,7 +627,10 @@ impl ZvNetwork {
         crate::app::minisign::verify_minisign_signature(&final_tarball_path, &final_minisig_path)?;
 
         // Finish progress reporting
-        if let Err(e) = progress_handle.finish("Download and verification completed").await {
+        if let Err(e) = progress_handle
+            .finish("Download and verification completed")
+            .await
+        {
             tracing::debug!(target: TARGET, "Failed to finish progress handle: {} - This is non-critical", e);
         }
 
@@ -650,7 +654,6 @@ pub(crate) fn create_client() -> Result<reqwest::Client> {
         .map_err(|e| ZvError::NetworkError(NetErr::Reqwest(e)))
         .wrap_err("Failed to build HTTP client")
 }
-
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum PartialFetchError {
@@ -779,7 +782,7 @@ fn try_extract_complete_master(json_text: &str) -> Result<ZigRelease> {
     let end_pos = end_pos.ok_or_else(|| {
         eyre!(
             "Could not find end of master object (brace_count: {}, partial_length: {}, in_string: {})", 
-            brace_count, 
+            brace_count,
             after_colon.len(),
             in_string
         )

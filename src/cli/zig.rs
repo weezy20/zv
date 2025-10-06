@@ -107,7 +107,7 @@ async fn find_zig_for_version(zig_version: &ZigVersion) -> crate::Result<PathBuf
             Err(e) => {
                 tracing::warn!("Failed to install zig version {}: {}", resolved_version, e);
                 tracing::warn!("Retrying with community mirrors...");
-                
+
                 // We need to re-resolve the version since install_release consumed to_install
                 let resolved_version_retry = resolve_zig_version(&mut app, zig_version).await
                     .map_err(|e| {
@@ -121,13 +121,17 @@ async fn find_zig_for_version(zig_version: &ZigVersion) -> crate::Result<PathBuf
                             _ => e,
                         }
                     })?;
-                
+
                 app.install_release(false).await.map_err(|e| {
-                    eyre!("Failed to download & install zig version {}: {}", resolved_version_retry, e)
+                    eyre!(
+                        "Failed to download & install zig version {}: {}",
+                        resolved_version_retry,
+                        e
+                    )
                 })?
             }
         };
-        
+
         Ok(zig_exe)
     }
 }
@@ -141,10 +145,11 @@ async fn find_default_zig() -> crate::Result<PathBuf> {
             shell: None,
         })
         .await
-            && let Some(zig_path) = app.zv_zig() {
-                tracing::trace!(target: "zig", "Using zv-managed zig at {}", zig_path.display());
-                return Ok(zig_path);
-            }
+        && let Some(zig_path) = app.zv_zig()
+    {
+        tracing::trace!(target: "zig", "Using zv-managed zig at {}", zig_path.display());
+        return Ok(zig_path);
+    }
     bail!("Could not find zig executable")
 }
 

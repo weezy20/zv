@@ -35,9 +35,10 @@ pub(crate) fn supports_interactive_prompts() -> bool {
 
     // Check for non-interactive terminals
     if let Ok(term) = std::env::var("TERM")
-        && term == "dumb" {
-            return false;
-        }
+        && term == "dumb"
+    {
+        return false;
+    }
 
     // Additional environment checks
     if std::env::var("DEBIAN_FRONTEND").as_deref() == Ok("noninteractive") {

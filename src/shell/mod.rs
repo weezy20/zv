@@ -229,9 +229,10 @@ impl Shell {
 
                 // Try XDG_CONFIG_HOME/fish/conf.d/zv.fish
                 if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME")
-                    && !xdg_config.is_empty() {
-                        fish_files.push(PathBuf::from(xdg_config).join("fish/conf.d/zv.fish"));
-                    }
+                    && !xdg_config.is_empty()
+                {
+                    fish_files.push(PathBuf::from(xdg_config).join("fish/conf.d/zv.fish"));
+                }
 
                 // Always include ~/.config/fish/conf.d/zv.fish as fallback
                 fish_files.push(rc_file(".config/fish/conf.d/zv.fish"));
@@ -245,9 +246,10 @@ impl Shell {
 
                 // Try XDG_CONFIG_HOME/nushell/config.nu
                 if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME")
-                    && !xdg_config.is_empty() {
-                        nu_files.push(PathBuf::from(xdg_config).join("nushell/config.nu"));
-                    }
+                    && !xdg_config.is_empty()
+                {
+                    nu_files.push(PathBuf::from(xdg_config).join("nushell/config.nu"));
+                }
 
                 // Always include ~/.config/nushell/config.nu as fallback
                 nu_files.push(rc_file(".config/nushell/config.nu"));
@@ -286,7 +288,12 @@ impl Shell {
     }
 
     /// Generate shell-specific environment content using templates
-    pub fn generate_env_content(&self, zv_dir: &str, zv_bin_path: &str, export_zv_dir: bool) -> String {
+    pub fn generate_env_content(
+        &self,
+        zv_dir: &str,
+        zv_bin_path: &str,
+        export_zv_dir: bool,
+    ) -> String {
         use crate::shell::path_utils::escape_path_for_shell;
 
         // Escape paths for shell-specific safety
@@ -334,7 +341,12 @@ impl Shell {
     }
 
     /// Generate shell-specific cleanup content using templates
-    pub fn generate_cleanup_content(&self, zv_dir: &str, zv_bin_path: &str, export_zv_dir: bool) -> String {
+    pub fn generate_cleanup_content(
+        &self,
+        zv_dir: &str,
+        zv_bin_path: &str,
+        export_zv_dir: bool,
+    ) -> String {
         use crate::shell::path_utils::escape_path_for_shell;
 
         // Escape paths for shell-specific safety
@@ -360,7 +372,9 @@ impl Shell {
         // Generate the ZV_DIR cleanup line based on shell type and whether it was exported
         let zv_dir_cleanup = if export_zv_dir {
             match self.shell_type {
-                ShellType::PowerShell => "Remove-Item Env:ZV_DIR -ErrorAction SilentlyContinue".to_string(),
+                ShellType::PowerShell => {
+                    "Remove-Item Env:ZV_DIR -ErrorAction SilentlyContinue".to_string()
+                }
                 ShellType::Cmd => "set \"ZV_DIR=\"".to_string(),
                 ShellType::Fish => "set -e ZV_DIR".to_string(),
                 ShellType::Nu => "$env.ZV_DIR = null".to_string(),
