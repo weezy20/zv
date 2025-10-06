@@ -60,6 +60,7 @@ indicatif = "0.18.0"
 futures = "0.3.31"
 rand = "0.9.2"
 url = "2.5.7"
+tempfile = "3.23.0"
 sha2 = "0.10.8"
 minisign-verify = "0.2.4"
 tar = "0.4.44"
@@ -120,5 +121,4 @@ lto = "thin"
 
 [dev-dependencies]
 serde_test = "1.0.177"
-tempfile = "3.23.0"
 wiremock = "0.6.2"

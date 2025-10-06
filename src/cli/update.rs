@@ -144,14 +144,17 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
             "→".blue()
         );
 
-        let temp_dir = std::env::temp_dir().join(format!("zv-update-{}", std::process::id()));
-        std::fs::create_dir_all(&temp_dir)?;
+        // Use tempfile to create a temporary directory that will be cleaned up automatically
+        let temp_dir = tempfile::Builder::new()
+            .prefix("zv-update-")
+            .tempdir()
+            .wrap_err("Failed to create temporary directory")?;
 
         // Download the binary to temp location
-        update_builder.bin_install_path(&temp_dir);
+        update_builder.bin_install_path(temp_dir.path());
         let status = update_builder.build()?.update()?;
 
-        let temp_binary = temp_dir.join(if cfg!(windows) { "zv.exe" } else { "zv" });
+        let temp_binary = temp_dir.path().join(if cfg!(windows) { "zv.exe" } else { "zv" });
 
         println!("  {} Downloaded version {}", "✓".green(), status.version());
         println!(
