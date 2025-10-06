@@ -20,17 +20,20 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
     // Build the updater using self_update crate
     let mut update_builder = self_update::backends::github::Update::configure();
 
+    let target = self_update::get_target();
+    
     update_builder
         .repo_owner("weezy20")
         .repo_name("zv")
         .bin_name("zv")
         .show_download_progress(true)
         .no_confirm(force)
-        .current_version(env!("CARGO_PKG_VERSION"));
+        .current_version(env!("CARGO_PKG_VERSION"))
+        .target(&target)
+        // cargo-dist puts binaries in a subdirectory like "zv-x86_64-unknown-linux-gnu/"
+        .bin_path_in_archive(&format!("zv-{}/zv", target));
 
-    let target = self_update::get_target();
     println!("  {} Detected platform: {}", "→".blue(), target);
-    update_builder.target(&target);
 
     // Check what version is available
     let latest_release = match update_builder.build()?.get_latest_release() {
