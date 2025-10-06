@@ -34,6 +34,10 @@ Windows (PowerShell):
 ```powershell
 irm https://github.com/weezy20/zv/releases/latest/download/zv-installer.ps1 | iex
 ```
+If you encounter an execution policy error, you can temporarily allow script execution by running:
+```powershell
+powershell -ExecutionPolicy Bypass -Command "irm https://github.com/weezy20/zv/releases/latest/download/zv-installer.ps1 | iex"
+```
 
 >The following methods use different package managers hence, after running `zv setup` we uninstall the package manager version of `zv` to avoid confusion. Since `zv` can self update for popular OS/Arch combinations, you don't need to rely on package managers for updates.
 
