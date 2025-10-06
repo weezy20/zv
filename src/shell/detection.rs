@@ -64,17 +64,19 @@ pub fn detect_shell() -> ShellType {
 fn detect_windows_shell() -> ShellType {
     // First, try to detect from parent process if we're in a TTY
     if is_tty()
-        && let Some(shell) = detect_shell_from_parent() {
-            return shell;
-        }
+        && let Some(shell) = detect_shell_from_parent()
+    {
+        return shell;
+    }
 
     // Check if we're in WSL (Unix shells on Windows)
     if std::env::var("WSL_DISTRO_NAME").is_ok() || std::env::var("WSL_INTEROP").is_ok() {
         // In WSL, SHELL variable should work properly
         if let Ok(shell) = std::env::var("SHELL")
-            && let Some(detected) = detect_shell_from_string(&shell) {
-                return detected;
-            }
+            && let Some(detected) = detect_shell_from_string(&shell)
+        {
+            return detected;
+        }
         return ShellType::Bash; // Default for WSL
     }
 
@@ -85,13 +87,15 @@ fn detect_windows_shell() -> ShellType {
 
     // Additional checks for specific environments
     if let Ok(term_program) = std::env::var("TERM_PROGRAM")
-        && term_program == "vscode" {
-            // VS Code integrated terminal, check for shell preference
-            if let Ok(vscode_shell) = std::env::var("VSCODE_SHELL_INTEGRATION")
-                && let Some(shell) = detect_shell_from_string(&vscode_shell) {
-                    return shell;
-                }
+        && term_program == "vscode"
+    {
+        // VS Code integrated terminal, check for shell preference
+        if let Ok(vscode_shell) = std::env::var("VSCODE_SHELL_INTEGRATION")
+            && let Some(shell) = detect_shell_from_string(&vscode_shell)
+        {
+            return shell;
         }
+    }
 
     // Default to PowerShell on modern Windows
     ShellType::PowerShell
@@ -101,25 +105,29 @@ fn detect_windows_shell() -> ShellType {
 fn detect_unix_shell() -> ShellType {
     // First, try to detect from parent process if we're in a TTY
     if is_tty()
-        && let Some(shell) = detect_shell_from_parent() {
-            return shell;
-        }
+        && let Some(shell) = detect_shell_from_parent()
+    {
+        return shell;
+    }
 
     // Use SHELL environment variable (standard on Unix-like systems)
     if let Ok(shell) = std::env::var("SHELL")
-        && let Some(detected) = detect_shell_from_string(&shell) {
-            return detected;
-        }
+        && let Some(detected) = detect_shell_from_string(&shell)
+    {
+        return detected;
+    }
 
     // Additional checks for specific environments
     if let Ok(term_program) = std::env::var("TERM_PROGRAM")
-        && term_program == "vscode" {
-            // VS Code integrated terminal, check for shell preference
-            if let Ok(vscode_shell) = std::env::var("VSCODE_SHELL_INTEGRATION")
-                && let Some(shell) = detect_shell_from_string(&vscode_shell) {
-                    return shell;
-                }
+        && term_program == "vscode"
+    {
+        // VS Code integrated terminal, check for shell preference
+        if let Ok(vscode_shell) = std::env::var("VSCODE_SHELL_INTEGRATION")
+            && let Some(shell) = detect_shell_from_string(&vscode_shell)
+        {
+            return shell;
         }
+    }
 
     ShellType::Unknown
 }

@@ -145,7 +145,8 @@ impl App {
         installed_path: Option<PathBuf>,
     ) -> crate::Result<()> {
         // Copy zv binary to bin directory if needed and regenerate shims
-        crate::cli::sync::check_and_update_zv_binary(self, false).await
+        crate::cli::sync::check_and_update_zv_binary(self, false)
+            .await
             .wrap_err("Failed to update zv binary")?;
 
         if let Some(p) = installed_path {

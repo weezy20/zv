@@ -9,9 +9,9 @@ use yansi::Paint;
 mod clean;
 mod init;
 mod list;
-mod update;
 mod setup;
 pub mod sync; // Make sync public so other modules can use check_and_update_zv_binary
+mod update;
 mod r#use;
 mod zig;
 mod zls;

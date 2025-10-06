@@ -1,9 +1,7 @@
 use crate::{ResolvedZigVersion, ZigVersion};
 use crate::{
     Result, ZvError,
-    app::{
-        App, CacheStrategy,
-    },
+    app::{App, CacheStrategy},
 };
 use color_eyre::eyre::{Context, eyre};
 use yansi::Paint;

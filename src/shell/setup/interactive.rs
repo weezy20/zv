@@ -1,9 +1,6 @@
 use std::path::PathBuf;
 
-use dialoguer::{
-    Select,
-    theme::Theme,
-};
+use dialoguer::{Select, theme::Theme};
 use yansi::Paint;
 
 use super::{SetupContext, SetupRequirements};
@@ -14,16 +11,16 @@ use crate::tools;
 pub enum InteractiveError {
     #[error("Interactive prompts not available in this environment: {reason}")]
     NotAvailable { reason: String },
-    
+
     #[error("User cancelled setup during interactive flow")]
     UserCancelled,
-    
+
     #[error("Dialoguer operation failed: {0}")]
     DialoguerError(#[from] dialoguer::Error),
-    
+
     #[error("TTY not available for interactive prompts")]
     NoTty,
-    
+
     #[error("Interactive setup failed: {reason}")]
     SetupFailed { reason: String },
 }
@@ -224,7 +221,9 @@ impl InteractiveSetup {
     pub async fn run_interactive_flow(&self) -> crate::Result<UserChoices> {
         // Check if interactive mode is available before proceeding
         if let Err(e) = self.validate_interactive_environment() {
-            return Err(crate::ZvError::shell_interactive_mode_not_available(&e.to_string()).into());
+            return Err(
+                crate::ZvError::shell_interactive_mode_not_available(&e.to_string()).into(),
+            );
         }
 
         // Wrap the interactive flow in error handling
@@ -237,18 +236,23 @@ impl InteractiveSetup {
             }
             Err(InteractiveError::DialoguerError(e)) => {
                 // Check if this is a user cancellation (Ctrl+C)
-                if matches!(e, dialoguer::Error::IO(ref io_err) if io_err.kind() == std::io::ErrorKind::Interrupted) {
-                        let _ = self.handle_cancellation();
-                        return Err(crate::ZvError::shell_user_cancelled_interactive().into());
-                    }
-                Err(crate::ZvError::shell_interactive_prompt_failed(&format!("Dialoguer error: {}", e)).into())
+                if matches!(e, dialoguer::Error::IO(ref io_err) if io_err.kind() == std::io::ErrorKind::Interrupted)
+                {
+                    let _ = self.handle_cancellation();
+                    return Err(crate::ZvError::shell_user_cancelled_interactive().into());
+                }
+                Err(crate::ZvError::shell_interactive_prompt_failed(&format!(
+                    "Dialoguer error: {}",
+                    e
+                ))
+                .into())
             }
             Err(InteractiveError::NotAvailable { reason }) => {
                 Err(crate::ZvError::shell_interactive_mode_not_available(&reason).into())
             }
-            Err(InteractiveError::NoTty) => {
-                Err(crate::ZvError::shell_interactive_mode_not_available("TTY not available").into())
-            }
+            Err(InteractiveError::NoTty) => Err(
+                crate::ZvError::shell_interactive_mode_not_available("TTY not available").into(),
+            ),
             Err(InteractiveError::SetupFailed { reason }) => {
                 Err(crate::ZvError::shell_interactive_prompt_failed(&reason).into())
             }
@@ -286,11 +290,12 @@ impl InteractiveSetup {
 
         // Check if TERM is set to something that supports interactive prompts
         if let Ok(term) = std::env::var("TERM")
-            && term == "dumb" {
-                return Err(InteractiveError::NotAvailable {
-                    reason: "TERM=dumb does not support interactive prompts".to_string(),
-                });
-            }
+            && term == "dumb"
+        {
+            return Err(InteractiveError::NotAvailable {
+                reason: "TERM=dumb does not support interactive prompts".to_string(),
+            });
+        }
 
         // Check for non-interactive frontend
         if std::env::var("DEBIAN_FRONTEND").as_deref() == Ok("noninteractive") {
@@ -307,13 +312,13 @@ impl InteractiveSetup {
         // Since we haven't made any system changes yet in the interactive phase,
         // we don't need to clean up anything. The actual system changes happen
         // in the execute_setup phase which comes after interactive confirmation.
-        
+
         println!();
         println!(
             "{}",
             Paint::yellow("⚠ Setup cancelled - no changes were made to your system")
         );
-        
+
         Ok(())
     }
 
@@ -367,7 +372,8 @@ impl InteractiveSetup {
 
     /// Prompt user for ZV_DIR choice with interactive dialog (public interface)
     fn prompt_zv_dir_choice(&self) -> crate::Result<ZvDirChoice> {
-        Ok(self.prompt_zv_dir_choice_internal()
+        Ok(self
+            .prompt_zv_dir_choice_internal()
             .map_err(|e| crate::ZvError::shell_interactive_prompt_failed(&e.to_string()))?)
     }
 
@@ -375,10 +381,11 @@ impl InteractiveSetup {
     fn prompt_zv_dir_choice_internal(&self) -> Result<ZvDirChoice, InteractiveError> {
         // Only show ZV_DIR prompt if we're using an environment variable
         if !self.context.using_env_var {
-            let default_path = self.get_default_zv_dir_path()
-                .map_err(|e| InteractiveError::SetupFailed { 
-                    reason: format!("Failed to get default ZV_DIR: {}", e) 
-                })?;
+            let default_path =
+                self.get_default_zv_dir_path()
+                    .map_err(|e| InteractiveError::SetupFailed {
+                        reason: format!("Failed to get default ZV_DIR: {}", e),
+                    })?;
             return Ok(ZvDirChoice::UseDefault(default_path));
         }
 
@@ -392,10 +399,11 @@ impl InteractiveSetup {
 
         // Get current and default paths
         let current_path = self.context.app.path().clone();
-        let default_path = self.get_default_zv_dir_path()
-            .map_err(|e| InteractiveError::SetupFailed { 
-                reason: format!("Failed to get default ZV_DIR: {}", e) 
-            })?;
+        let default_path =
+            self.get_default_zv_dir_path()
+                .map_err(|e| InteractiveError::SetupFailed {
+                    reason: format!("Failed to get default ZV_DIR: {}", e),
+                })?;
 
         // If current path is the same as default, no need to prompt
         if current_path == default_path {
@@ -449,7 +457,9 @@ impl InteractiveSetup {
             .default(default_index)
             .interact()
             .map_err(|e| match e {
-                dialoguer::Error::IO(io_err) if io_err.kind() == std::io::ErrorKind::Interrupted => {
+                dialoguer::Error::IO(io_err)
+                    if io_err.kind() == std::io::ErrorKind::Interrupted =>
+                {
                     InteractiveError::UserCancelled
                 }
                 _ => InteractiveError::DialoguerError(e),
@@ -497,7 +507,8 @@ impl InteractiveSetup {
 
     /// Prompt user for PATH modification choice with interactive dialog (public interface)
     fn prompt_path_choice(&self) -> crate::Result<PathChoice> {
-        Ok(self.prompt_path_choice_internal()
+        Ok(self
+            .prompt_path_choice_internal()
             .map_err(|e| crate::ZvError::shell_interactive_prompt_failed(&e.to_string()))?)
     }
 
@@ -555,7 +566,9 @@ impl InteractiveSetup {
                 Paint::new("Method:").bold(),
                 Paint::dim("Shell profile modification")
             );
-            if let super::PathAction::GenerateEnvFile { rc_file, .. } = &self.requirements.path_action {
+            if let super::PathAction::GenerateEnvFile { rc_file, .. } =
+                &self.requirements.path_action
+            {
                 println!(
                     "  {} {}",
                     Paint::new("Profile:").bold(),
@@ -587,7 +600,9 @@ impl InteractiveSetup {
             .default(0) // Proceed is the default option
             .interact()
             .map_err(|e| match e {
-                dialoguer::Error::IO(io_err) if io_err.kind() == std::io::ErrorKind::Interrupted => {
+                dialoguer::Error::IO(io_err)
+                    if io_err.kind() == std::io::ErrorKind::Interrupted =>
+                {
                     InteractiveError::UserCancelled
                 }
                 _ => InteractiveError::DialoguerError(e),
@@ -722,18 +737,14 @@ pub fn apply_user_choices(
 pub fn handle_interactive_error(error: &crate::ZvError) -> Option<String> {
     match error {
         crate::ZvError::ShellError(shell_err) => match shell_err {
-            crate::types::error::ShellErr::InteractiveModeNotAvailable { reason } => {
-                Some(format!(
-                    "Interactive mode not available ({}). Use --no-interactive flag to skip interactive prompts.",
-                    reason
-                ))
-            }
-            crate::types::error::ShellErr::InteractivePromptFailed { reason } => {
-                Some(format!(
-                    "Interactive prompts failed ({}). Try running with --no-interactive flag.",
-                    reason
-                ))
-            }
+            crate::types::error::ShellErr::InteractiveModeNotAvailable { reason } => Some(format!(
+                "Interactive mode not available ({}). Use --no-interactive flag to skip interactive prompts.",
+                reason
+            )),
+            crate::types::error::ShellErr::InteractivePromptFailed { reason } => Some(format!(
+                "Interactive prompts failed ({}). Try running with --no-interactive flag.",
+                reason
+            )),
             crate::types::error::ShellErr::UserCancelledInteractive => {
                 Some("Setup was cancelled. Run 'zv setup' again when ready to proceed.".to_string())
             }
@@ -749,7 +760,7 @@ pub fn is_recoverable_interactive_error(error: &crate::ZvError) -> bool {
         error,
         crate::ZvError::ShellError(
             crate::types::error::ShellErr::InteractiveModeNotAvailable { .. }
-            | crate::types::error::ShellErr::InteractivePromptFailed { .. }
+                | crate::types::error::ShellErr::InteractivePromptFailed { .. }
         )
     )
 }

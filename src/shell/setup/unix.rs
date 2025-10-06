@@ -181,9 +181,11 @@ pub async fn add_source_to_rc_file(
     }
 
     // Write the updated content with proper line endings
-    write_rc_file_with_line_endings(rc_file, &content).await.map_err(|e| {
-        crate::ZvError::shell_rc_file_modification_failed(&rc_file.display().to_string(), e)
-    })?;
+    write_rc_file_with_line_endings(rc_file, &content)
+        .await
+        .map_err(|e| {
+            crate::ZvError::shell_rc_file_modification_failed(&rc_file.display().to_string(), e)
+        })?;
 
     Ok(())
 }
@@ -255,9 +257,11 @@ pub async fn add_zv_dir_export_to_rc_file(
     }
 
     // Write the updated content with proper line endings
-    write_rc_file_with_line_endings(rc_file, &content).await.map_err(|e| {
-        crate::ZvError::shell_rc_file_modification_failed(&rc_file.display().to_string(), e)
-    })?;
+    write_rc_file_with_line_endings(rc_file, &content)
+        .await
+        .map_err(|e| {
+            crate::ZvError::shell_rc_file_modification_failed(&rc_file.display().to_string(), e)
+        })?;
 
     Ok(())
 }
@@ -293,7 +297,11 @@ pub async fn check_zv_dir_permanent_unix(shell: &Shell, zv_dir: &Path) -> crate:
             Some(path.trim_matches('"').trim_matches('\''))
         } else if let Some(path) = trimmed.strip_prefix("setenv ZV_DIR ") {
             Some(path.trim_matches('"').trim_matches('\''))
-        } else { trimmed.strip_prefix("$env.ZV_DIR = ").map(|path| path.trim_matches('"').trim_matches('\'')) };
+        } else {
+            trimmed
+                .strip_prefix("$env.ZV_DIR = ")
+                .map(|path| path.trim_matches('"').trim_matches('\''))
+        };
 
         if let Some(path) = exported_path {
             // Compare normalized paths
@@ -370,7 +378,14 @@ pub async fn execute_path_setup_unix(
     };
 
     // Generate the environment file
-    generate_unix_env_file(&context.shell, env_file_path, context.app.path(), bin_path, context.using_env_var).await?;
+    generate_unix_env_file(
+        &context.shell,
+        env_file_path,
+        context.app.path(),
+        bin_path,
+        context.using_env_var,
+    )
+    .await?;
 
     println!(
         "✓ Generated environment file at {}",
@@ -400,7 +415,10 @@ pub async fn execute_path_setup_unix(
     Ok(())
 }
 /// Write RC file content with proper line endings (always Unix LF for RC files)
-async fn write_rc_file_with_line_endings(file_path: &Path, content: &str) -> Result<(), std::io::Error> {
+async fn write_rc_file_with_line_endings(
+    file_path: &Path,
+    content: &str,
+) -> Result<(), std::io::Error> {
     // RC files should always use Unix line endings (LF) even on Windows
     // because they're shell configuration files
     let normalized_content = content.replace("\r\n", "\n");
