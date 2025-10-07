@@ -120,7 +120,7 @@ impl Template {
         let file_statuses = match &self.r#type {
             TemplateType::App { zon } => {
                 if !zon {
-                    self.instantiate_embedded()?
+                    self.instantiate_minimal()?
                 } else {
                     self.instantiate_package(app)?
                 }
@@ -143,7 +143,7 @@ impl Template {
         self.instantiate_with_context(pre_exec_msg, app)
     }
 
-    fn instantiate_embedded(&self) -> Result<Vec<FileStatus>, ZvError> {
+    fn instantiate_minimal(&self) -> Result<Vec<FileStatus>, ZvError> {
         let files = [
             ("main.zig", MAIN_ZIG),
             ("build.zig", BUILD_ZIG),
