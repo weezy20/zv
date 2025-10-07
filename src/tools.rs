@@ -212,14 +212,7 @@ pub fn files_have_same_hash(path1: &Path, path2: &Path) -> Result<bool> {
 }
 /// Build.zig.zon files have a .name field that expect an enum literal v0.13 onwards
 /// 0.12 expects a string literal. 0.11 and below don't come with build.zig.zon files.
-pub fn sanitize_build_zig_zon_name(
-    name: Option<&str>,
-    zig_version: Option<&Version>,
-) -> Option<String> {
-    if zig_version.is_none() {
-        return None;
-    }
-    let zig_version = zig_version.unwrap();
+pub fn sanitize_build_zig_zon_name(name: Option<&str>, zig_version: &Version) -> Option<String> {
     if *zig_version < Version::new(0, 12, 0) {
         return None; // build.zig.zon not supported below 0.12
     }
@@ -242,19 +235,15 @@ pub fn sanitize_build_zig_zon_name(
         .to_lowercase();
 
     // Must not start with a digit
-    if sanitized
-        .chars()
-        .next()
-        .map(|c| c.is_ascii_digit())
-        .unwrap_or(true)
+    if let Some(first_char) = sanitized.chars().next()
+        && first_char.is_ascii_digit()
     {
         sanitized = format!("_{}", sanitized);
     }
-
     // Check Zig version to decide output form
     Some(if *zig_version >= Version::new(0, 13, 0) {
-        format!(".{}", sanitized)
+        format!(".{sanitized}") // enum literal preferred from v0.13..
     } else {
-        format!("\"{}\"", sanitized) // only v0.12
+        format!("\"{sanitized}\"") // only v0.12
     })
 }

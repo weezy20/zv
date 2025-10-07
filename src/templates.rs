@@ -283,16 +283,18 @@ impl Template {
         use crc32fast::Hasher;
         use rand::Rng;
         let active_zig_version = if let Some(active_version) = app.get_active_version() {
-            active_version.version()
+            active_version.version().expect("valid semver")
         } else {
             // Get handle to the current runtime
             let handle = tokio::runtime::Handle::current();
             if let Ok(stable) =
                 handle.block_on(app.fetch_latest_version(crate::app::CacheStrategy::OnlyCache))
             {
-                Some(stable.resolved_version().version())
+                stable.resolved_version().version()
             } else {
-                None
+                return Err(ZvError::TemplateError(eyre!(
+                    "Failed to determine active Zig version for build.zig.zon generation"
+                )));
             }
         };
         let mut build_zig_zon = String::with_capacity(512);
@@ -301,17 +303,20 @@ impl Template {
         let project_name =
             tools::sanitize_build_zig_zon_name(self.name.as_deref(), active_zig_version);
 
-        if project_name.is_none() && active_zig_version.is_some() {
-            let zig_ver = active_zig_version.unwrap();
-            if zig_ver < &Version::new(0, 12, 0) {
+        if project_name.is_none() {
+            if active_zig_version < &Version::new(0, 12, 0) {
                 // build.zig.zon not supported below 0.12
                 return Err(ZvError::TemplateError(
                     eyre!("build.zig.zon files are only supported in Zig 0.12 and above").wrap_err(
-                        format!("Cannot generate build.zig.zon with Zig version {}", zig_ver),
+                        format!("Cannot generate build.zig.zon with Zig version {}", active_zig_version),
                     ),
                 ));
             }
         }
+        if let Some(name) = &project_name {
+            build_zig_zon.push_str(&format!("    .name = \"{}\",\n", name));
+        }
+
         // Generate fingerprint
         let mut rng = rand::rng();
         let id: u32 = rng.random_range(1..0xffffffff);
