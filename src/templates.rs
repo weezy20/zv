@@ -299,30 +299,33 @@ impl Template {
         };
         let mut build_zig_zon = String::with_capacity(512);
         build_zig_zon.push_str(".{\n");
-        // Determine project name. Returns None if zig version < 0.12 or if cwd is used then it returns ".app" or "app"
+        // Determine project name. Returns None if zig version < 0.12 or if cwd is used then it returns ".app" (minor version >= 13)
+        // or "app" (minor version ~ 12)
         let project_name =
             tools::sanitize_build_zig_zon_name(self.name.as_deref(), active_zig_version);
 
-        if project_name.is_none() {
-            if active_zig_version < &Version::new(0, 12, 0) {
-                // build.zig.zon not supported below 0.12
-                return Err(ZvError::TemplateError(
-                    eyre!("build.zig.zon files are only supported in Zig 0.12 and above").wrap_err(
-                        format!("Cannot generate build.zig.zon with Zig version {}", active_zig_version),
+        if active_zig_version < &Version::new(0, 12, 0) {
+            // build.zig.zon not supported below 0.12
+            return Err(ZvError::TemplateError(
+                eyre!("build.zig.zon files are only supported in Zig 0.12 and above").wrap_err(
+                    format!(
+                        "Cannot generate build.zig.zon with Zig version {}",
+                        active_zig_version
                     ),
-                ));
-            }
+                ),
+            ));
         }
-        if let Some(name) = &project_name {
-            build_zig_zon.push_str(&format!("    .name = \"{}\",\n", name));
-        }
+        let name = project_name
+            .expect("*zig_version < Version::new(0, 12, 0) checked during sanitization");
+
+        build_zig_zon.push_str(&format!("    .name = {name},\n"));
 
         // Generate fingerprint
         let mut rng = rand::rng();
         let id: u32 = rng.random_range(1..0xffffffff);
 
         let mut hasher = Hasher::new();
-        hasher.update(project_name.as_bytes());
+        hasher.update(name.as_bytes());
         let checksum = hasher.finalize();
 
         let fingerprint = ((id as u64) << 32) | (checksum as u64);
