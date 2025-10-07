@@ -118,7 +118,13 @@ impl Template {
         }
 
         let file_statuses = match &self.r#type {
-            TemplateType::Embedded => self.instantiate_embedded()?,
+            TemplateType::App { zon } => {
+                if !zon {
+                    self.instantiate_embedded()?
+                } else {
+                    self.instantiate_package(app)?
+                }
+            }
             // TemplateType::Minimal => self.instantiate_minimal()?,
             TemplateType::Zig(_zig_path) => self.instantiate_zig(app)?,
         };
@@ -147,26 +153,18 @@ impl Template {
         self.create_template_files(&files)
     }
 
-    // TODO: Add after zv 1.0.0
-    // fn instantiate_minimal(&self) -> Result<Vec<FileStatus>, ZvError> {
-    //     // First create embedded files
-    //     let mut file_statuses = self.instantiate_embedded()?;
+    fn instantiate_package(&self, app: &crate::App) -> Result<Vec<FileStatus>, ZvError> {
+        let build_zig_zon = generate_build_zig_zon(app)?;
 
-    //     // Then add minimal-specific files
-    //     let minimal_files = [("build.zig.zon", BUILD_ZIG_ZON)];
+        let files = [
+            ("main.zig", MAIN_ZIG),
+            ("build.zig", BUILD_ZIG),
+            (".gitignore", GITIGNORE_ZIG),
+            ("build.zig.zon", &build_zig_zon),
+        ];
 
-    //     match self.create_template_files(&minimal_files) {
-    //         Ok(mut minimal_statuses) => {
-    //             file_statuses.append(&mut minimal_statuses);
-    //             Ok(file_statuses)
-    //         }
-    //         Err(e) => {
-    //             // Rollback the embedded files that were created
-    //             self.rollback_created_files(&file_statuses);
-    //             Err(e)
-    //         }
-    //     }
-    // }
+        self.create_template_files(&files)
+    }
 
     /// Create template files with rollback
     fn create_template_files(&self, files: &[(&str, &str)]) -> Result<Vec<FileStatus>, ZvError> {
@@ -199,13 +197,13 @@ impl Template {
 
     /// Rollback strategy: remove created files or entire directory
     fn rollback_created_files(&self, file_statuses: &[FileStatus]) {
+        // If we created the directory, remove the entire directory
         if self
             .context
             .as_ref()
             .expect("Context should be initialized")
             .created_new_dir
         {
-            // If we created the directory, remove the entire directory
             let _ = rda::remove_dir_all(
                 &self
                     .context
@@ -289,11 +287,18 @@ impl Template {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+impl Default for TemplateType {
+    fn default() -> Self {
+        TemplateType::App { zon: false }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TemplateType {
     /// Barebones Template.
-    #[default]
-    Embedded,
+    App { zon: bool },
+    /// Library Template with src/root.zig, unit test, and build.zig.zon (optional)
+    // Library { zon: bool }, //TODO: unimplemented
     /// Minimal Template with build.zig.zon & unit test
     // Minimal, //TODO: unimplemented
     /// Template initialized using Zig
@@ -320,6 +325,11 @@ pub const BUILD_ZIG_ZON: &str = r#".{
     .dependencies = .{},
     .paths = .{""},
 }"#;
+
+fn generate_build_zig_zon(app: &crate::App) -> Result<String, ZvError> {
+    let _ = app;
+    Ok(BUILD_ZIG_ZON.to_string())
+}
 
 fn write_file(path: &Path, content: &str) -> Result<(), ZvError> {
     fs::File::create(path)

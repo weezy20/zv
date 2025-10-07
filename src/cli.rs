@@ -103,9 +103,19 @@ pub enum Commands {
         #[arg(
             long = "zig",
             short = 'z',
-            help = "Use `zig init` instead to create a new Zig project"
+            help = "Use `zig init` instead to create a new Zig project",
+            conflicts_with = "zon"
         )]
         zig: bool,
+        /// Create a Zig project with build.zig.zon file
+        #[arg(
+            alias = "package",
+            long = "zon",
+            short = 'p',
+            help = "Create a Zig project with build.zig.zon file",
+            conflicts_with = "zig"
+        )]
+        zon: bool,
     },
 
     /// Select which Zig version to use - master | latest | stable | <semver>,
@@ -214,7 +224,11 @@ pub enum Commands {
 impl Commands {
     pub(crate) async fn execute(self, mut app: App, using_env: bool) -> super::Result<()> {
         match self {
-            Commands::Init { project_name, zig } => {
+            Commands::Init {
+                project_name,
+                zig,
+                zon,
+            } => {
                 use crate::{Template, TemplateType};
                 if zig {
                     init::init_project(
@@ -236,7 +250,7 @@ impl Commands {
                         &app,
                     )
                 } else {
-                    init::init_project(Template::new(project_name, TemplateType::Embedded), &app)
+                    init::init_project(Template::new(project_name, TemplateType::App { zon }), &app)
                 }
             }
             Commands::Use {
