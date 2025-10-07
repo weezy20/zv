@@ -154,16 +154,20 @@ impl Template {
     }
 
     fn instantiate_package(&self, app: &crate::App) -> Result<Vec<FileStatus>, ZvError> {
-        let build_zig_zon = generate_build_zig_zon(app)?;
-
-        let files = [
+        let minimal_files = [
             ("main.zig", MAIN_ZIG),
             ("build.zig", BUILD_ZIG),
             (".gitignore", GITIGNORE_ZIG),
-            ("build.zig.zon", &build_zig_zon),
         ];
 
-        self.create_template_files(&files)
+        let build_zig_zon = generate_build_zig_zon(app, &minimal_files[..2])?;
+
+        self.create_template_files(&[
+            minimal_files[0],
+            minimal_files[1],
+            minimal_files[2],
+            ("build.zig.zon", &build_zig_zon),
+        ])
     }
 
     /// Create template files with rollback
@@ -320,13 +324,17 @@ pub const BUILD_ZIG: &str = include_str!(concat!(
 ));
 
 pub const BUILD_ZIG_ZON: &str = r#".{
-    .name = "project",
+    .name = "app",
     .version = "0.0.0",
     .dependencies = .{},
     .paths = .{""},
 }"#;
 
-fn generate_build_zig_zon(app: &crate::App) -> Result<String, ZvError> {
+fn generate_build_zig_zon(
+    app: &crate::App,
+    // List of path and file content pairs to be included in the build.zig.zon - we only care about the paths here
+    path_files: &[(&str, &str)],
+) -> Result<String, ZvError> {
     let _ = app;
     Ok(BUILD_ZIG_ZON.to_string())
 }
