@@ -48,7 +48,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::download::download_file_with_retries_standalone;
+use super::download::download_file;
 use super::{CacheStrategy, TARGET};
 use crate::{
     CfgErr, NetErr, ZvError,
@@ -164,7 +164,7 @@ impl Mirror {
         };
 
         // Phase 1: Download tarball
-        match download_file_with_retries_standalone(
+        match download_file(
             client,
             &tarball_url,
             tarball_path,
@@ -230,7 +230,7 @@ impl Mirror {
         }
 
         // For minisig, we don't have size info, so use 0
-        match download_file_with_retries_standalone(
+        match download_file(
             client,
             &minisig_url,
             minisig_path,

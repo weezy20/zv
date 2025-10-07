@@ -11,11 +11,11 @@ use crate::{NetErr, ZvError, app::utils::ProgressHandle};
 
 const TARGET: &str = "zv::network::download";
 
-/// Download a single file with HTTP status code handling (standalone version)
+/// Download a single file with HTTP status code handling
 ///
 /// This function handles the complete download process for a single file with comprehensive
 /// error handling and logging for different failure scenarios.
-pub(in crate::app::network) async fn download_file_with_retries_standalone(
+pub(in crate::app::network) async fn download_file(
     client: &reqwest::Client,
     url: &str,
     dest_path: &Path,
