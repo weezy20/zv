@@ -4,8 +4,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::ZvError;
+use crate::{ZvError, tools};
 use color_eyre::eyre::eyre;
+use semver::Version;
 
 #[derive(Debug, Clone)]
 pub enum FileStatus {
@@ -160,7 +161,7 @@ impl Template {
             (".gitignore", GITIGNORE_ZIG),
         ];
 
-        let build_zig_zon = generate_build_zig_zon(app, &minimal_files[..2])?;
+        let build_zig_zon = self.generate_build_zig_zon(app, &minimal_files[..2])?;
 
         self.create_template_files(&[
             minimal_files[0],
@@ -272,6 +273,60 @@ impl Template {
 
         Ok(file_statuses)
     }
+
+    fn generate_build_zig_zon(
+        &self,
+        app: &crate::App,
+        // List of path and file content pairs to be included in the build.zig.zon - we only care about the paths here
+        path_files: &[(&str, &str)],
+    ) -> Result<String, ZvError> {
+        use crc32fast::Hasher;
+        use rand::Rng;
+        let active_zig_version = if let Some(active_version) = app.get_active_version() {
+            active_version.version()
+        } else {
+            // Get handle to the current runtime
+            let handle = tokio::runtime::Handle::current();
+            if let Ok(stable) =
+                handle.block_on(app.fetch_latest_version(crate::app::CacheStrategy::OnlyCache))
+            {
+                Some(stable.resolved_version().version())
+            } else {
+                None
+            }
+        };
+        let mut build_zig_zon = String::with_capacity(512);
+        build_zig_zon.push_str(".{\n");
+        // Determine project name. Returns None if zig version < 0.12 or if cwd is used then it returns ".app" or "app"
+        let project_name =
+            tools::sanitize_build_zig_zon_name(self.name.as_deref(), active_zig_version);
+
+        if project_name.is_none() && active_zig_version.is_some() {
+            let zig_ver = active_zig_version.unwrap();
+            if zig_ver < &Version::new(0, 12, 0) {
+                // build.zig.zon not supported below 0.12
+                return Err(ZvError::TemplateError(
+                    eyre!("build.zig.zon files are only supported in Zig 0.12 and above").wrap_err(
+                        format!("Cannot generate build.zig.zon with Zig version {}", zig_ver),
+                    ),
+                ));
+            }
+        }
+        // Generate fingerprint
+        let mut rng = rand::rng();
+        let id: u32 = rng.random_range(1..0xffffffff);
+
+        let mut hasher = Hasher::new();
+        hasher.update(project_name.as_bytes());
+        let checksum = hasher.finalize();
+
+        let fingerprint = ((id as u64) << 32) | (checksum as u64);
+
+        // TODO: Use project_name, fingerprint, and path_files to generate actual build.zig.zon
+        let _ = (project_name, fingerprint, path_files);
+
+        Ok("BUILD_ZIG_ZON".to_string())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -322,22 +377,6 @@ pub const BUILD_ZIG: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/lean_build.zig"
 ));
-
-pub const BUILD_ZIG_ZON: &str = r#".{
-    .name = "app",
-    .version = "0.0.0",
-    .dependencies = .{},
-    .paths = .{""},
-}"#;
-
-fn generate_build_zig_zon(
-    app: &crate::App,
-    // List of path and file content pairs to be included in the build.zig.zon - we only care about the paths here
-    path_files: &[(&str, &str)],
-) -> Result<String, ZvError> {
-    let _ = app;
-    Ok(BUILD_ZIG_ZON.to_string())
-}
 
 fn write_file(path: &Path, content: &str) -> Result<(), ZvError> {
     fs::File::create(path)

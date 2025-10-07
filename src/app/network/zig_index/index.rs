@@ -170,7 +170,7 @@ impl IndexManager {
                 }
             }
             CacheStrategy::OnlyCache => {
-                // Use cached data if available, only fetch if no cache exists
+                // Use cached data if available, returns error if no cache exists
                 if self.index_path.is_file() {
                     let data =
                         tokio::fs::read_to_string(&self.index_path)

@@ -3,6 +3,7 @@ use color_eyre::{
     Result,
     eyre::{WrapErr, bail, eyre},
 };
+use semver::Version;
 use std::{
     borrow::Cow,
     io,
@@ -208,4 +209,52 @@ pub fn files_have_same_hash(path1: &Path, path2: &Path) -> Result<bool> {
     }
 
     Ok(calculate_file_hash(path1)? == calculate_file_hash(path2)?)
+}
+/// Build.zig.zon files have a .name field that expect an enum literal v0.13 onwards
+/// 0.12 expects a string literal. 0.11 and below don't come with build.zig.zon files.
+pub fn sanitize_build_zig_zon_name(
+    name: Option<&str>,
+    zig_version: Option<&Version>,
+) -> Option<String> {
+    if zig_version.is_none() {
+        return None;
+    }
+    let zig_version = zig_version.unwrap();
+    if *zig_version < Version::new(0, 12, 0) {
+        return None; // build.zig.zon not supported below 0.12
+    }
+
+    // Default .name
+    let default_name = "app";
+
+    // Extract and clean provided name
+    let raw = name.unwrap_or(default_name).trim();
+
+    // Basic normalization: lowercase and replace invalid chars
+    let mut sanitized = raw
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '_' => c,
+            '-' | ' ' | '.' => '_',
+            _ => '_', // fallback for all invalid chars
+        })
+        .collect::<String>()
+        .to_lowercase();
+
+    // Must not start with a digit
+    if sanitized
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_digit())
+        .unwrap_or(true)
+    {
+        sanitized = format!("_{}", sanitized);
+    }
+
+    // Check Zig version to decide output form
+    Some(if *zig_version >= Version::new(0, 13, 0) {
+        format!(".{}", sanitized)
+    } else {
+        format!("\"{}\"", sanitized) // only v0.12
+    })
 }
