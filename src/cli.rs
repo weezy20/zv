@@ -249,8 +249,10 @@ impl Commands {
                         ),
                         app,
                     )
+                    .await
                 } else {
                     init::init_project(Template::new(project_name, TemplateType::App { zon }), app)
+                        .await
                 }
             }
             Commands::Use {
