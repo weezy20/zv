@@ -196,8 +196,9 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
         // Download and replace the binary in place
         println!("  {} Downloading and installing update...", "→".blue());
 
-        download_and_replace_binary(&client, asset, &expected_zv_path, true).await
+        let _temp_dir = download_and_replace_binary(&client, asset, &expected_zv_path, true).await
             .wrap_err("Failed to update zv")?;
+        // Keep _temp_dir alive until after self_replace completes
 
         println!(
             "  {} Updated successfully to version {}!",
@@ -233,8 +234,9 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
             .join(if cfg!(windows) { "zv.exe" } else { "zv" });
 
         // Download the binary to temp location
-        download_and_replace_binary(&client, asset, &temp_binary, false).await
+        let _extract_temp_dir = download_and_replace_binary(&client, asset, &temp_binary, false).await
             .wrap_err("Failed to download binary to temporary location")?;
+        // Keep _extract_temp_dir alive until after copy completes
 
         println!("  {} Downloaded version {}", "✓".green(), latest_version);
         
@@ -301,12 +303,13 @@ async fn fetch_latest_release(client: &reqwest::Client) -> Result<GitHubRelease>
 }
 
 /// Download and extract/replace the binary from a GitHub release asset
+/// Returns the temporary directory handle to keep it alive until the caller is done
 async fn download_and_replace_binary(
     client: &reqwest::Client,
     asset: &GitHubAsset,
     target_path: &Path,
     use_self_replace: bool,
-) -> Result<()> {
+) -> Result<tempfile::TempDir> {
     // Create a temporary file for the download with the correct extension
     let temp_dir = tempfile::tempdir()
         .wrap_err("Failed to create temporary directory for download")?;
@@ -402,7 +405,7 @@ async fn download_and_replace_binary(
         }
     }
 
-    Ok(())
+    Ok(temp_extract_dir)
 }
 
 /// Dispatch extraction for zip/tar.xz/tar.gz
