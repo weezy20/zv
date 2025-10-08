@@ -305,7 +305,10 @@ impl Template {
             if let Ok(stable) =
                 handle.block_on(app.fetch_latest_version(crate::app::CacheStrategy::OnlyCache))
             {
-                tracing::debug!("Stable resolved version: {}", stable.resolved_version().version());
+                tracing::debug!(
+                    "Stable resolved version: {}",
+                    stable.resolved_version().version()
+                );
                 stable.resolved_version().version().clone()
             } else {
                 return Err(ZvError::TemplateError(eyre!(
@@ -323,7 +326,7 @@ impl Template {
             // build.zig.zon not supported below 0.12
             return Err(ZvError::TemplateError(
                 eyre!("build.zig.zon files are only supported in Zig 0.12 and above").wrap_err(
-                    format!(
+                    eyre!(
                         "Cannot generate build.zig.zon with Zig version {}",
                         active_zig_version
                     ),
