@@ -247,10 +247,10 @@ impl Commands {
                                 eyre!("No Zig executable found")
                             })?),
                         ),
-                        &app,
+                        app,
                     )
                 } else {
-                    init::init_project(Template::new(project_name, TemplateType::App { zon }), &app)
+                    init::init_project(Template::new(project_name, TemplateType::App { zon }), app)
                 }
             }
             Commands::Use {

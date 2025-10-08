@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{ZvError, tools};
+use crate::{App, ZvError, tools};
 use color_eyre::eyre::eyre;
 use semver::Version;
 
@@ -99,7 +99,7 @@ impl Template {
     pub fn instantiate_with_context(
         self,
         pre_exec_msg: Option<String>,
-        app: &crate::App,
+        app: App,
     ) -> Result<TemplateResult, ZvError> {
         if !self
             .context
@@ -139,7 +139,7 @@ impl Template {
     }
 
     /// Convenience method that handles directory preparation and instantiation
-    pub fn execute(mut self, app: &crate::App) -> Result<TemplateResult, ZvError> {
+    pub fn execute(mut self, app: App) -> Result<TemplateResult, ZvError> {
         let pre_exec_msg = self.prepare_directory()?;
         self.instantiate_with_context(pre_exec_msg, app)
     }
@@ -154,7 +154,7 @@ impl Template {
         self.create_template_files(&files)
     }
 
-    fn instantiate_package(&self, app: &crate::App) -> Result<Vec<FileStatus>, ZvError> {
+    fn instantiate_package(&self, app: App) -> Result<Vec<FileStatus>, ZvError> {
         let minimal_files = [
             ("main.zig", MAIN_ZIG),
             ("build.zig", BUILD_ZIG),
@@ -226,7 +226,7 @@ impl Template {
         }
     }
 
-    fn instantiate_zig(&self, app: &crate::App) -> Result<Vec<FileStatus>, ZvError> {
+    fn instantiate_zig(&self, app: App) -> Result<Vec<FileStatus>, ZvError> {
         let target_dir = &self.context.as_ref().unwrap().target_dir;
 
         // Get the zig path from the app
@@ -276,21 +276,21 @@ impl Template {
 
     fn generate_build_zig_zon(
         &self,
-        app: &crate::App,
+        mut app: App,
         // List of path and file content pairs to be included in the build.zig.zon - we only care about the paths here
         path_files: &[(&str, &str)],
     ) -> Result<String, ZvError> {
         use crc32fast::Hasher;
         use rand::Rng;
         let active_zig_version = if let Some(active_version) = app.get_active_version() {
-            active_version.version().expect("valid semver")
+            active_version.version().expect("valid semver").clone()
         } else {
             // Get handle to the current runtime
             let handle = tokio::runtime::Handle::current();
             if let Ok(stable) =
                 handle.block_on(app.fetch_latest_version(crate::app::CacheStrategy::OnlyCache))
             {
-                stable.resolved_version().version()
+                stable.resolved_version().version().clone()
             } else {
                 return Err(ZvError::TemplateError(eyre!(
                     "Failed to determine active Zig version for build.zig.zon generation"
@@ -302,9 +302,9 @@ impl Template {
         // Determine project name. Returns None if zig version < 0.12 or if cwd is used then it returns ".app" (minor version >= 13)
         // or "app" (minor version ~ 12)
         let project_name =
-            tools::sanitize_build_zig_zon_name(self.name.as_deref(), active_zig_version);
+            tools::sanitize_build_zig_zon_name(self.name.as_deref(), &active_zig_version);
 
-        if active_zig_version < &Version::new(0, 12, 0) {
+        if active_zig_version < Version::new(0, 12, 0) {
             // build.zig.zon not supported below 0.12
             return Err(ZvError::TemplateError(
                 eyre!("build.zig.zon files are only supported in Zig 0.12 and above").wrap_err(
