@@ -201,7 +201,7 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
         // Keep _temp_dir alive until after self_replace completes
 
         println!(
-            "  {} Updated successfully to version {}!",
+            "  {} Updated successfully to zv <{}>!",
             "✓".green(),
             latest_version
         );
@@ -261,7 +261,7 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
             }
         }
         
-        println!("  {} Updated successfully to version {}!", "✓".green(), latest_version);
+        println!("  {} Updated successfully to zv <{}>!", "✓".green(), latest_version);
         
         // Regenerate shims to ensure zig/zls symlinks point to the updated zv binary
         if let Some(install) = app.toolchain_manager.get_active_install() {
