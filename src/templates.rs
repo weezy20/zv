@@ -4,8 +4,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::ZvError;
+use crate::{App, ZvError, suggest, tools};
 use color_eyre::eyre::eyre;
+use semver::Version;
 
 #[derive(Debug, Clone)]
 pub enum FileStatus {
@@ -98,7 +99,7 @@ impl Template {
     pub fn instantiate_with_context(
         self,
         pre_exec_msg: Option<String>,
-        app: &crate::App,
+        app: App,
     ) -> Result<TemplateResult, ZvError> {
         if !self
             .context
@@ -118,7 +119,30 @@ impl Template {
         }
 
         let file_statuses = match &self.r#type {
-            TemplateType::Embedded => self.instantiate_embedded()?,
+            TemplateType::App { zon } => {
+                if let Some(zig_version) = app.get_active_version()
+                    && let Some(v) = zig_version.version()
+                {
+                    let mszv = include_str!(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/templates/.zigversion"
+                    ));
+                    if v < &Version::parse(mszv).expect("valid .zigversion") {
+                        tools::warn(
+                            "Minimal build.zig template may not work with active zig version < 0.14.0",
+                        );
+                        suggest!(
+                            "Consider using {} to initialize the project with `zig init` instead.",
+                            cmd = "zv init -z"
+                        );
+                    }
+                }
+                if !zon {
+                    self.instantiate_minimal()?
+                } else {
+                    self.instantiate_package(app)?
+                }
+            }
             // TemplateType::Minimal => self.instantiate_minimal()?,
             TemplateType::Zig(_zig_path) => self.instantiate_zig(app)?,
         };
@@ -132,12 +156,12 @@ impl Template {
     }
 
     /// Convenience method that handles directory preparation and instantiation
-    pub fn execute(mut self, app: &crate::App) -> Result<TemplateResult, ZvError> {
+    pub fn execute(mut self, app: App) -> Result<TemplateResult, ZvError> {
         let pre_exec_msg = self.prepare_directory()?;
         self.instantiate_with_context(pre_exec_msg, app)
     }
 
-    fn instantiate_embedded(&self) -> Result<Vec<FileStatus>, ZvError> {
+    fn instantiate_minimal(&self) -> Result<Vec<FileStatus>, ZvError> {
         let files = [
             ("main.zig", MAIN_ZIG),
             ("build.zig", BUILD_ZIG),
@@ -147,26 +171,22 @@ impl Template {
         self.create_template_files(&files)
     }
 
-    // TODO: Add after zv 1.0.0
-    // fn instantiate_minimal(&self) -> Result<Vec<FileStatus>, ZvError> {
-    //     // First create embedded files
-    //     let mut file_statuses = self.instantiate_embedded()?;
+    fn instantiate_package(&self, app: App) -> Result<Vec<FileStatus>, ZvError> {
+        let minimal_files = [
+            ("main.zig", MAIN_ZIG),
+            ("build.zig", BUILD_ZIG),
+            (".gitignore", GITIGNORE_ZIG),
+        ];
 
-    //     // Then add minimal-specific files
-    //     let minimal_files = [("build.zig.zon", BUILD_ZIG_ZON)];
+        let build_zig_zon = self.generate_build_zig_zon(app, &minimal_files[..2])?;
 
-    //     match self.create_template_files(&minimal_files) {
-    //         Ok(mut minimal_statuses) => {
-    //             file_statuses.append(&mut minimal_statuses);
-    //             Ok(file_statuses)
-    //         }
-    //         Err(e) => {
-    //             // Rollback the embedded files that were created
-    //             self.rollback_created_files(&file_statuses);
-    //             Err(e)
-    //         }
-    //     }
-    // }
+        self.create_template_files(&[
+            minimal_files[0],
+            minimal_files[1],
+            minimal_files[2],
+            ("build.zig.zon", &build_zig_zon),
+        ])
+    }
 
     /// Create template files with rollback
     fn create_template_files(&self, files: &[(&str, &str)]) -> Result<Vec<FileStatus>, ZvError> {
@@ -199,13 +219,13 @@ impl Template {
 
     /// Rollback strategy: remove created files or entire directory
     fn rollback_created_files(&self, file_statuses: &[FileStatus]) {
+        // If we created the directory, remove the entire directory
         if self
             .context
             .as_ref()
             .expect("Context should be initialized")
             .created_new_dir
         {
-            // If we created the directory, remove the entire directory
             let _ = rda::remove_dir_all(
                 &self
                     .context
@@ -223,7 +243,7 @@ impl Template {
         }
     }
 
-    fn instantiate_zig(&self, app: &crate::App) -> Result<Vec<FileStatus>, ZvError> {
+    fn instantiate_zig(&self, app: App) -> Result<Vec<FileStatus>, ZvError> {
         let target_dir = &self.context.as_ref().unwrap().target_dir;
 
         // Get the zig path from the app
@@ -270,6 +290,91 @@ impl Template {
 
         Ok(file_statuses)
     }
+
+    fn generate_build_zig_zon(
+        &self,
+        mut app: App,
+        // List of path and file content pairs to be included in the build.zig.zon - we only care about the paths here
+        path_files: &[(&str, &str)],
+    ) -> Result<String, ZvError> {
+        let active_zig_version = if let Some(active_version) = app.get_active_version() {
+            active_version.version().expect("valid semver").clone()
+        } else {
+            // Get handle to the current runtime
+            let handle = tokio::runtime::Handle::current();
+            if let Ok(stable) =
+                handle.block_on(app.fetch_latest_version(crate::app::CacheStrategy::OnlyCache))
+            {
+                tracing::debug!(
+                    "Stable resolved version: {}",
+                    stable.resolved_version().version()
+                );
+                stable.resolved_version().version().clone()
+            } else {
+                return Err(ZvError::TemplateError(eyre!(
+                    "Failed to determine active Zig version for build.zig.zon generation"
+                )));
+            }
+        };
+        let mut build_zig_zon = String::with_capacity(512);
+        // Determine project name. Returns None if zig version < 0.12 or if cwd is used then it returns ".app" (minor version >= 13)
+        // or "app" (minor version ~ 12)
+        let project_name =
+            tools::sanitize_build_zig_zon_name(self.name.as_deref(), &active_zig_version);
+
+        if active_zig_version < Version::new(0, 12, 0) {
+            // build.zig.zon not supported below 0.12
+            return Err(ZvError::TemplateError(
+                eyre!("build.zig.zon files are only supported in Zig 0.12 and above").wrap_err(
+                    eyre!(
+                        "Cannot generate build.zig.zon with Zig version {}",
+                        active_zig_version
+                    ),
+                ),
+            ));
+        }
+        let name = project_name
+            .expect("*zig_version < Version::new(0, 12, 0) checked during sanitization");
+
+        build_zig_zon.push_str(".{\n");
+        build_zig_zon.push_str(&format!("    .name = {name},\n"));
+        build_zig_zon.push_str("    .version = \"0.0.0\",\n");
+
+        // Generate fingerprint using the same algorithm as Zig (https://github.com/ziglang/zig/blob/60a332406c10be922568e11dcc5144bb0f2d7a85/src/Package.zig#L17-L22)
+        // Fingerprint is a packed struct(u64) with:
+        // - id: random u32 in range [1, 0xfffffffe]
+        // - checksum: CRC32 hash of the name
+        use crc32fast::Hasher;
+        use rand::Rng;
+
+        let mut rng = rand::rng();
+        let id: u32 = rng.random_range(1..0xffffffff); // Excludes 0xffffffff
+
+        // Get the name without quotes/dots for CRC32 (strip the formatting)
+        let name_for_hash = name.trim_start_matches('.').trim_matches('"');
+        let mut hasher = Hasher::new();
+        hasher.update(name_for_hash.as_bytes());
+        let checksum = hasher.finalize();
+
+        // Pack as little-endian: id in lower 32 bits, checksum in upper 32 bits
+        // This matches Zig's packed struct(u64) layout
+        let fingerprint: u64 = (id as u64) | ((checksum as u64) << 32);
+
+        build_zig_zon.push_str(&format!("    .fingerprint = 0x{fingerprint:x},\n"));
+
+        build_zig_zon.push_str(&format!(
+            "    .minimum_zig_version = \"{active_zig_version}\",\n"
+        ));
+
+        build_zig_zon.push_str("    .dependencies = .{},\n");
+        build_zig_zon.push_str("    .paths = .{\n");
+        for (path, _) in path_files {
+            build_zig_zon.push_str(&format!("        \"{path}\",\n"));
+        }
+        build_zig_zon.push_str("    },\n");
+        build_zig_zon.push_str("}\n");
+        Ok(build_zig_zon)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -289,11 +394,18 @@ impl Template {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+impl Default for TemplateType {
+    fn default() -> Self {
+        TemplateType::App { zon: false }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TemplateType {
     /// Barebones Template.
-    #[default]
-    Embedded,
+    App { zon: bool },
+    /// Library Template with src/root.zig, unit test, and build.zig.zon (optional)
+    // Library { zon: bool }, //TODO: unimplemented
     /// Minimal Template with build.zig.zon & unit test
     // Minimal, //TODO: unimplemented
     /// Template initialized using Zig
@@ -313,13 +425,6 @@ pub const BUILD_ZIG: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/lean_build.zig"
 ));
-
-pub const BUILD_ZIG_ZON: &str = r#".{
-    .name = "project",
-    .version = "0.0.0",
-    .dependencies = .{},
-    .paths = .{""},
-}"#;
 
 fn write_file(path: &Path, content: &str) -> Result<(), ZvError> {
     fs::File::create(path)
