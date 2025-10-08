@@ -172,7 +172,12 @@ You can customize this by setting the `ZV_DIR` environment variable.
 zv init [project_name]                 # Create a new Zig project with a name
 zv init                                # Create a new Zig project in the current working directory
 zv init --zig | -z                     # Create a new Zig project using the standard template provided by `zig init`
+# Create a zig project with build.zig.zon:
+zv init -p | --zon | --package  <?name>      # Create a zig project in current directory with build.zig.zon or with name if provided
+# Note: this requires an active zig version >= 0.12.0 where build.zig.zon support was introduced
+
 ```
+>Note: `zv init` will use the `build.zig` that's present in [templates/build.zig](templates/lean_build.zig) which is checked to work against minimum zig version specified in [templates/.zigversion](templates/.zigversion). If you want to use a different zig version, set it as active zig and use `zv init -z` or `zig init` directly.
 
 ## Use `zv` as your Zig compiler toolchain manager:
 
