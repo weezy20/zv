@@ -305,6 +305,7 @@ impl Template {
             if let Ok(stable) =
                 handle.block_on(app.fetch_latest_version(crate::app::CacheStrategy::OnlyCache))
             {
+                tracing::debug!("Stable resolved version: {}", stable.resolved_version().version());
                 stable.resolved_version().version().clone()
             } else {
                 return Err(ZvError::TemplateError(eyre!(
