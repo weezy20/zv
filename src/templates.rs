@@ -133,7 +133,7 @@ impl Template {
                         );
                         suggest!(
                             "Consider using {} to initialize the project with `zig init` instead.",
-                            cmd = "zv init --z"
+                            cmd = "zv init -z"
                         );
                     }
                 }
