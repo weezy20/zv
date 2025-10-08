@@ -48,13 +48,7 @@ sysinfo = "0.37.2"
 dunce = "1.0.5"
 crc32fast = "1.5.0"
 rda = { package = "remove_dir_all", version = "1.0.0", features = ["parallel"] }
-self_update = { version = "0.42.0", default-features = false, features = [
-    "archive-tar",
-    "archive-zip",
-    "compression-flate2",
-    "compression-zip-deflate",
-    "rustls",
-] }
+self-replace = "1.5.0"
 cfg-if = "1.0.3"
 indicatif = "0.18.0"
 futures = "0.3.31"
@@ -66,6 +60,7 @@ minisign-verify = "0.2.4"
 tar = "0.4.44"
 xz2 = "0.1.7"
 zip = "5.1.1"
+flate2 = "1.0.35"
 dialoguer = { version = "0.12.0", default-features = false }
 
 [target."cfg(windows)".dependencies]
