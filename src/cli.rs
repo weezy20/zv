@@ -104,18 +104,18 @@ pub enum Commands {
             long = "zig",
             short = 'z',
             help = "Use `zig init` instead to create a new Zig project",
-            conflicts_with = "zon"
+            conflicts_with = "package"
         )]
         zig: bool,
-        /// Create a Zig project with build.zig.zon file
+        /// Enable package support via build.zig.zon file
         #[arg(
-            alias = "package",
-            long = "zon",
+            long = "package",
+            alias = "zon",
             short = 'p',
-            help = "Create a Zig project with build.zig.zon file",
+            help = "Enable package support via build.zig.zon file",
             conflicts_with = "zig"
         )]
-        zon: bool,
+        package: bool,
     },
 
     /// Select which Zig version to use - master | latest | stable | <semver>,
@@ -227,7 +227,7 @@ impl Commands {
             Commands::Init {
                 project_name,
                 zig,
-                zon,
+                package: zon,
             } => {
                 use crate::{Template, TemplateType};
                 if zig {
