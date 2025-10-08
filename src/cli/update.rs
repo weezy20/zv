@@ -354,15 +354,23 @@ async fn download_and_replace_binary(
     extract(&temp_file_path, temp_extract_dir.path()).await?;
 
     // Find the zv binary in the extracted files
-    // Based on cargo-dist, it should be in a subdirectory like "zv-{target}/zv"
+    // Based on cargo-dist:
+    // - Unix archives (.tar.gz/.tar.xz) have a subdirectory like "zv-{target}/zv"
+    // - Windows archives (.zip) extract files directly to the temp directory
     let target = option_env!("CARGO_CFG_TARGET_TRIPLE")
         .unwrap_or_else(|| get_release_target().unwrap_or("unknown"));
     let binary_name = if cfg!(windows) { "zv.exe" } else { "zv" };
     
-    let extracted_binary = temp_extract_dir
+    // Try the subdirectory structure first (Unix archives)
+    let mut extracted_binary = temp_extract_dir
         .path()
         .join(format!("zv-{target}"))
         .join(binary_name);
+
+    // If not found, try the root of the extraction directory (Windows zip)
+    if !extracted_binary.is_file() {
+        extracted_binary = temp_extract_dir.path().join(binary_name);
+    }
 
     if !extracted_binary.is_file() {
         println!("  {} Debug: Listing extracted contents...", "→".blue());
