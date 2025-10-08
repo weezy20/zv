@@ -209,6 +209,7 @@ pub enum Commands {
         no_interactive: bool,
     },
     /// Update zv to the latest release only if present in GH Releases:
+    #[clap(alias = "upgrade")]
     Update {
         #[arg(
             long,
