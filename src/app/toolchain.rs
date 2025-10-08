@@ -6,7 +6,7 @@ use tokio::fs;
 const TARGET: &str = "zv::app::toolchain";
 
 /// An entry representing an installed Zig version
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ZigInstall {
     /// The semantic version of this installation
     pub version: semver::Version,
@@ -36,21 +36,76 @@ impl ToolchainManager {
         let installations =
             Self::scan_installations(&versions_path).map_err(ZvError::ZvAppInitError)?;
 
+        // Helper function to find the best fallback version from installations
+        let find_fallback_install = |installations: &[ZigInstall]| -> Option<ZigInstall> {
+            if installations.is_empty() {
+                return None;
+            }
+
+            // Prefer highest stable version over master
+            let fallback = installations
+                .iter()
+                .filter(|i| !i.is_master)
+                .max_by(|a, b| a.version.cmp(&b.version))
+                .or_else(|| {
+                    // If no stable versions, use highest master version
+                    installations
+                        .iter()
+                        .filter(|i| i.is_master)
+                        .max_by(|a, b| a.version.cmp(&b.version))
+                })
+                .cloned();
+
+            if let Some(ref zi) = fallback {
+                let json =
+                    serde_json::to_vec(zi).expect("ZigInstall serialization should never fail");
+                if let Err(e) = std::fs::write(&active_file, json) {
+                    tracing::error!(target: TARGET, "Failed to write fallback active install to file: {}", e);
+                }
+            }
+
+            fallback
+        };
+
         // load last active install
         let active_install = if active_file.is_file() {
             match fs::read(&active_file).await {
-                Ok(bytes) => serde_json::from_slice(&bytes).ok(),
-                Err(err) => {
+                Ok(bytes) => {
+                    match serde_json::from_slice::<ZigInstall>(&bytes) {
+                        Ok(zig_install) => {
+                            // Verify the install exists in our installations list
+                            let exists = installations.iter().any(|i| *i == zig_install);
+
+                            if exists {
+                                Some(zig_install)
+                            } else {
+                                tracing::debug!(target: TARGET,
+                                    "Active install from file not found in installations, using fallback"
+                                );
+                                find_fallback_install(&installations)
+                            }
+                        }
+                        Err(err) => {
+                            tracing::debug!(target: TARGET,
+                                "Failed to deserialize active install file {}: {}, using fallback",
+                                active_file.display(),
+                                err
+                            );
+                            find_fallback_install(&installations)
+                        }
+                    }
+                }
+                Err(io_err) => {
                     tracing::debug!(target: TARGET,
-                        "Failed to read active install file {}: {}",
+                        "Failed to read active install file {}: {}, using fallback",
                         active_file.display(),
-                        err
+                        io_err
                     );
-                    None
+                    find_fallback_install(&installations)
                 }
             }
         } else {
-            None
+            find_fallback_install(&installations)
         };
 
         let toolchain_manager = Self {
@@ -315,7 +370,7 @@ impl ToolchainManager {
             .ok_or_else(|| eyre!("Version {} is not installed", version))?;
 
         tracing::debug!(target: TARGET, install_path = %install.path.display(), "Found installation, deploying shims");
-        self.deploy_shims(install, false).await?;
+        self.deploy_shims(install, false, false).await?;
 
         let json = serde_json::to_vec(&install)
             .wrap_err("Failed to serialize Zig install for active file")?;
@@ -345,7 +400,7 @@ impl ToolchainManager {
             is_master: rzv.is_master(),
         };
         tracing::debug!(target: TARGET, "Deploying shims");
-        self.deploy_shims(&zig_install, false).await?;
+        self.deploy_shims(&zig_install, false, false).await?;
         let json = serde_json::to_vec(&zig_install)
             .wrap_err("Failed to serialize Zig install for active file")?;
         fs::write(&self.active_file, json).await?;
@@ -403,7 +458,12 @@ impl ToolchainManager {
     }
 
     /// Deploys or updates the proxy shims (zig, zls) in bin/ that link to zv
-    pub async fn deploy_shims(&self, install: &ZigInstall, skip_zv_bin_check: bool) -> Result<()> {
+    pub async fn deploy_shims(
+        &self,
+        install: &ZigInstall,
+        skip_zv_bin_check: bool,
+        quiet: bool,
+    ) -> Result<()> {
         let zv_path = if !skip_zv_bin_check {
             // Validate that zv binary exists
             self.validate_zv_binary()?
@@ -416,8 +476,9 @@ impl ToolchainManager {
         self.create_shim(&zv_path, Shim::Zig).await?;
         // TODO: ZLS support is unimplemented
         // self.create_shim(&zv_path, Shim::Zls).await?;
-
-        tracing::info!(target: TARGET, "Successfully deployed zig version {}", install.version);
+        if !quiet {
+            tracing::info!(target: TARGET, "Successfully deployed zig version {}", install.version);
+        }
         Ok(())
     }
 
