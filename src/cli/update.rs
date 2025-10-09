@@ -304,6 +304,39 @@ async fn download_and_replace_binary(
     file.sync_all().await.wrap_err("Failed to sync download file to disk")?;
     drop(file); // Close the file
 
+    // Fetch sha256 checksum file:
+    println!("  {} Verifying checksum...", "→".blue());
+    let checksum_url = format!("{}.sha256", &asset.browser_download_url);
+    let checksum_response = client
+        .get(&checksum_url)
+        .send()
+        .await
+        .wrap_err("Failed to download checksum file")?;
+
+    if !checksum_response.status().is_success() {
+        bail!("Failed to download checksum file: HTTP {}", checksum_response.status());
+    }
+
+    let checksum_content = checksum_response
+        .text()
+        .await
+        .wrap_err("Failed to read checksum file content")?;
+
+    // Parse the checksum file - it typically contains "<hash>  <filename>" or just "<hash>"
+    // For ours the format contains "<hash> *<filename>"
+    // We extract just the hash part (first 64 hex characters)
+    let expected_shasum = checksum_content
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| eyre!("Checksum file is empty or invalid"))?
+        .trim();
+
+    // Verify the downloaded file's checksum
+    utils::verify_checksum(&temp_file_path, expected_shasum)
+        .await
+        .wrap_err("Checksum verification failed - the downloaded file may be corrupted")?;
+
+    println!("  {} Checksum verified successfully", "✓".green());
     println!("  {} Extracting binary...", "→".blue());
 
     // Extract the binary from the archive
