@@ -549,3 +549,80 @@ async fn extract_zip(archive: &Path, dest: &Path) -> Result<()> {
     .await
     .wrap_err("zip extraction task panicked")?
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_latest_version_stable_only() {
+        let releases = vec![
+            GitHubRelease {
+                tag_name: "v0.3.1".to_string(),
+                assets: vec![],
+            },
+            GitHubRelease {
+                tag_name: "v0.4.0-rc1".to_string(),
+                assets: vec![],
+            },
+            GitHubRelease {
+                tag_name: "v0.4.0-rc.2".to_string(),
+                assets: vec![],
+            },
+        ];
+
+        let (_, version) = find_latest_version(&releases, false).unwrap();
+        assert_eq!(version.to_string(), "0.3.1");
+    }
+
+    #[test]
+    fn test_find_latest_version_with_prerelease() {
+        let releases = vec![
+            GitHubRelease {
+                tag_name: "v0.3.1".to_string(),
+                assets: vec![],
+            },
+            GitHubRelease {
+                tag_name: "v0.4.0-rc.1".to_string(),
+                assets: vec![],
+            },
+            GitHubRelease {
+                tag_name: "v0.4.0-rc.2".to_string(),
+                assets: vec![],
+            },
+        ];
+
+        let (_, version) = find_latest_version(&releases, true).unwrap();
+        assert_eq!(version.to_string(), "0.4.0-rc.2");
+    }
+
+    #[test]
+    fn test_find_latest_version_mixed_order() {
+        let releases = vec![
+            GitHubRelease {
+                tag_name: "v0.4.0-rc.1".to_string(),
+                assets: vec![],
+            },
+            GitHubRelease {
+                tag_name: "v0.3.1".to_string(),
+                assets: vec![],
+            },
+            GitHubRelease {
+                tag_name: "v0.4.0-rc.2".to_string(),
+                assets: vec![],
+            },
+            GitHubRelease {
+                tag_name: "v0.5.0".to_string(),
+                assets: vec![],
+            },
+        ];
+
+        // Should find latest stable (0.5.0) when not including prereleases
+        let (_, version) = find_latest_version(&releases, false).unwrap();
+        assert_eq!(version.to_string(), "0.5.0");
+
+        // Should find latest overall (0.5.0) when including prereleases
+        let (_, version) = find_latest_version(&releases, true).unwrap();
+        assert_eq!(version.to_string(), "0.5.0");
+    }
+}
