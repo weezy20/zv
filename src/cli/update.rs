@@ -13,37 +13,6 @@ use tokio::task;
 use crate::{App, tools, app::utils};
 use walkdir::WalkDir;
 
-/// Get the target triple used in GitHub release assets for the current platform
-/// This is a fallback when CARGO_CFG_TARGET_TRIPLE is not available (which should be rare).
-/// The targets here match the CI generated artifacts.
-fn get_release_target() -> Option<&'static str> {
-    use target_lexicon::{HOST, Architecture, OperatingSystem};
-
-    match (HOST.architecture, HOST.operating_system) {
-        // macOS
-        (Architecture::X86_64, OperatingSystem::Darwin(_)) => {
-            Some("x86_64-apple-darwin")
-        }
-        (Architecture::Aarch64(_), OperatingSystem::Darwin(_)) => {
-            Some("aarch64-apple-darwin")
-        }
-        // Windows
-        (Architecture::X86_64, OperatingSystem::Windows) => {
-            Some("x86_64-pc-windows-msvc")
-        }
-        // Linux
-        (Architecture::X86_64, OperatingSystem::Linux) => {
-            // Default to GNU libc, could also be musl but GNU is more common
-            Some("x86_64-unknown-linux-gnu")
-        }
-        (Architecture::Aarch64(_), OperatingSystem::Linux) => {
-            Some("aarch64-unknown-linux-gnu")
-        }
-        // Unsupported combinations
-        _ => None,
-    }
-}
-
 #[derive(Deserialize, Debug)]
 struct GitHubRelease {
     tag_name: String,
@@ -63,12 +32,10 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
         .expect("CARGO_PKG_VERSION should be valid semver");
 
     println!("Current version: {}", Paint::yellow(&current_version));
-
+    
     // Get target triple for this platform
-    // Prefer the compilation target (embedded at build time) over runtime detection
-    let target = option_env!("CARGO_CFG_TARGET_TRIPLE")
-        .or_else(|| get_release_target())
-        .ok_or_else(|| eyre!("Unable to determine target platform for updates"))?;
+    // The TARGET env var is set at compile time via build.rs
+    let target = env!("TARGET");
 
     println!("  {} Detected platform: {}", "→".blue(), target);
 
@@ -360,8 +327,7 @@ async fn download_and_replace_binary(
     // Based on cargo-dist:
     // - Unix archives (.tar.gz/.tar.xz) have a subdirectory like "zv-{target}/zv"
     // - Windows archives (.zip) extract files directly to the temp directory
-    let target = option_env!("CARGO_CFG_TARGET_TRIPLE")
-        .unwrap_or_else(|| get_release_target().unwrap_or("unknown"));
+    let target = env!("TARGET");
     let binary_name = if cfg!(windows) { "zv.exe" } else { "zv" };
     
     // Try the subdirectory structure first (Unix archives)
