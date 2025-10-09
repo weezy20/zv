@@ -8,6 +8,7 @@
 - **`zv init`**: Generate `.zigversion` file to specify minimum Zig version for builds
 - **Self-update**: Refactored using `self-replace` dependency with SHA256 verification for downloaded github assets (#21). This also removes a ton of dependencies.
 - **Self-update**: Added `upgrade` as alias for `update` command
+- **Self-update**: Added `--rc` flag to include pre-release versions when checking for updates
 
 ## Bug Fixes
 
