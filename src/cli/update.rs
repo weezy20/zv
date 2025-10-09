@@ -201,7 +201,7 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
         // Keep _temp_dir alive until after self_replace completes
 
         println!(
-            "  {} Updated successfully to zv <{}>!",
+            "  {} Updated successfully to zv {}!",
             "✓".green(),
             latest_version
         );
@@ -260,9 +260,13 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
                 tools::warn(format!("Failed to set binary permissions: {}", e));
             }
         }
-        
-        println!("  {} Updated successfully to zv <{}>!", "✓".green(), latest_version);
-        
+
+        println!(
+            "  {} Updated successfully to zv {}!",
+            "✓".green(),
+            latest_version
+        );
+
         // Regenerate shims to ensure zig/zls symlinks point to the updated zv binary
         if let Some(install) = app.toolchain_manager.get_active_install() {
             println!("  {} Regenerating shims...", "→".blue());
@@ -274,8 +278,7 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
         }
     }
 
-    println!();
-    println!("{}", "Update completed successfully!".green().bold());
+    println!("\n{} {}", "✓".green(), "Update complete".green().bold());
 
     Ok(())
 }
