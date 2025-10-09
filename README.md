@@ -128,7 +128,7 @@ From now on, use the `zv` installed in `ZV_DIR/bin`.
 
 **Simple update (Recommended):**
 ```sh
-zv update
+zv update # Installs latest stable release on supported targets*.
 ```
 
 This command checks for new releases on GitHub and updates `zv` in place. It works whether you're running from `ZV_DIR/bin/zv` or from an external location (like cargo install). 
@@ -136,6 +136,8 @@ This command checks for new releases on GitHub and updates `zv` in place. It wor
 **Options:**
 ```sh
 zv update --force  # Force reinstall even if already on the latest version
+zv upgrade         # Alias for update
+zv update --rc     # Update to latest pre-release (release candidate) version
 ```
 
 
@@ -206,7 +208,7 @@ zv rm master                           # Clean up the `master` branch toolchain.
 zv rm master --outdated                # Clean up any older master versions in the master folder that don't match latest `master`
 zv setup                               # Set up shell environment for zv with interactive prompts (use --no-interactive for automation)
 zv sync                                # Resync community mirrors list from [ziglang.org/download/community-mirrors.txt]; also force resync of index to fetch latest nightly builds. Replaces `ZV_DIR/bin/zv` if outdated against current invocation.
-zv update                              # Update zv to the latest release only if present in GH Releases: https://github.com/weezy20/zv/releases
+zv upgrade | update                    # Update zv to the latest release only if present in GH Releases: https://github.com/weezy20/zv/releases
 zv help                                # Detailed instructions for zv. Use `--help` for long help or `-h` for short help with a subcommand.
 ```
 
