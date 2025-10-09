@@ -13,19 +13,19 @@ use tokio::task;
 use crate::{App, tools, app::utils};
 use walkdir::WalkDir;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct GitHubRelease {
     tag_name: String,
     assets: Vec<GitHubAsset>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct GitHubAsset {
     name: String,
     browser_download_url: String,
 }
 
-pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
+pub async fn update_zv(app: &mut App, force: bool, include_prerelease: bool) -> Result<()> {
     println!("{}", "Checking for zv updates...".cyan());
 
     let current_version = Version::parse(env!("CARGO_PKG_VERSION"))
@@ -39,24 +39,36 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
 
     println!("  {} Detected platform: {}", "→".blue(), target);
 
-    // Fetch latest release from GitHub API
+    // Fetch releases from GitHub API
     let client = reqwest::Client::builder()
         .user_agent(utils::zv_agent())
         .connect_timeout(Duration::from_secs(*crate::app::FETCH_TIMEOUT_SECS))
         .build()
         .wrap_err("Failed to create HTTP client")?;
 
-    let latest_release = fetch_latest_release(&client).await
-        .wrap_err("Failed to fetch latest release from GitHub")?;
+    let (latest_release, latest_version) = if include_prerelease {
+        let releases = fetch_all_releases(&client).await
+            .wrap_err("Failed to fetch releases from GitHub")?;
+        
+        find_latest_version(&releases, true)
+            .wrap_err("No valid releases found")?
+    } else {
+        let release = fetch_latest_release(&client).await
+            .wrap_err("Failed to fetch latest release from GitHub")?;
+        
+        // Parse version from tag_name (remove 'v' prefix if present)
+        let version_str = release.tag_name.strip_prefix('v').unwrap_or(&release.tag_name);
+        let version = Version::parse(version_str)
+            .wrap_err("Failed to parse latest version from GitHub release tag")?;
+        
+        (release, version)
+    };
 
-    // Parse version from tag_name (remove 'v' prefix if present)
-    let version_str = latest_release.tag_name.strip_prefix('v').unwrap_or(&latest_release.tag_name);
-    let latest_version = Version::parse(version_str)
-        .wrap_err("Failed to parse latest version from GitHub release tag")?;
-
+    let release_type = if latest_version.pre.is_empty() { "stable" } else { "pre-release" };
     println!(
-        "  {} Latest version from releases:  {}",
+        "  {} Latest {} version from releases:  {}",
         "→".blue(),
+        release_type,
         Paint::green(&latest_version)
     );
 
@@ -259,6 +271,58 @@ async fn fetch_latest_release(client: &reqwest::Client) -> Result<GitHubRelease>
         .wrap_err("Failed to parse GitHub API response")?;
 
     Ok(release)
+}
+
+/// Fetch all releases from GitHub API (including pre-releases)
+async fn fetch_all_releases(client: &reqwest::Client) -> Result<Vec<GitHubRelease>> {
+    let url = "https://api.github.com/repos/weezy20/zv/releases";
+    
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .wrap_err("Failed to send request to GitHub API")?;
+
+    if !response.status().is_success() {
+        bail!("GitHub API request failed with status: {}", response.status());
+    }
+
+    let releases = response
+        .json::<Vec<GitHubRelease>>()
+        .await
+        .wrap_err("Failed to parse GitHub API response")?;
+
+    Ok(releases)
+}
+
+/// Find the latest version from a list of releases
+/// If include_prerelease is true, considers all releases; otherwise only stable releases
+fn find_latest_version(releases: &[GitHubRelease], include_prerelease: bool) -> Result<(GitHubRelease, Version)> {
+    let mut best_release: Option<&GitHubRelease> = None;
+    let mut best_version: Option<Version> = None;
+
+    for release in releases {
+        // Parse version from tag_name (remove 'v' prefix if present)
+        let version_str = release.tag_name.strip_prefix('v').unwrap_or(&release.tag_name);
+        
+        if let Ok(version) = Version::parse(version_str) {
+            // Skip pre-releases if not requested
+            if !include_prerelease && !version.pre.is_empty() {
+                continue;
+            }
+
+            // Check if this is the best version so far
+            if best_version.as_ref().map_or(true, |best| version > *best) {
+                best_version = Some(version);
+                best_release = Some(release);
+            }
+        }
+    }
+
+    match (best_release, best_version) {
+        (Some(release), Some(version)) => Ok((release.clone(), version)),
+        _ => bail!("No valid releases found"),
+    }
 }
 
 /// Download and extract/replace the binary from a GitHub release asset

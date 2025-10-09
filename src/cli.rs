@@ -212,6 +212,11 @@ pub enum Commands {
             help = "Force update even if the current version is the latest"
         )]
         force: bool,
+        #[arg(
+            long,
+            help = "Include pre-release versions when checking for updates"
+        )]
+        rc: bool,
     },
     /// Synchronize index, mirrors list and metadata for zv. Also replaces `ZV_DIR/bin/zv` if outdated against current invocation.
     Sync,
@@ -272,7 +277,7 @@ impl Commands {
                 no_interactive,
             } => setup::setup_shell(&mut app, using_env, dry_run, no_interactive).await,
             Commands::Sync => sync::sync(&mut app).await,
-            Commands::Update { force } => update::update_zv(&mut app, force).await,
+            Commands::Update { force, rc } => update::update_zv(&mut app, force, rc).await,
         }
     }
 }
