@@ -94,7 +94,26 @@ async fn clean_specific_versions(app: &mut App, versions: &[ZigVersion]) -> crat
                     install.is_master && &install.version == target_v
                 }
                 ZigVersion::Master(None) => install.is_master, // Match any master version
-                _ => false,
+                ZigVersion::Stable(Some(target_v)) | ZigVersion::Latest(Some(target_v)) => {
+                    // Stable@version and Latest@version should match like regular semver
+                    !install.is_master && &install.version == target_v
+                }
+                ZigVersion::Stable(None) | ZigVersion::Latest(None) => {
+                    // Match the highest stable version (non-master)
+                    !install.is_master && {
+                        // Find the highest stable version among all installations
+                        let highest_stable = installations
+                            .iter()
+                            .filter(|i| !i.is_master)
+                            .max_by(|a, b| a.version.cmp(&b.version));
+                        
+                        if let Some(highest) = highest_stable {
+                            &install.version == &highest.version
+                        } else {
+                            false
+                        }
+                    }
+                }
             }
         });
 
