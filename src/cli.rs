@@ -203,7 +203,7 @@ pub enum Commands {
         )]
         no_interactive: bool,
     },
-    /// Update zv to the latest release only if present in GH Releases:
+    /// Update zv to using Github releases.
     #[clap(alias = "upgrade")]
     Update {
         #[arg(
