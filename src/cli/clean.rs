@@ -94,7 +94,26 @@ async fn clean_specific_versions(app: &mut App, versions: &[ZigVersion]) -> crat
                     install.is_master && &install.version == target_v
                 }
                 ZigVersion::Master(None) => install.is_master, // Match any master version
-                _ => false,
+                ZigVersion::Stable(Some(target_v)) | ZigVersion::Latest(Some(target_v)) => {
+                    // Stable@version and Latest@version should match like regular semver
+                    !install.is_master && &install.version == target_v
+                }
+                ZigVersion::Stable(None) | ZigVersion::Latest(None) => {
+                    // Match the highest stable version (non-master)
+                    !install.is_master && {
+                        // Find the highest stable version among all installations
+                        let highest_stable = installations
+                            .iter()
+                            .filter(|i| !i.is_master)
+                            .max_by(|a, b| a.version.cmp(&b.version));
+                        
+                        if let Some(highest) = highest_stable {
+                            &install.version == &highest.version
+                        } else {
+                            false
+                        }
+                    }
+                }
             }
         });
 
@@ -253,9 +272,7 @@ async fn clean_except_versions(app: &mut App, except_versions: &[ZigVersion]) ->
             println!("{} Kept: {}", Paint::green("✓"), display_name);
         } else {
             // Check if we're removing the currently active version
-            let is_active = active_install.is_some_and(|active| {
-                active.version == install.version && active.is_master == install.is_master
-            });
+            let is_active = active_install.is_some_and(|active| active == install);
 
             if is_active {
                 active_version_removed = true;
@@ -390,9 +407,7 @@ async fn clean_outdated_master(app: &mut App) -> crate::Result<()> {
     for install in &master_installs {
         if install.version != latest_master.version {
             // Check if we're removing the currently active version
-            let is_active = active_install.is_some_and(|active| {
-                active.version == install.version && active.is_master == install.is_master
-            });
+            let is_active = active_install.is_some_and(|active| active == install);
 
             if is_active {
                 active_version_removed = true;
@@ -633,10 +648,6 @@ pub async fn clean_all(app: &mut App) -> crate::Result<()> {
 /// Priority: highest stable > highest master > none
 async fn handle_active_version_removal(app: &mut App) -> crate::Result<()> {
     println!();
-    println!(
-        "{} The currently active Zig version was removed.",
-        Paint::yellow("⚠")
-    );
 
     // Get all remaining installed versions
     let installations = ToolchainManager::scan_installations(&app.versions_path)?;
@@ -650,41 +661,34 @@ async fn handle_active_version_removal(app: &mut App) -> crate::Result<()> {
     }
 
     // Find the best replacement version using priority: highest stable > highest master > none
-    let mut stable_versions: Vec<_> = installations
+    let new_active = installations
         .iter()
         .filter(|install| !install.is_master)
-        .collect();
-    let mut master_versions: Vec<_> = installations
-        .iter()
-        .filter(|install| install.is_master)
-        .collect();
-
-    // Sort by version (highest first)
-    stable_versions.sort_by(|a, b| b.version.cmp(&a.version));
-    master_versions.sort_by(|a, b| b.version.cmp(&a.version));
-
-    let new_active = if let Some(highest_stable) = stable_versions.first() {
-        // Use highest stable version
-        Some((highest_stable, false)) // false = not master
-    } else {
-        master_versions
-            .first()
-            .map(|highest_master| (highest_master, true))
-    };
+        .max_by(|a, b| a.version.cmp(&b.version))
+        .map(|install| (install, false))
+        .or_else(|| {
+            installations
+                .iter()
+                .filter(|install| install.is_master)
+                .max_by(|a, b| a.version.cmp(&b.version))
+                .map(|install| (install, true))
+        });
 
     match new_active {
         Some((install, is_master)) => {
-            let display_name = if is_master {
-                format!("master/{}", install.version)
+            if is_master {
+                println!(
+                    "{} Automatically setting new active version: master <{}>",
+                    Paint::cyan("→"),
+                    Paint::yellow(&install.version)
+                );
             } else {
-                install.version.to_string()
+                println!(
+                    "{} Automatically setting new active version: <{}>",
+                    Paint::cyan("→"),
+                    Paint::yellow(&install.version)
+                );
             };
-
-            println!(
-                "{} Automatically setting new active version: {}",
-                Paint::cyan("→"),
-                display_name
-            );
 
             // Create ResolvedZigVersion for the new active version
             let resolved_version = if is_master {
@@ -702,20 +706,19 @@ async fn handle_active_version_removal(app: &mut App) -> crate::Result<()> {
                     println!(
                         "{} Successfully set active version to: {}",
                         Paint::green("✓"),
-                        display_name
+                        Paint::yellow(&install.version),
                     );
                 }
                 Err(e) => {
                     eprintln!(
-                        "{} Failed to set active version to {}: {}",
+                        "{} Failed to set active version to {}: {e}",
                         Paint::red("✗"),
-                        display_name,
-                        e
+                        Paint::yellow(&install.version),
                     );
                     println!(
                         "{} Run 'zv use {}' to manually set the active version.",
                         Paint::cyan("ℹ"),
-                        display_name
+                        Paint::yellow(&install.version),
                     );
                 }
             }
@@ -725,6 +728,7 @@ async fn handle_active_version_removal(app: &mut App) -> crate::Result<()> {
                 "{} No Zig versions remain installed. Run 'zv use <version>' to install and activate a version.",
                 Paint::cyan("ℹ")
             );
+            let _ = app.toolchain_manager.clear_active_version();
         }
     }
 

@@ -54,11 +54,6 @@ pub async fn zv_main() -> super::Result<()> {
     if using_env {
         tracing::debug!("Using ZV_DIR from environment: {}", zv_base_path.display());
     }
-    // TODO: Allow force flags to skip prompts in ZvCli
-    // let allow_shell = zv_cli.allow_shell || zv_cli.force;
-    // let force = zv_cli.force;
-    // let g = Genie { allow_shell, force };
-
     let app = App::init(UserConfig {
         zv_base_path,
         shell: Some(Shell::detect()),

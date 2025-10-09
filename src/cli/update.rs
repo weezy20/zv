@@ -228,7 +228,7 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
     if let Some(install) = app.toolchain_manager.get_active_install() {
         println!("  {} Regenerating shims...", "→".blue());
         app.toolchain_manager
-            .deploy_shims(install, true)
+            .deploy_shims(install, true, false)
             .await
             .wrap_err("Failed to regenerate shims after update")?;
         println!("  {} Shims regenerated successfully", "✓".green());

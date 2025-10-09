@@ -43,6 +43,7 @@ pub async fn sync(app: &mut crate::App) -> crate::Result<()> {
 /// Public API for checking and updating the zv binary
 /// This can be called from setup, sync, or other commands
 pub async fn check_and_update_zv_binary(app: &crate::App, quiet: bool) -> crate::Result<()> {
+    tracing::debug!(target: "zv::cli::sync", "Checking for zv binary updates");
     check_and_update_zv_binary_impl(app, quiet, true).await
 }
 
@@ -69,7 +70,7 @@ async fn check_and_update_zv_binary_impl(
                 zv_dir_bin.display()
             );
         }
-        copy_binary_and_regenerate_shims(&current_exe, &target_exe, app).await?;
+        copy_binary_and_regenerate_shims(&current_exe, &target_exe, app, quiet).await?;
         if !quiet {
             tracing::info!("zv binary installed");
         }
@@ -105,7 +106,7 @@ async fn check_and_update_zv_binary_impl(
                                     Paint::green(&current_version)
                                 );
                             }
-                            copy_binary_and_regenerate_shims(&current_exe, &target_exe, app)
+                            copy_binary_and_regenerate_shims(&current_exe, &target_exe, app, quiet)
                                 .await?;
                             if !quiet {
                                 println!("  {} zv binary updated", "✓".green());
@@ -143,7 +144,7 @@ async fn check_and_update_zv_binary_impl(
                                     Paint::yellow(&current_version)
                                 );
                             }
-                            copy_binary_and_regenerate_shims(&current_exe, &target_exe, app)
+                            copy_binary_and_regenerate_shims(&current_exe, &target_exe, app, quiet)
                                 .await?;
                             if !quiet {
                                 println!(
@@ -167,7 +168,7 @@ async fn check_and_update_zv_binary_impl(
                                     current_version
                                 );
                             }
-                            copy_binary_and_regenerate_shims(&current_exe, &target_exe, app)
+                            copy_binary_and_regenerate_shims(&current_exe, &target_exe, app, quiet)
                                 .await?;
                             if !quiet {
                                 println!("  {} zv binary updated", "✓".green());
@@ -189,7 +190,7 @@ async fn check_and_update_zv_binary_impl(
                             "⚠".yellow()
                         );
                     }
-                    copy_binary_and_regenerate_shims(&current_exe, &target_exe, app).await?;
+                    copy_binary_and_regenerate_shims(&current_exe, &target_exe, app, quiet).await?;
                     if !quiet {
                         println!("  {} zv binary updated", "✓".green());
                     }
@@ -205,7 +206,7 @@ async fn check_and_update_zv_binary_impl(
                     e
                 );
             }
-            copy_binary_and_regenerate_shims(&current_exe, &target_exe, app).await?;
+            copy_binary_and_regenerate_shims(&current_exe, &target_exe, app, quiet).await?;
             if !quiet {
                 println!("  {} zv binary updated", "✓".green());
             }
@@ -274,6 +275,7 @@ async fn copy_binary_and_regenerate_shims(
     source: &Path,
     target: &Path,
     app: &crate::App,
+    quiet: bool,
 ) -> crate::Result<()> {
     use color_eyre::eyre::Context;
 
@@ -294,7 +296,7 @@ async fn copy_binary_and_regenerate_shims(
     let toolchain_manager = &app.toolchain_manager;
     if let Some(install) = toolchain_manager.get_active_install() {
         toolchain_manager
-            .deploy_shims(install, true)
+            .deploy_shims(install, true, quiet)
             .await
             .with_context(|| "Failed to regenerate shims after updating zv binary")?;
     }
