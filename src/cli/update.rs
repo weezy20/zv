@@ -1,13 +1,29 @@
-//! Self-update command for zv binary using self_update crate
+//! Self-update command for zv binary using async GitHub API and self-replace crate
 //!
 //! Checks GitHub releases for newer versions and updates the binary if available.
 //! Intelligently handles updates whether zv is running from ZV_DIR/bin or elsewhere.
 
-use color_eyre::eyre::{Context, Result, bail};
+use color_eyre::eyre::{Context, Result, bail, eyre};
 use semver::Version;
 use yansi::Paint;
+use serde::Deserialize;
+use std::{path::Path, time::Duration};
+use tokio::task;
 
-use crate::{App, tools};
+use crate::{App, tools, app::utils};
+use walkdir::WalkDir;
+
+#[derive(Deserialize, Debug)]
+struct GitHubRelease {
+    tag_name: String,
+    assets: Vec<GitHubAsset>,
+}
+
+#[derive(Deserialize, Debug)]
+struct GitHubAsset {
+    name: String,
+    browser_download_url: String,
+}
 
 pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
     println!("{}", "Checking for zv updates...".cyan());
@@ -16,35 +32,27 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
         .expect("CARGO_PKG_VERSION should be valid semver");
 
     println!("Current version: {}", Paint::yellow(&current_version));
-
-    // Build the updater using self_update crate
-    let mut update_builder = self_update::backends::github::Update::configure();
-
-    let target = self_update::get_target();
-
-    update_builder
-        .repo_owner("weezy20")
-        .repo_name("zv")
-        .bin_name("zv")
-        .show_download_progress(true)
-        .no_confirm(force)
-        .current_version(env!("CARGO_PKG_VERSION"))
-        .target(&target)
-        // cargo-dist puts binaries in a subdirectory like "zv-x86_64-unknown-linux-gnu/"
-        .bin_path_in_archive(&format!("zv-{}/zv", target));
+    
+    // Get target triple for this platform
+    // The TARGET env var is set at compile time via build.rs
+    let target = env!("TARGET");
 
     println!("  {} Detected platform: {}", "→".blue(), target);
 
-    // Check what version is available
-    let latest_release = match update_builder.build()?.get_latest_release() {
-        Ok(release) => release,
-        Err(e) => {
-            bail!("Failed to fetch latest release: {}", e);
-        }
-    };
+    // Fetch latest release from GitHub API
+    let client = reqwest::Client::builder()
+        .user_agent(utils::zv_agent())
+        .connect_timeout(Duration::from_secs(*crate::app::FETCH_TIMEOUT_SECS))
+        .build()
+        .wrap_err("Failed to create HTTP client")?;
 
-    let latest_version =
-        Version::parse(&latest_release.version).wrap_err("Failed to parse latest version")?;
+    let latest_release = fetch_latest_release(&client).await
+        .wrap_err("Failed to fetch latest release from GitHub")?;
+
+    // Parse version from tag_name (remove 'v' prefix if present)
+    let version_str = latest_release.tag_name.strip_prefix('v').unwrap_or(&latest_release.tag_name);
+    let latest_version = Version::parse(version_str)
+        .wrap_err("Failed to parse latest version from GitHub release tag")?;
 
     println!(
         "  {} Latest version from releases:  {}",
@@ -73,44 +81,78 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
         );
     }
 
-    // Check if a release asset exists for this platform
-    // Windows uses .zip, Unix uses .tar.gz
-    let expected_extension = if cfg!(windows) { ".zip" } else { ".tar.gz" };
+    // Find the correct asset for this platform
+    // The naming convention is: zv-{target}.{extension}
+    let asset = if cfg!(windows) {
+        // Windows: only look for .zip
+        let expected_asset_name = format!("zv-{target}.zip");
+        latest_release
+            .assets
+            .iter()
+            .find(|asset| asset.name == expected_asset_name)
+            .ok_or_else(|| {
+                let available_assets: Vec<&str> = latest_release
+                    .assets
+                    .iter()
+                    .map(|a| a.name.as_str())
+                    .filter(|name| name.starts_with("zv-") && name.ends_with(".zip"))
+                    .collect();
+                
+                eyre!(
+                    "No compatible release asset found for platform: {} (expected: {})\nAvailable assets: {:?}",
+                    target,
+                    expected_asset_name,
+                    available_assets
+                )
+            })?
+    } else {
+        // MacOS/Linux: prefer .tar.gz, fallback to .tar.xz
+        let gz_asset_name = format!("zv-{target}.tar.gz");
+        let xz_asset_name = format!("zv-{target}.tar.xz");
+        
+        latest_release
+            .assets
+            .iter()
+            .find(|asset| asset.name == gz_asset_name)
+            .or_else(|| {
+                latest_release
+                    .assets
+                    .iter()
+                    .find(|asset| asset.name == xz_asset_name)
+            })
+            .ok_or_else(|| {
+                let available_assets: Vec<&str> = latest_release
+                    .assets
+                    .iter()
+                    .map(|a| a.name.as_str())
+                    .filter(|name| {
+                        name.starts_with("zv-") && (name.ends_with(".tar.gz") || name.ends_with(".tar.xz"))
+                    })
+                    .collect();
+                
+                eyre!(
+                    "No compatible release asset found for platform: {} (tried: {} and {})\nAvailable assets: {:?}",
+                    target,
+                    gz_asset_name,
+                    xz_asset_name,
+                    available_assets
+                )
+            })?
+    };
 
-    let has_asset = latest_release
-        .assets
-        .iter()
-        .any(|asset| asset.name.contains(&target) && asset.name.ends_with(expected_extension));
-
-    if !has_asset {
-        println!(
-            "  {} No compatible release asset found for this platform.",
-            "✗".red()
-        );
-        println!("  • Build from source at https://github.com/weezy20/zv");
-        println!("  • You can try: {}", "cargo install zv".cyan().underline());
-        println!(
-            "  • Then run: {} to update bin @ ZV_DIR/bin/zv",
-            "$CARGO_HOME/bin/zv sync".cyan().underline()
-        );
-        println!(
-            "  • Then uninstall cargo binary: {}",
-            "cargo uninstall zv".cyan().underline()
-        );
-        bail!("No release asset found for platform: {target} with extension {expected_extension}");
-    }
+    tracing::trace!(target: "zv::update", "Found asset: {}", asset.name);
 
     // Check if we're running from ZV_DIR/bin/zv or somewhere else
     let current_exe = std::env::current_exe().wrap_err("Failed to get current executable path")?;
     let (zv_dir, _) = tools::fetch_zv_dir()?;
-    let expected_zv_path = zv_dir
+    let expected_zv_exe_path = zv_dir
         .join("bin")
         .join(if cfg!(windows) { "zv.exe" } else { "zv" });
 
     let running_from_zv_dir = tools::canonicalize(&current_exe)
         .ok()
         .and_then(|ce| {
-            tools::canonicalize(&expected_zv_path)
+            tools::canonicalize(&expected_zv_exe_path)
                 .ok()
                 .map(|ez| ce == ez)
         })
@@ -118,30 +160,21 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
 
     if running_from_zv_dir {
         // Standard case: running from ZV_DIR/bin/zv
-        // Use self_update to replace the binary in place
+        // Download and replace the binary in place
         println!("  {} Downloading and installing update...", "→".blue());
 
-        update_builder.bin_install_path(&expected_zv_path.parent().unwrap());
-        let status = update_builder.build()?.update()?;
+        let _temp_extract_dir = download_and_replace_binary(&client, asset, &expected_zv_exe_path, true).await
+            .wrap_err("Failed to update zv")?;
+        // Keep _temp_extract_dir alive until after self_replace completes
 
         println!(
-            "  {} Updated successfully to version {}!",
+            "  {} Updated successfully to zv {}!",
             "✓".green(),
-            status.version()
-        );
-
-        // Regenerate shims to ensure zig/zls symlinks point to the updated zv binary
-        if let Some(install) = app.toolchain_manager.get_active_install() {
-            println!("  {} Regenerating shims...", "→".blue());
-            app.toolchain_manager
-                .deploy_shims(install, true)
-                .await
-                .wrap_err("Failed to regenerate shims after update")?;
-            println!("  {} Shims regenerated successfully", "✓".green());
-        }
+            latest_version
+        );        
     } else {
         // Running from outside ZV_DIR (e.g., cargo install, custom location)
-        // Download to temp location and exec into `zv sync`
+        // Download to temp location and then copy to ZV_DIR
         println!(
             "  {} Running from outside ZV_DIR, downloading to temporary location...",
             "→".blue()
@@ -153,64 +186,302 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
             .tempdir()
             .wrap_err("Failed to create temporary directory")?;
 
-        // Download the binary to temp location
-        update_builder.bin_install_path(temp_dir.path());
-        let status = update_builder.build()?.update()?;
-
         let temp_binary = temp_dir
             .path()
             .join(if cfg!(windows) { "zv.exe" } else { "zv" });
 
-        println!("  {} Downloaded version {}", "✓".green(), status.version());
+        // Download the binary to temp location
+        let _temp_extract_dir = download_and_replace_binary(&client, asset, &temp_binary, false).await
+            .wrap_err("Failed to download binary to temporary location")?;
+        // Keep _temp_extract_dir alive until after copy completes
+
+        println!("  {} Downloaded version {}", "✓".green(), latest_version);
+        
+        // Copy the new binary to ZV_DIR/bin/zv
+        println!("  {} Installing ...", "→".blue());
+        
+        // Ensure ZV_DIR/bin exists
+        if let Some(parent) = expected_zv_exe_path.parent() {
+            tokio::fs::create_dir_all(parent).await
+                .wrap_err_with(|| format!("Failed to create ZV_DIR/bin directory: {}", parent.display()))?;
+        }
+        
+        // Copy the binary
+        tokio::fs::copy(&temp_binary, &expected_zv_exe_path).await
+            .wrap_err("Failed to copy binary to ZV_DIR")?;
+        
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Err(e) = tokio::fs::set_permissions(&expected_zv_exe_path, std::fs::Permissions::from_mode(0o755)).await {
+                tools::warn(format!("Failed to set binary permissions: {}", e));
+            }
+        }
+
         println!(
-            "  {} Running sync to update ZV_DIR/bin/zv and regenerate shims...",
-            "→".blue()
+            "  {} Updated successfully to zv {}!",
+            "✓".green(),
+            latest_version
         );
-
-        // Exec into the new binary with sync command
-        // This will copy the new binary to ZV_DIR/bin/zv and regenerate shims
-        exec_new_binary_with_sync(&temp_binary)?;
-
-        // Never reached
-        unreachable!()
+    }
+    // Regenerate shims to ensure zig/zls symlinks point to the updated zv binary
+    if let Some(install) = app.toolchain_manager.get_active_install() {
+        println!("  {} Regenerating shims...", "→".blue());
+        app.toolchain_manager
+            .deploy_shims(install, true)
+            .await
+            .wrap_err("Failed to regenerate shims after update")?;
+        println!("  {} Shims regenerated successfully", "✓".green());
     }
 
-    println!();
-    println!("{}", "Update completed successfully!".green().bold());
+    println!("\n{} {}", "✓".green(), "Update complete".green().bold());
 
     Ok(())
 }
 
-/// Replace the current process with the newly downloaded binary running `sync`
-fn exec_new_binary_with_sync(binary_path: &std::path::Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
+/// Fetch the latest release from GitHub API
+async fn fetch_latest_release(client: &reqwest::Client) -> Result<GitHubRelease> {
+    let url = "https://api.github.com/repos/weezy20/zv/releases/latest";
+    
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .wrap_err("Failed to send request to GitHub API")?;
 
-        let err = std::process::Command::new(binary_path).arg("sync").exec();
-
-        // exec only returns on error
-        Err(err).wrap_err("Failed to exec into new binary for sync")
+    if !response.status().is_success() {
+        bail!("GitHub API request failed with status: {}", response.status());
     }
 
-    #[cfg(windows)]
-    {
-        use std::process::Stdio;
+    let release = response
+        .json::<GitHubRelease>()
+        .await
+        .wrap_err("Failed to parse GitHub API response")?;
 
-        let mut child = std::process::Command::new(binary_path)
-            .arg("sync")
-            .stdin(Stdio::inherit())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .wrap_err("Failed to spawn new binary for sync")?;
+    Ok(release)
+}
 
-        let status = child.wait()?;
+/// Download and extract/replace the binary from a GitHub release asset
+/// Returns the temporary directory handle to keep it alive until the caller is done
+async fn download_and_replace_binary(
+    client: &reqwest::Client,
+    asset: &GitHubAsset,
+    target_path: &Path,
+    use_self_replace: bool,
+) -> Result<tempfile::TempDir> {
+    // Create a temporary file for the download with the correct extension
+    let temp_dir = tempfile::tempdir()
+        .wrap_err("Failed to create temporary directory for download")?;
+    let temp_file_path = temp_dir.path().join(&asset.name);
 
-        if !status.success() {
-            bail!("Sync command failed after update");
+    // Download the asset
+    println!("  {} Downloading {}...", "→".blue(), asset.name);
+    
+    let response = client
+        .get(&asset.browser_download_url)
+        .send()
+        .await
+        .wrap_err("Failed to download release asset")?;
+
+    if !response.status().is_success() {
+        bail!("Failed to download asset: HTTP {}", response.status());
+    }
+
+    // Write to temporary file
+    let mut file = tokio::fs::File::create(&temp_file_path).await
+        .wrap_err("Failed to create temporary download file")?;
+
+    let mut stream = response.bytes_stream();
+    use futures::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.wrap_err("Failed to read download chunk")?;
+        file.write_all(&chunk).await
+            .wrap_err("Failed to write download chunk")?;
+    }
+
+    file.sync_all().await.wrap_err("Failed to sync download file to disk")?;
+    drop(file); // Close the file
+
+    // Fetch sha256 checksum file:
+    println!("  {} Verifying checksum...", "→".blue());
+    let checksum_url = format!("{}.sha256", &asset.browser_download_url);
+    let checksum_response = client
+        .get(&checksum_url)
+        .send()
+        .await
+        .wrap_err("Failed to download checksum file")?;
+
+    if !checksum_response.status().is_success() {
+        bail!("Failed to download checksum file: HTTP {}", checksum_response.status());
+    }
+
+    let checksum_content = checksum_response
+        .text()
+        .await
+        .wrap_err("Failed to read checksum file content")?;
+
+    // Parse the checksum file - it typically contains "<hash>  <filename>" or just "<hash>"
+    // For ours the format contains "<hash> *<filename>"
+    // We extract just the hash part (first 64 hex characters)
+    let expected_shasum = checksum_content
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| eyre!("Checksum file is empty or invalid"))?
+        .trim();
+
+    // Verify the downloaded file's checksum
+    utils::verify_checksum(&temp_file_path, expected_shasum)
+        .await
+        .wrap_err("Checksum verification failed - the downloaded file may be corrupted")?;
+
+    println!("  {} Checksum verified successfully", "✓".green());
+    println!("  {} Extracting binary...", "→".blue());
+
+    // Extract the binary from the archive
+    let temp_extract_dir = tempfile::tempdir()
+        .wrap_err("Failed to create temporary extraction directory")?;
+
+    extract(&temp_file_path, temp_extract_dir.path()).await?;
+
+    // Find the zv binary in the extracted files
+    // Based on cargo-dist:
+    // - Unix archives (.tar.gz/.tar.xz) have a subdirectory like "zv-{target}/zv"
+    // - Windows archives (.zip) extract files directly to the temp directory
+    let target = env!("TARGET");
+    let binary_name = if cfg!(windows) { "zv.exe" } else { "zv" };
+    
+    // Try the subdirectory structure first (Unix archives)
+    let mut extracted_binary = temp_extract_dir
+        .path()
+        .join(format!("zv-{target}"))
+        .join(binary_name);
+
+    // If not found, try the root of the extraction directory (Windows zip)
+    if !extracted_binary.is_file() {
+        extracted_binary = temp_extract_dir.path().join(binary_name);
+    }
+
+    if !extracted_binary.is_file() {
+        println!("  {} Debug: Listing extracted contents...", "!".yellow());
+        // walkdir does the recursion for you
+        for entry in WalkDir::new(temp_extract_dir.path())
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            let depth = entry.depth();
+            let prefix = "  ".repeat(1 + depth); // 1 base indent + 2 spaces per level
+            println!("{prefix}{}", entry.path().display());
         }
 
-        std::process::exit(0);
+        bail!("Could not find zv binary in extracted archive at: {}", extracted_binary.display());
     }
+
+    // Install the binary
+    println!("  {} Installing update...", "→".blue());
+    
+    // Ensure target directory exists
+    if let Some(parent) = target_path.parent() {
+        tokio::fs::create_dir_all(parent).await
+            .wrap_err("Failed to create target directory")?;
+    }
+
+    if use_self_replace {
+        // Use self-replace to atomically replace the binary (when running from ZV_DIR)
+        self_replace::self_replace(&extracted_binary)
+            .wrap_err("Failed to replace binary with updated version")?;
+    } else {
+        tokio::fs::copy(&extracted_binary, target_path).await
+            .wrap_err("Failed to copy binary to target location")?;
+        
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Err(e) = tokio::fs::set_permissions(target_path, std::fs::Permissions::from_mode(0o755)).await {
+                tools::warn(format!("Failed to set binary permissions: {}", e));
+            }
+        }
+    }
+
+    Ok(temp_extract_dir)
+}
+
+/// Dispatch extraction for zip/tar.xz/tar.gz
+async fn extract(archive: &Path, dest: &Path) -> Result<()> {
+    let ext = archive.extension().and_then(|e| e.to_str()).unwrap_or_default();
+    let ext2 = archive.file_stem()
+        .and_then(|n| n.to_str()?.rsplit_once('.'))
+        .map(|(_, e)| e); // foo.tar.gz  ->  tar
+
+    match (ext, ext2) {
+        ("gz", Some("tar")) => extract_tar(archive, dest, TarDecoder::Gz).await,
+        ("xz", Some("tar")) => extract_tar(archive, dest, TarDecoder::Xz).await,
+        ("zip", _) => extract_zip(archive, dest).await,
+        _ => bail!("Unsupported archive type: {}", archive.display()),
+    }
+}
+
+enum TarDecoder {
+    Gz,
+    Xz,
+}
+
+async fn extract_tar(archive: &Path, dest: &Path, decoder: TarDecoder) -> Result<()> {
+    let archive = archive.to_owned();
+    let dest = dest.to_owned();
+
+    task::spawn_blocking(move || {
+        let file = std::fs::File::open(&archive).wrap_err("Failed to open tar archive")?;
+
+        let boxed_decoder: Box<dyn std::io::Read> = match decoder {
+            TarDecoder::Gz => Box::new(flate2::read::GzDecoder::new(file)),
+            TarDecoder::Xz => Box::new(xz2::read::XzDecoder::new(file)),
+        };
+
+        let mut archive = tar::Archive::new(boxed_decoder);
+        archive.unpack(&dest).wrap_err("Failed to unpack tar archive")?;
+
+        Ok(())
+    })
+    .await
+    .wrap_err("tar extraction task panicked")?
+}
+
+async fn extract_zip(archive: &Path, dest: &Path) -> Result<()> {
+    let archive = archive.to_owned();
+    let dest = dest.to_owned();
+
+    task::spawn_blocking(move || {
+        let file = std::fs::File::open(&archive).wrap_err("Failed to open zip archive")?;
+        let mut zip = zip::ZipArchive::new(file).wrap_err("Failed to read zip archive")?;
+
+        for i in 0..zip.len() {
+            let mut entry = zip.by_index(i)?;
+            let out_path = match entry.enclosed_name() {
+                Some(p) => dest.join(p),
+                None => continue,
+            };
+
+            if entry.name().ends_with('/') {
+                std::fs::create_dir_all(&out_path)?;
+            } else {
+                if let Some(parent) = out_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let mut out = std::fs::File::create(&out_path)?;
+                std::io::copy(&mut entry, &mut out)?;
+            }
+
+            #[cfg(unix)]
+            if let Some(mode) = entry.unix_mode() {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&out_path, std::fs::Permissions::from_mode(mode))?;
+            }
+        }
+
+        Ok(())
+    })
+    .await
+    .wrap_err("zip extraction task panicked")?
 }

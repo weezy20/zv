@@ -96,7 +96,7 @@ impl Template {
     }
 
     /// Instantiate template with full context and file tracking; Needs to be called with valid context
-    pub fn instantiate_with_context(
+    pub async fn instantiate_with_context(
         self,
         pre_exec_msg: Option<String>,
         app: App,
@@ -140,7 +140,7 @@ impl Template {
                 if !zon {
                     self.instantiate_minimal()?
                 } else {
-                    self.instantiate_package(app)?
+                    self.instantiate_package(app).await?
                 }
             }
             // TemplateType::Minimal => self.instantiate_minimal()?,
@@ -156,9 +156,9 @@ impl Template {
     }
 
     /// Convenience method that handles directory preparation and instantiation
-    pub fn execute(mut self, app: App) -> Result<TemplateResult, ZvError> {
+    pub async fn execute(mut self, app: App) -> Result<TemplateResult, ZvError> {
         let pre_exec_msg = self.prepare_directory()?;
-        self.instantiate_with_context(pre_exec_msg, app)
+        self.instantiate_with_context(pre_exec_msg, app).await
     }
 
     fn instantiate_minimal(&self) -> Result<Vec<FileStatus>, ZvError> {
@@ -171,14 +171,14 @@ impl Template {
         self.create_template_files(&files)
     }
 
-    fn instantiate_package(&self, app: App) -> Result<Vec<FileStatus>, ZvError> {
+    async fn instantiate_package(&self, app: App) -> Result<Vec<FileStatus>, ZvError> {
         let minimal_files = [
             ("main.zig", MAIN_ZIG),
             ("build.zig", BUILD_ZIG),
             (".gitignore", GITIGNORE_ZIG),
         ];
 
-        let build_zig_zon = self.generate_build_zig_zon(app, &minimal_files[..2])?;
+        let build_zig_zon = self.generate_build_zig_zon(app, &minimal_files[..2]).await?;
 
         self.create_template_files(&[
             minimal_files[0],
@@ -291,7 +291,7 @@ impl Template {
         Ok(file_statuses)
     }
 
-    fn generate_build_zig_zon(
+    async fn generate_build_zig_zon(
         &self,
         mut app: App,
         // List of path and file content pairs to be included in the build.zig.zon - we only care about the paths here
@@ -300,10 +300,9 @@ impl Template {
         let active_zig_version = if let Some(active_version) = app.get_active_version() {
             active_version.version().expect("valid semver").clone()
         } else {
-            // Get handle to the current runtime
-            let handle = tokio::runtime::Handle::current();
+            // Fetch latest version asynchronously
             if let Ok(stable) =
-                handle.block_on(app.fetch_latest_version(crate::app::CacheStrategy::OnlyCache))
+                app.fetch_latest_version(crate::app::CacheStrategy::OnlyCache).await
             {
                 tracing::debug!(
                     "Stable resolved version: {}",

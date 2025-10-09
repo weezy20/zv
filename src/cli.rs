@@ -209,6 +209,7 @@ pub enum Commands {
         no_interactive: bool,
     },
     /// Update zv to the latest release only if present in GH Releases:
+    #[clap(alias = "upgrade")]
     Update {
         #[arg(
             long,
@@ -249,8 +250,10 @@ impl Commands {
                         ),
                         app,
                     )
+                    .await
                 } else {
                     init::init_project(Template::new(project_name, TemplateType::App { zon }), app)
+                        .await
                 }
             }
             Commands::Use {
