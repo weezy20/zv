@@ -592,4 +592,14 @@ impl ToolchainManager {
             })
             .collect()
     }
+    /// Clear the active version without setting a new one
+    pub fn clear_active_version(&mut self) -> Result<()> {
+        if self.active_file.exists() {
+            if let Err(e) = std::fs::remove_file(&self.active_file) {
+                tracing::warn!(target: TARGET, "Failed to remove active version file: {}", e);
+                return Err(eyre!(e).wrap_err("Failed to remove active version file"));
+            }
+        }
+        Ok(())
+    }
 }

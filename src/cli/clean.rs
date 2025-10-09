@@ -253,9 +253,7 @@ async fn clean_except_versions(app: &mut App, except_versions: &[ZigVersion]) ->
             println!("{} Kept: {}", Paint::green("✓"), display_name);
         } else {
             // Check if we're removing the currently active version
-            let is_active = active_install.is_some_and(|active| {
-                active == install
-            });
+            let is_active = active_install.is_some_and(|active| active == install);
 
             if is_active {
                 active_version_removed = true;
@@ -390,9 +388,7 @@ async fn clean_outdated_master(app: &mut App) -> crate::Result<()> {
     for install in &master_installs {
         if install.version != latest_master.version {
             // Check if we're removing the currently active version
-            let is_active = active_install.is_some_and(|active| {
-                active == install
-            });
+            let is_active = active_install.is_some_and(|active| active == install);
 
             if is_active {
                 active_version_removed = true;
@@ -713,6 +709,7 @@ async fn handle_active_version_removal(app: &mut App) -> crate::Result<()> {
                 "{} No Zig versions remain installed. Run 'zv use <version>' to install and activate a version.",
                 Paint::cyan("ℹ")
             );
+            let _ = app.toolchain_manager.clear_active_version();
         }
     }
 
