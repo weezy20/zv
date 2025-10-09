@@ -254,7 +254,7 @@ async fn clean_except_versions(app: &mut App, except_versions: &[ZigVersion]) ->
         } else {
             // Check if we're removing the currently active version
             let is_active = active_install.is_some_and(|active| {
-                active.version == install.version && active.is_master == install.is_master
+                active == install
             });
 
             if is_active {
@@ -391,7 +391,7 @@ async fn clean_outdated_master(app: &mut App) -> crate::Result<()> {
         if install.version != latest_master.version {
             // Check if we're removing the currently active version
             let is_active = active_install.is_some_and(|active| {
-                active.version == install.version && active.is_master == install.is_master
+                active == install
             });
 
             if is_active {
