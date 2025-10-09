@@ -140,7 +140,7 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
             })?
     };
 
-    tracing::trace!(target: "zv::update", "  {} Found asset: {}", "→".blue(), asset.name);
+    tracing::trace!(target: "zv::update", "Found asset: {}", asset.name);
 
     // Check if we're running from ZV_DIR/bin/zv or somewhere else
     let current_exe = std::env::current_exe().wrap_err("Failed to get current executable path")?;
@@ -163,25 +163,15 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
         // Download and replace the binary in place
         println!("  {} Downloading and installing update...", "→".blue());
 
-        let _temp_dir = download_and_replace_binary(&client, asset, &expected_zv_exe_path, true).await
+        let _temp_extract_dir = download_and_replace_binary(&client, asset, &expected_zv_exe_path, true).await
             .wrap_err("Failed to update zv")?;
-        // Keep _temp_dir alive until after self_replace completes
+        // Keep _temp_extract_dir alive until after self_replace completes
 
         println!(
             "  {} Updated successfully to zv {}!",
             "✓".green(),
             latest_version
-        );
-
-        // Regenerate shims to ensure zig/zls symlinks point to the updated zv binary
-        if let Some(install) = app.toolchain_manager.get_active_install() {
-            println!("  {} Regenerating shims...", "→".blue());
-            app.toolchain_manager
-                .deploy_shims(install, true)
-                .await
-                .wrap_err("Failed to regenerate shims after update")?;
-            println!("  {} Shims regenerated successfully", "✓".green());
-        }
+        );        
     } else {
         // Running from outside ZV_DIR (e.g., cargo install, custom location)
         // Download to temp location and then copy to ZV_DIR
@@ -201,9 +191,9 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
             .join(if cfg!(windows) { "zv.exe" } else { "zv" });
 
         // Download the binary to temp location
-        let _extract_temp_dir = download_and_replace_binary(&client, asset, &temp_binary, false).await
+        let _temp_extract_dir = download_and_replace_binary(&client, asset, &temp_binary, false).await
             .wrap_err("Failed to download binary to temporary location")?;
-        // Keep _extract_temp_dir alive until after copy completes
+        // Keep _temp_extract_dir alive until after copy completes
 
         println!("  {} Downloaded version {}", "✓".green(), latest_version);
         
@@ -233,16 +223,15 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
             "✓".green(),
             latest_version
         );
-
-        // Regenerate shims to ensure zig/zls symlinks point to the updated zv binary
-        if let Some(install) = app.toolchain_manager.get_active_install() {
-            println!("  {} Regenerating shims...", "→".blue());
-            app.toolchain_manager
-                .deploy_shims(install, true)
-                .await
-                .wrap_err("Failed to regenerate shims after update")?;
-            println!("  {} Shims regenerated successfully", "✓".green());
-        }
+    }
+    // Regenerate shims to ensure zig/zls symlinks point to the updated zv binary
+    if let Some(install) = app.toolchain_manager.get_active_install() {
+        println!("  {} Regenerating shims...", "→".blue());
+        app.toolchain_manager
+            .deploy_shims(install, true)
+            .await
+            .wrap_err("Failed to regenerate shims after update")?;
+        println!("  {} Shims regenerated successfully", "✓".green());
     }
 
     println!("\n{} {}", "✓".green(), "Update complete".green().bold());
