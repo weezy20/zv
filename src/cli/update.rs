@@ -106,7 +106,7 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
                 )
             })?
     } else {
-        // Unix: prefer .tar.gz, fallback to .tar.xz
+        // MacOS/Linux: prefer .tar.gz, fallback to .tar.xz
         let gz_asset_name = format!("zv-{target}.tar.gz");
         let xz_asset_name = format!("zv-{target}.tar.xz");
         
@@ -145,14 +145,14 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
     // Check if we're running from ZV_DIR/bin/zv or somewhere else
     let current_exe = std::env::current_exe().wrap_err("Failed to get current executable path")?;
     let (zv_dir, _) = tools::fetch_zv_dir()?;
-    let expected_zv_path = zv_dir
+    let expected_zv_exe_path = zv_dir
         .join("bin")
         .join(if cfg!(windows) { "zv.exe" } else { "zv" });
 
     let running_from_zv_dir = tools::canonicalize(&current_exe)
         .ok()
         .and_then(|ce| {
-            tools::canonicalize(&expected_zv_path)
+            tools::canonicalize(&expected_zv_exe_path)
                 .ok()
                 .map(|ez| ce == ez)
         })
@@ -163,7 +163,7 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
         // Download and replace the binary in place
         println!("  {} Downloading and installing update...", "→".blue());
 
-        let _temp_dir = download_and_replace_binary(&client, asset, &expected_zv_path, true).await
+        let _temp_dir = download_and_replace_binary(&client, asset, &expected_zv_exe_path, true).await
             .wrap_err("Failed to update zv")?;
         // Keep _temp_dir alive until after self_replace completes
 
@@ -211,19 +211,19 @@ pub async fn update_zv(app: &mut App, force: bool) -> Result<()> {
         println!("  {} Installing ...", "→".blue());
         
         // Ensure ZV_DIR/bin exists
-        if let Some(parent) = expected_zv_path.parent() {
+        if let Some(parent) = expected_zv_exe_path.parent() {
             tokio::fs::create_dir_all(parent).await
                 .wrap_err_with(|| format!("Failed to create ZV_DIR/bin directory: {}", parent.display()))?;
         }
         
         // Copy the binary
-        tokio::fs::copy(&temp_binary, &expected_zv_path).await
+        tokio::fs::copy(&temp_binary, &expected_zv_exe_path).await
             .wrap_err("Failed to copy binary to ZV_DIR")?;
         
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if let Err(e) = tokio::fs::set_permissions(&expected_zv_path, std::fs::Permissions::from_mode(0o755)).await {
+            if let Err(e) = tokio::fs::set_permissions(&expected_zv_exe_path, std::fs::Permissions::from_mode(0o755)).await {
                 tools::warn(format!("Failed to set binary permissions: {}", e));
             }
         }
