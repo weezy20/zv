@@ -342,7 +342,7 @@ async fn download_and_replace_binary(
     }
 
     if !extracted_binary.is_file() {
-        println!("  {} Debug: Listing extracted contents...", "→".blue());
+        println!("  {} Debug: Listing extracted contents...", "!".yellow());
         // walkdir does the recursion for you
         for entry in WalkDir::new(temp_extract_dir.path())
             .into_iter()
