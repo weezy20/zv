@@ -592,6 +592,12 @@ impl ToolchainManager {
             })
             .collect()
     }
+
+    /// Check if there are any installed versions
+    /// Returns `true`` if no installations are available, `false` otherwise.
+    pub fn installations_empty(&self) -> bool {
+        self.installations.is_empty()
+    }
     /// Clear the active version without setting a new one
     pub fn clear_active_version(&mut self) -> Result<()> {
         if self.active_file.exists() {
