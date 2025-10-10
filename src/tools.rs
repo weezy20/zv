@@ -247,3 +247,42 @@ pub fn sanitize_build_zig_zon_name(name: Option<&str>, zig_version: &Version) ->
         format!("\"{sanitized}\"") // only v0.12
     })
 }
+
+/// Deduplicate semver variants before resolution
+///
+/// This function handles cases where the user specifies the same version in different forms:
+/// - `0.14.0` and `latest@0.14.0` and `stable@0.14.0` all become just `0.14.0`
+/// - Duplicate exact versions like `0.14.0, 0.14.0, 0.14.0` become just a single `0.14.0`
+pub fn deduplicate_semver_variants(versions: Vec<crate::ZigVersion>) -> Vec<crate::ZigVersion> {
+    let mut seen_semvers: std::collections::HashMap<semver::Version, crate::ZigVersion> =
+        std::collections::HashMap::new();
+    let mut non_semver_versions: Vec<crate::ZigVersion> = Vec::new();
+
+    for version in versions {
+        match version {
+            // For variants with explicit semver, deduplicate by the semver
+            crate::ZigVersion::Semver(v) => {
+                seen_semvers
+                    .entry(v.clone())
+                    .or_insert(crate::ZigVersion::Semver(v));
+            }
+            crate::ZigVersion::Latest(Some(v)) | crate::ZigVersion::Stable(Some(v)) => {
+                // Prefer plain semver over latest@version or stable@version
+                seen_semvers
+                    .entry(v.clone())
+                    .or_insert(crate::ZigVersion::Semver(v));
+            }
+            // Non-semver versions (latest, stable, master) need resolution to deduplicate
+            crate::ZigVersion::Latest(None)
+            | crate::ZigVersion::Stable(None)
+            | crate::ZigVersion::Master(_) => {
+                non_semver_versions.push(version);
+            }
+        }
+    }
+
+    // Combine deduplicated semvers with non-semver versions
+    let mut result: Vec<crate::ZigVersion> = seen_semvers.into_values().collect();
+    result.extend(non_semver_versions);
+    result
+}
