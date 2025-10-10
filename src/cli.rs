@@ -115,6 +115,7 @@ pub enum Commands {
     },
 
     /// Install Zig version(s) without setting as active
+    #[clap(alias = "i")]
     Install {
         /// Force using ziglang.org as a download source. Default is to use community mirrors.
         #[arg(
