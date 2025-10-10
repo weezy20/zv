@@ -31,13 +31,7 @@ pub(crate) async fn install_versions(
             "📦 Installing {}...",
             Paint::blue(&zig_versions[0].to_string())
         );
-    } else {
-        println!(
-            "📦 Installing {} versions...",
-            Paint::blue(&zig_versions.len().to_string())
-        );
     }
-
     // Deduplicate semver variants before resolution
     // e.g., latest@0.14.0, stable@0.14.0, 0.14.0 all become just 0.14.0
     let zig_versions = crate::tools::deduplicate_semver_variants(zig_versions);
@@ -82,6 +76,10 @@ pub(crate) async fn install_versions(
 
     let mut installed_versions = Vec::new();
     let mut failed_versions = Vec::new();
+    println!(
+        "📦 Installing {} version(s)...",
+        Paint::blue(&resolved_map.keys().len())
+    );
 
     // Process each unique resolved version
     for (resolved_version, zig_release) in resolved_map {
