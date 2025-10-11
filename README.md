@@ -192,6 +192,8 @@ zv use 0.14 -f                              # Use a version (auto-completes to 0
 zv use master                               # Use master branch build (queries network to find the latest master build)
 zv use stable                               # Use latest stable release (refers to cached index)
 zv use latest                               # Use latest stable release (queries network to fetch the latest stable)
+zv install <version,*> [-f ]                # Install one or more Zig versions without switching to it. Use -f to download from ziglang.org instead of community mirrors.
+zv i 0.15.1,0.14.0,master                   # Install multiple versions at once using a comma-separated list
 
 # Per-project Zig config
 zig +<version> [...zig args]            # Run Zig using a specific <version> (fetches and downloads version if not present locally)
