@@ -20,7 +20,7 @@ pub async fn clean(
                     .iter()
                     .any(|ver| matches!(ver, ZigVersion::Master(_)))
             }
-            Some(CleanTarget::All) | Some(CleanTarget::Downloads) => false,
+            _ => false,
         };
 
         if should_clean_outdated {
@@ -49,6 +49,13 @@ pub async fn clean(
         Some(CleanTarget::All) => clean_all(app).await,
         Some(CleanTarget::Downloads) => clean_downloads_only(app).await,
         Some(CleanTarget::Versions(versions)) => clean_specific_versions(app, versions).await,
+        Some(CleanTarget::Zls) => {
+            println!(
+                "{} Cleaning zls versions is not yet implemented.",
+                Paint::yellow("⚠")
+            );
+            Ok(())
+        }
     }
 }
 

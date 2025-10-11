@@ -24,6 +24,7 @@ pub use zls::zls_main;
 #[derive(Debug, Clone)]
 pub enum CleanTarget {
     All,
+    Zls,
     Downloads,
     Versions(Vec<ZigVersion>),
 }
@@ -33,6 +34,7 @@ fn parse_clean_target(s: &str) -> Result<CleanTarget, String> {
     match s.to_lowercase().as_str() {
         "all" => Ok(CleanTarget::All),
         "downloads" => Ok(CleanTarget::Downloads),
+        "zls" => Ok(CleanTarget::Zls),
         _ => {
             // Try parsing as comma-separated version list
             let versions: Result<Vec<ZigVersion>, _> = s
@@ -149,6 +151,9 @@ pub enum Commands {
             long_help = "Force using ziglang.org as a download source. Default is to use community mirrors."
         )]
         force_ziglang: bool,
+        /// Pull or set compatible zls version
+        #[arg(long)]
+        zls: bool,
         /// Version of Zig to use
         #[arg(
             value_parser = clap::value_parser!(ZigVersion),
@@ -166,7 +171,9 @@ pub enum Commands {
     /// List installed Zig versions
     #[clap(name = "list", alias = "ls")]
     List,
-
+    /// Synchronize ZLS with current active Zig version
+    #[clap(name = "zls")]
+    Zls,
     /// Clean up Zig installations. Non-zv managed installations will not be affected.
     #[clap(name = "clean", alias = "rm")]
     Clean {
@@ -239,10 +246,7 @@ pub enum Commands {
             help = "Force update even if the current version is the latest"
         )]
         force: bool,
-        #[arg(
-            long,
-            help = "Include pre-release versions when checking for updates"
-        )]
+        #[arg(long, help = "Include pre-release versions when checking for updates")]
         rc: bool,
     },
     /// Synchronize index, mirrors list and metadata for zv. Also replaces `ZV_DIR/bin/zv` if outdated against current invocation.
@@ -285,6 +289,7 @@ impl Commands {
             }
             Commands::Use {
                 version,
+                zls,
                 force_ziglang,
             } => match version {
                 Some(version) => r#use::use_version(version, &mut app, force_ziglang).await,
@@ -309,6 +314,7 @@ impl Commands {
             } => setup::setup_shell(&mut app, using_env, dry_run, no_interactive).await,
             Commands::Sync => sync::sync(&mut app).await,
             Commands::Update { force, rc } => update::update_zv(&mut app, force, rc).await,
+            Commands::Zls => todo!(),
         }
     }
 }
