@@ -112,7 +112,8 @@ codegen-units = 1
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
-lto = "thin"
+lto = "fat"
+codegen-units = 1
 
 [dev-dependencies]
 serde_test = "1.0.177"
