@@ -38,17 +38,24 @@ pub(crate) async fn install_versions(
 
     // First, resolve all versions to detect duplicates and store their ZigRelease objects
     let mut resolved_map: HashMap<ResolvedZigVersion, ZigRelease> = HashMap::new();
-    let mut resolution_errors = Vec::new();
+    let mut resolution_errors: Vec<(ZigVersion, ZvError)> = Vec::new();
 
     for zig_version in zig_versions {
         match resolve_zig_version(app, &zig_version).await {
             Ok(resolved) => {
                 // Get the ZigRelease that was set by resolve_zig_version
                 let zig_release = app.to_install.take().ok_or_else(|| {
-                    eyre!("Internal error: resolve_zig_version did not set to_install")
-                })?;
-
-                resolved_map.entry(resolved).or_insert(zig_release);
+                    resolution_errors.push((
+                        zig_version,
+                        ZvError::ZigVersionResolveError(eyre!(
+                            "Internal Error: App failed to set to_install for zig version.",
+                        )),
+                    ));
+                });
+                if zig_release.is_err() {
+                    continue;
+                }
+                resolved_map.entry(resolved).or_insert(zig_release.unwrap());
             }
             Err(e) => {
                 let error_msg = match e {
