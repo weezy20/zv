@@ -51,7 +51,7 @@ pub async fn clean(
         Some(CleanTarget::Versions(versions)) => clean_specific_versions(app, versions).await,
         Some(CleanTarget::Zls) => {
             println!(
-                "{} Cleaning zls versions is not yet implemented.",
+                "{} todo: route to zv zls clean | rm all --except <active zig version>",
                 Paint::yellow("⚠")
             );
             Ok(())

@@ -173,7 +173,16 @@ pub enum Commands {
     List,
     /// Synchronize ZLS with current active Zig version
     #[clap(name = "zls")]
-    Zls,
+    Zls {
+        #[command(subcommand)]
+        cmd: Option<ZlsCmd>,
+        #[arg(
+            short = 'b',
+            long,
+            help = "Clone & build ZLS instead of downloading precompiled binary"
+        )]
+        top_build: bool,
+    },
     /// Clean up Zig installations. Non-zv managed installations will not be affected.
     #[clap(name = "clean", alias = "rm")]
     Clean {
@@ -253,6 +262,50 @@ pub enum Commands {
     Sync,
 }
 
+#[derive(Subcommand, Debug)]
+pub enum ZlsCmd {
+    /// Download or build ZLS for the active Zig version
+    ///
+    /// By default, downloads prebuilt binaries. Falls back to building from source
+    /// if no prebuilt binary is available for your platform.
+    #[clap(alias = "i")]
+    Install {
+        /// Build ZLS from source instead of downloading prebuilt binary
+        #[arg(
+            long = "build",
+            short = 'b',
+            help = "Build ZLS from source instead of downloading prebuilt binary",
+            long_help = "Build ZLS from source instead of downloading prebuilt binary.\n\
+                         Useful for unsupported platforms or custom modifications."
+        )]
+        build: bool,
+    },
+
+    /// List installed ZLS versions
+    #[clap(alias = "ls")]
+    List,
+
+    /// Remove ZLS installations not used by the current active Zig version
+    #[clap(alias = "rm")]
+    Clean {
+        /// Remove all ZLS versions
+        #[arg(
+            long = "all",
+            help = "Remove all ZLS versions",
+            conflicts_with = "versions"
+        )]
+        all: bool,
+
+        /// Specific version(s) to remove (comma-separated)
+        #[arg(
+            value_delimiter = ',',
+            help = "Specific version(s) to remove (e.g., 0.13.0,master)",
+            long_help = "Remove specific ZLS version(s).\n\
+                         Examples: 0.13.0, master, or 0.13.0,0.12.0 for multiple versions."
+        )]
+        versions: Vec<semver::Version>,
+    },
+}
 impl Commands {
     pub(crate) async fn execute(self, mut app: App, using_env: bool) -> super::Result<()> {
         match self {
@@ -314,7 +367,27 @@ impl Commands {
             } => setup::setup_shell(&mut app, using_env, dry_run, no_interactive).await,
             Commands::Sync => sync::sync(&mut app).await,
             Commands::Update { force, rc } => update::update_zv(&mut app, force, rc).await,
-            Commands::Zls => todo!(),
+            Commands::Zls { top_build, cmd } => match (top_build, cmd) {
+                (true, None) => zls::zls_command(ZlsCmd::Install { build: true }, app),
+                (false, None) => zls::zls_command(ZlsCmd::Install { build: false }, app),
+                (true, Some(ZlsCmd::Install { .. })) => {
+                    zls::zls_command(ZlsCmd::Install { build: true }, app)
+                }
+                (false, Some(zls_cmd)) => zls::zls_command(zls_cmd, app),
+                (true, Some(zls_cmd)) => {
+                    let display_name = match zls_cmd {
+                        ZlsCmd::Install { .. } => "install",
+                        ZlsCmd::List => "list",
+                        ZlsCmd::Clean { .. } => "clean",
+                    };
+                    error(format!(
+                        "The --build/-b option cannot be used with {} subcommand. Ignoring flag.",
+                        display_name.bold()
+                    ));
+                    zls::zls_command(zls_cmd, app)
+                }
+            }
+            .await,
         }
     }
 }

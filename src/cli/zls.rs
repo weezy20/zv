@@ -1,3 +1,4 @@
+use crate::cli::ZlsCmd;
 use crate::{App, UserConfig, ZigVersion, tools};
 use color_eyre::eyre::{bail, eyre};
 use std::path::PathBuf;
@@ -101,4 +102,8 @@ fn get_zig_version_from_executable(zig_path: &PathBuf) -> crate::Result<ZigVersi
     version_str
         .parse::<ZigVersion>()
         .map_err(|e| eyre!("Failed to parse Zig version '{}': {}", version_str, e))
+}
+
+pub(crate) async fn zls_command(cmd: ZlsCmd, mut app: App) -> crate::Result<()> {
+    Ok(())
 }
