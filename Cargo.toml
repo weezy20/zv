@@ -1,6 +1,6 @@
 [package]
 name = "zv"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 description = "Ziglang Version Manager and Project Starter"
 license = "MIT"
@@ -38,8 +38,8 @@ reqwest = { version = "0.12.23", features = [
     "rustls-tls",
     "json",
 ], default-features = false }
-toml = "0.9.7"
-toml_edit = "0.23.6"
+toml = "0.9.8"
+toml_edit = "0.23.7"
 thiserror = "2.0.17"
 ahash = "0.8.12"
 walkdir = "2.5.0"

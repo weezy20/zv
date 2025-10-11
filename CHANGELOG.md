@@ -1,5 +1,13 @@
 # Changelog 
 
+## v0.4.0 → v0.5.0
+## ✨ Features
+- **`zv install`**: Install without setting a zig version as active.
+- Uses same flags as `zv use` i.e. `-f` to force using ziglang.org as a download source.
+- Shorthand: **`zv i <version>`** installs the specified version without setting it as active.
+- Can also install multiple versions which are comma separated list: `zv i 0.11,master,stable,latest`
+- De-duplication for zigversions is handled internally so if you specify `zv i latest,stable` then it only installs one version, provided cached index stable == remote index stable which is true for 99.99% of the time.
+
 ## v0.3.1 → v0.4.0
 
 ## ✨ Features
