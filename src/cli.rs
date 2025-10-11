@@ -358,8 +358,8 @@ fn print_welcome_message(app: App) {
                     )
                 }
             ),
-            format!("ZV directory: {}", app.path().display()),
-            format!("ZV Version: {zv_version}"),
+            format!("ZV directory: {}", app.path().display().yellow()),
+            format!("ZV Version: {}", zv_version.yellow()),
             format!(
                 "Shell: {}",
                 app.shell.as_ref().map_or(Shell::detect(), |s| s.clone())
@@ -441,7 +441,6 @@ fn print_welcome_message(app: App) {
         Paint::yellow(&active_zig_str),
         help_text
     );
-    println!();
 
     // Help section
     if cfg!(windows) {
