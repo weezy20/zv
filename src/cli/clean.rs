@@ -40,7 +40,7 @@ pub async fn clean(
 
     // Handle --except flag
     if !except.is_empty() {
-        return clean_except_versions(app, &except).await;
+        return clean_except_versions(app, except).await;
     }
 
     // Handle target-based cleaning
@@ -48,12 +48,15 @@ pub async fn clean(
         None => clean_all(app).await,
         Some(CleanTarget::All) => clean_all(app).await,
         Some(CleanTarget::Downloads) => clean_downloads_only(app).await,
-        Some(CleanTarget::Versions(versions)) => clean_specific_versions(app, &versions).await,
+        Some(CleanTarget::Versions(versions)) => clean_specific_versions(app, versions).await,
     }
 }
 
 /// Clean specific versions from the comma-separated list
-async fn clean_specific_versions(app: &mut App, versions: &[ZigVersion]) -> crate::Result<()> {
+async fn clean_specific_versions(app: &mut App, versions: Vec<ZigVersion>) -> crate::Result<()> {
+    // Deduplicate semver variants
+    let versions = crate::tools::deduplicate_semver_variants(versions);
+
     // Format the version list for display
     let version_list: Vec<String> = versions
         .iter()
@@ -88,7 +91,7 @@ async fn clean_specific_versions(app: &mut App, versions: &[ZigVersion]) -> crat
     for version in versions {
         // Find if this version is actually installed
         let installation = installations.iter().find(|install| {
-            match version {
+            match &version {
                 ZigVersion::Semver(target_v) => !install.is_master && &install.version == target_v,
                 ZigVersion::Master(Some(target_v)) => {
                     install.is_master && &install.version == target_v
@@ -106,7 +109,7 @@ async fn clean_specific_versions(app: &mut App, versions: &[ZigVersion]) -> crat
                             .iter()
                             .filter(|i| !i.is_master)
                             .max_by(|a, b| a.version.cmp(&b.version));
-                        
+
                         if let Some(highest) = highest_stable {
                             &install.version == &highest.version
                         } else {
@@ -212,7 +215,13 @@ async fn clean_specific_versions(app: &mut App, versions: &[ZigVersion]) -> crat
 }
 
 /// Clean all versions except the specified ones
-async fn clean_except_versions(app: &mut App, except_versions: &[ZigVersion]) -> crate::Result<()> {
+async fn clean_except_versions(
+    app: &mut App,
+    except_versions: Vec<ZigVersion>,
+) -> crate::Result<()> {
+    // Deduplicate semver variants
+    let except_versions = crate::tools::deduplicate_semver_variants(except_versions);
+
     // Format the except version list for display
     let except_list: Vec<String> = except_versions
         .iter()
@@ -317,7 +326,7 @@ async fn clean_except_versions(app: &mut App, except_versions: &[ZigVersion]) ->
     }
 
     // Report non-existent versions in --except list (Requirement 4.3)
-    for except_ver in except_versions {
+    for except_ver in &except_versions {
         if !found_except_versions.contains(except_ver) {
             let display_name = match except_ver {
                 ZigVersion::Semver(v) => v.to_string(),

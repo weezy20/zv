@@ -8,6 +8,7 @@ use std::str::FromStr;
 use yansi::Paint;
 mod clean;
 mod init;
+mod install;
 mod list;
 mod setup;
 pub mod sync; // Make sync public so other modules can use check_and_update_zv_binary
@@ -111,6 +112,32 @@ pub enum Commands {
             conflicts_with = "zig"
         )]
         package: bool,
+    },
+
+    /// Install Zig version(s) without setting as active
+    #[clap(alias = "i")]
+    Install {
+        /// Force using ziglang.org as a download source. Default is to use community mirrors.
+        #[arg(
+            long = "force-ziglang",
+            short = 'f',
+            long_help = "Force using ziglang.org as a download source. Default is to use community mirrors."
+        )]
+        force_ziglang: bool,
+        /// Version(s) of Zig to install (comma-separated for multiple versions)
+        #[arg(
+            value_delimiter = ',',
+            value_parser = clap::value_parser!(ZigVersion),
+            help = "The version(s) of Zig to install. Use 'master', 'stable@<version>', 'stable', 'latest', or simply <version> (e.g., '0.15.1'). Multiple versions can be comma-separated.",
+            long_help = "The version(s) of Zig to install. Options:\n\
+                         • master             - Install master branch build\n\
+                         • <semver>           - Install specific version (e.g., 0.13.0, 1.2.3)\n\
+                         • stable@<version>   - Install specific stable version. Identical to just <version> (e.g., stable@0.13.0)\n\
+                         • stable             - Install latest stable release\n\
+                         • latest             - Install latest stable release (queries network instead of relying on cached index)\n\
+                         Multiple versions can be specified as comma-separated values."
+        )]
+        versions: Vec<ZigVersion>,
     },
 
     /// Select which Zig version to use - master | latest | stable | <semver>,
@@ -266,6 +293,10 @@ impl Commands {
                     std::process::exit(2);
                 }
             },
+            Commands::Install {
+                versions,
+                force_ziglang,
+            } => install::install_versions(versions, &mut app, force_ziglang).await,
             Commands::List => list::list_versions(&mut app).await,
             Commands::Clean {
                 except,
@@ -428,6 +459,10 @@ fn print_welcome_message(app: App) {
     print_command(
         "init",
         "Initialize a new Zig project from lean or standard zig template",
+    );
+    print_command(
+        "install",
+        "Install Zig version(s) without setting as active",
     );
     print_command(
         "use",
