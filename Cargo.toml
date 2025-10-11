@@ -116,4 +116,3 @@ lto = "thin"
 
 [dev-dependencies]
 serde_test = "1.0.177"
-wiremock = "0.6.2"
