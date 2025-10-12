@@ -1,5 +1,5 @@
 use crate::{
-    App, Shell, UserConfig, ZigVersion, suggest,
+    App, ResolvedZigVersion, Shell, UserConfig, ZigVersion, suggest,
     tools::{self, error},
 };
 use clap::{Parser, Subcommand};
@@ -500,7 +500,7 @@ fn print_welcome_message(app: App) {
     }
 
     // Current active Zig version
-    let active_zig: Option<ZigVersion> = app.get_active_version();
+    let active_zig: Option<ResolvedZigVersion> = app.get_active_version();
 
     let active_zig_str = active_zig
         .as_ref()

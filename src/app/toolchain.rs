@@ -16,9 +16,22 @@ pub struct ZigInstall {
     pub is_master: bool,
 }
 
+/// An entry representing an installed ZLS version
+#[derive(Debug, Clone)]
+pub struct ZlsInstall {
+    /// The semantic version of this installation
+    pub version: semver::Version,
+    /// Path to the root directory of this installation
+    pub path: PathBuf,
+    /// Whether this installation is from the "master" nested directory
+    pub is_master: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ToolchainManager {
     versions_path: PathBuf,
+    zls_versions_path: PathBuf,
+    zls_installations: Vec<ZlsInstall>,
     installations: Vec<ZigInstall>,
     active_install: Option<ZigInstall>,
     bin_path: PathBuf,
@@ -26,15 +39,38 @@ pub struct ToolchainManager {
 }
 
 impl ToolchainManager {
+    /// Fetch a compatible ZLS version for the given Zig version
+    pub async fn fetch_compatible_zls(
+        &mut self,
+        zig_version: &ResolvedZigVersion,
+    ) -> Result<PathBuf, ZvError> {
+        // Determine compatible ZLS version
+        // TODO: Implement ZLS compatibility logic
+        todo!()
+    }
+    /// Fetch latest ZLS version available in local installations
+    /// This is a fallback for when ZLS is executed without a compatible active zig version activated in zv
+    pub async fn fetch_highest_zls(&self) -> Result<ZlsInstall, ZvError> {
+        self.zls_installations
+            .last()
+            .cloned()
+            .ok_or_else(|| ZvError::ZlsError(eyre!("No ZLS installations found")))
+    }
+}
+impl ToolchainManager {
     pub async fn new(zv_root: impl AsRef<Path>) -> Result<Self, ZvError> {
         let zv_root = zv_root.as_ref().to_path_buf();
         let versions_path = zv_root.join("versions");
+        let zls_versions_path = zv_root.join("zls_versions");
         let bin_path = zv_root.join("bin");
         let active_file = zv_root.join("active.json");
 
         // discover what is on disk
         let installations =
             Self::scan_installations(&versions_path).map_err(ZvError::ZvAppInitError)?;
+
+        let zls_installations =
+            Self::scan_zls_installations(&zls_versions_path).map_err(ZvError::ZvAppInitError)?;
 
         // Helper function to find the best fallback version from installations
         let find_fallback_install = |installations: &[ZigInstall]| -> Option<ZigInstall> {
@@ -110,6 +146,8 @@ impl ToolchainManager {
 
         let toolchain_manager = Self {
             versions_path,
+            zls_versions_path,
+            zls_installations,
             installations,
             active_install,
             bin_path,
@@ -172,6 +210,87 @@ impl ToolchainManager {
                         path: path.to_path_buf(),
                         is_master: true,
                     });
+                }
+            }
+        }
+
+        out.sort_by(|a, b| a.version.cmp(&b.version));
+        Ok(out)
+    }
+
+    /// Scan ZLS installations in `zls_versions_path` and return a sorted list of found [ZlsInstall]s
+    pub(crate) fn scan_zls_installations(zls_versions_path: &Path) -> Result<Vec<ZlsInstall>> {
+        use walkdir::WalkDir;
+
+        let mut out = Vec::new();
+        if !zls_versions_path.is_dir() {
+            return Ok(out);
+        }
+
+        let zls_exe = Shim::Zls.executable_name();
+
+        // Walk only 2 levels deep: zls_versions/*  or  zls_versions/master/*
+        for entry in WalkDir::new(zls_versions_path)
+            .min_depth(1)
+            .max_depth(2)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_dir())
+        {
+            let path = entry.path();
+            let depth = entry.depth();
+
+            // case 1: depth 1 bare semver  ->  zls_versions/0.13.0
+            if depth == 1
+                && let Some(ver) = path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .and_then(|s| s.parse::<semver::Version>().ok())
+            {
+                let zls_bin = path.join(zls_exe);
+                if zls_bin.is_file() {
+                    out.push(ZlsInstall {
+                        version: ver,
+                        path: path.to_path_buf(),
+                        is_master: false,
+                    });
+                }
+            }
+
+            // case 2: depth 2 inside master  ->  zls_versions/master/0.13.0
+            if depth == 2
+                && path.parent().unwrap().file_name() == Some(std::ffi::OsStr::new("master"))
+                && let Some(ver) = path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .and_then(|s| s.parse::<semver::Version>().ok())
+            {
+                let zls_bin = path.join(zls_exe);
+                if zls_bin.is_file() {
+                    out.push(ZlsInstall {
+                        version: ver,
+                        path: path.to_path_buf(),
+                        is_master: true,
+                    });
+                }
+            }
+
+            // case 3: depth 1 master directory without nested semver  ->  zls_versions/master
+            // This handles cases where ZLS master is installed directly in the master folder
+            // Shouldn't happen generally, but here for fallback
+            if depth == 1 && path.file_name() == Some(std::ffi::OsStr::new("master")) {
+                let zls_bin = path.join(zls_exe);
+                if zls_bin.is_file() {
+                    // Try to extract version from zls --version output or use a placeholder
+                    // For now, we'll use a placeholder version to represent "master"
+                    // This will be improved when we add proper version detection
+                    if let Some(ver) = extract_zls_version_from_binary(&zls_bin) {
+                        out.push(ZlsInstall {
+                            version: ver,
+                            path: path.to_path_buf(),
+                            is_master: true,
+                        });
+                    }
                 }
             }
         }
@@ -608,4 +727,27 @@ impl ToolchainManager {
         }
         Ok(())
     }
+}
+
+/// Helper function to extract version from a ZLS binary
+/// Returns None if version cannot be determined
+fn extract_zls_version_from_binary(zls_path: &Path) -> Option<semver::Version> {
+    use std::process::Command;
+
+    // Try to run `zls --version` to get the version
+    let output = Command::new(zls_path).arg("--version").output().ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let version_str = String::from_utf8(output.stdout).ok()?;
+
+    // ZLS version output is typically in the format "0.13.0" or "0.13.0-dev.123+abcdef"
+    // Extract the version part
+    version_str
+        .trim()
+        .lines()
+        .next()
+        .and_then(|line| line.parse::<semver::Version>().ok())
 }

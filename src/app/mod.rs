@@ -209,12 +209,12 @@ impl App {
     }
 
     /// Get the current active Zig version
-    pub fn get_active_version(&self) -> Option<ZigVersion> {
+    pub fn get_active_version(&self) -> Option<ResolvedZigVersion> {
         self.toolchain_manager.get_active_install().map(|zi| {
             if zi.is_master {
-                ZigVersion::Master(Some(zi.version.clone()))
+                ResolvedZigVersion::Master(zi.version.clone())
             } else {
-                ZigVersion::Semver(zi.version.clone())
+                ResolvedZigVersion::Semver(zi.version.clone())
             }
         })
     }
@@ -294,15 +294,6 @@ impl App {
                 command: "zig ".to_string() + &args.join(" "),
             }
         })
-    }
-
-    /// Fetch a compatible ZLS version for the given Zig version
-    /// This is a placeholder implementation that will be expanded with proper compatibility logic
-    pub fn fetch_compatible_zls(&mut self, zig_version: &ZigVersion) -> Result<PathBuf, ZvError> {
-        tracing::info!("Fetching compatible ZLS for Zig version: {:?}", zig_version);
-
-        // Determine compatible ZLS version
-        todo!()
     }
 
     /// Fetch latest master and returns a [ZigRelease]
@@ -461,5 +452,18 @@ impl App {
         tracing::debug!(target: TARGET, "Cleaned up temporary download files");
 
         Ok(zig_exe)
+    }
+    /// Find a compatible ZLS executable for the current active Zig version
+    /// If no active Zig version, fetches latest ZLS
+    pub async fn zls_for_current_active_zig(&mut self) -> Result<PathBuf, ZvError> {
+        if let Some(active_zig) = self.get_active_version() {
+            self.toolchain_manager
+                .fetch_compatible_zls(&active_zig)
+                .await
+        } else {
+            tracing::warn!(target: "zv","No active Zig version detected, fetching latest ZLS");
+            let zls = self.toolchain_manager.fetch_highest_zls().await?;
+            Ok(zls.path)
+        }
     }
 }
