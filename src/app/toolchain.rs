@@ -593,8 +593,7 @@ impl ToolchainManager {
         tracing::debug!(target: TARGET, install_path = %install.path.display(), "Deploying shims for installation");
 
         self.create_shim(&zv_path, Shim::Zig).await?;
-        // TODO: ZLS support is unimplemented
-        // self.create_shim(&zv_path, Shim::Zls).await?;
+        self.create_shim(&zv_path, Shim::Zls).await?;
         if !quiet {
             tracing::info!(target: TARGET, "Successfully deployed zig version {}", install.version);
         }
