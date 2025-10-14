@@ -45,8 +45,37 @@ impl ToolchainManager {
         zig_version: &ResolvedZigVersion,
     ) -> Result<PathBuf, ZvError> {
         // Determine compatible ZLS version
-        // TODO: Implement ZLS compatibility logic
-        todo!()
+        match zig_version {
+            // Expected for stable Zig versions
+            ResolvedZigVersion::Semver(version) => {
+                // Find the highest ZLS version that is less than or equal to the Zig version
+                if let Some(zls) = self.zls_installations.iter().find(|zls| {
+                    zls.version.major == version.major && zls.version.minor == version.minor
+                }) {
+                    Ok(zls.path.clone())
+                } else {
+                    Err(ZvError::ZlsError(eyre!(
+                        "No compatible ZLS found for Zig version {} locally. Try installing: `zv zls`",
+                        version
+                    )))
+                }
+            }
+            ResolvedZigVersion::Master(version) => {
+                if let Some(zls) = self
+                    .zls_installations
+                    .iter()
+                    .rev()
+                    .find(|zls| zls.is_master)
+                {
+                    Ok(zls.path.clone())
+                } else {
+                    Err(ZvError::ZlsError(eyre!(
+                        "No compatible ZLS found for Zig master version {} locally. Try installing: `zv zls --master`",
+                        version
+                    )))
+                }
+            }
+        }
     }
     /// Fetch latest ZLS version available in local installations
     /// This is a fallback for when ZLS is executed without a compatible active zig version activated in zv

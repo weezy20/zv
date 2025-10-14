@@ -455,13 +455,13 @@ impl App {
     }
     /// Find a compatible ZLS executable for the current active Zig version
     /// If no active Zig version, fetches latest ZLS
-    pub async fn zls_for_current_active_zig(&mut self) -> Result<PathBuf, ZvError> {
+    pub async fn zls_for_current_active_zig_or_latest(&mut self) -> Result<PathBuf, ZvError> {
         if let Some(active_zig) = self.get_active_version() {
             self.toolchain_manager
                 .fetch_compatible_zls(&active_zig)
                 .await
         } else {
-            tracing::warn!(target: "zv","No active Zig version detected, fetching latest ZLS");
+            tracing::warn!(target: "zv","No active Zig version detected, using highest available ZLS");
             let zls = self.toolchain_manager.fetch_highest_zls().await?;
             Ok(zls.path)
         }

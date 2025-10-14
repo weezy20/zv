@@ -47,8 +47,9 @@ async fn find_local_compatible_zls() -> Result<PathBuf, ZvError> {
     })
     .await
     .map_err(|e| eyre!("Failed to initialize app: {}", e))?;
-
-    app.zls_for_current_active_zig().await
+    // Fetches local ZLS compatible with current active Zig version
+    // If not found, returns highest local version of ZLS
+    app.zls_for_current_active_zig_or_latest().await
 }
 
 pub(crate) async fn zls_command(cmd: ZlsCmd, mut app: App) -> crate::Result<()> {
