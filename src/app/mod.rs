@@ -76,7 +76,38 @@ pub struct App {
     /// Current detected shell
     pub(crate) shell: Option<crate::Shell>,
     /// ZigRelease to install - set during resolution phase
-    pub(crate) to_install: Option<ZigRelease>,
+    pub(crate) to_install: Option<Either>,
+}
+impl From<ZigRelease> for Either {
+    fn from(release: ZigRelease) -> Self {
+        Either::Release(release)
+    }
+}
+impl From<ResolvedZigVersion> for Either {
+    fn from(rzv: ResolvedZigVersion) -> Self {
+        Either::Version(rzv)
+    }
+}
+impl Either {
+    /// Convert to ZigRelease if possible
+    pub fn into_release(self) -> Option<ZigRelease> {
+        match self {
+            Either::Release(r) => Some(r),
+            Either::Version(_) => None,
+        }
+    }
+    /// Convert to ResolvedZigVersion if possible
+    pub fn into_version(self) -> Option<ResolvedZigVersion> {
+        match self {
+            Either::Version(v) => Some(v),
+            Either::Release(_) => None,
+        }
+    }
+}
+#[derive(Debug, Clone)]
+pub enum Either {
+    Version(ResolvedZigVersion),
+    Release(ZigRelease),
 }
 
 impl App {
@@ -351,15 +382,24 @@ impl App {
     pub fn check_installed(&self, rzv: &ResolvedZigVersion) -> Option<PathBuf> {
         self.toolchain_manager.is_version_installed(rzv)
     }
+    /// Install the current loaded `to_install` ZigVersion directly without index resolution
+    pub async fn install_direct(&mut self, force_ziglang: bool) -> Result<PathBuf, ZvError> {
+        const TARGET: &str = "zv::app::install_direct";
+        todo!()
+    }
     /// Install the current loaded `to_install` ZigRelease
     pub async fn install_release(&mut self, force_ziglang: bool) -> Result<PathBuf, ZvError> {
         const TARGET: &str = "zv::app::install_release";
 
-        let zig_release = self.to_install.take().ok_or_else(|| {
-            ZvError::ZigVersionResolveError(eyre!(
-                "No ZigRelease is currently loaded for installation"
-            ))
-        })?;
+        let zig_release = self
+            .to_install
+            .take()
+            .and_then(|z| z.into_release())
+            .ok_or_else(|| {
+                ZvError::ZigVersionResolveError(eyre!(
+                    "No ZigRelease is currently loaded for installation"
+                ))
+            })?;
 
         let semver_version = zig_release.resolved_version().version();
         let is_master = zig_release.resolved_version().is_master();

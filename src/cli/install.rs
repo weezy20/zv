@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
-use crate::app::network::ZigRelease;
-use crate::{ResolvedZigVersion, ZigVersion, ZvError};
-use crate::{app::App, cli::r#use::resolve_zig_version};
+use crate::{
+    ResolvedZigVersion, ZigVersion, ZvError,
+    app::{App, Either},
+    cli::r#use::resolve_zig_version,
+};
 use color_eyre::eyre::{Context, Result, eyre};
 use yansi::Paint;
 
@@ -36,15 +38,15 @@ pub(crate) async fn install_versions(
     // e.g., latest@0.14.0, stable@0.14.0, 0.14.0 all become just 0.14.0
     let zig_versions = crate::tools::deduplicate_semver_variants(zig_versions);
 
-    // First, resolve all versions to detect duplicates and store their ZigRelease objects
-    let mut resolved_map: HashMap<ResolvedZigVersion, ZigRelease> = HashMap::new();
+    // First, resolve all versions to detect duplicates and store their Either objects
+    let mut resolved_map: HashMap<ResolvedZigVersion, Either> = HashMap::new();
     let mut resolution_errors: Vec<(ZigVersion, ZvError)> = Vec::new();
 
     for zig_version in zig_versions {
         match resolve_zig_version(app, &zig_version).await {
             Ok(resolved) => {
-                // Get the ZigRelease that was set by resolve_zig_version
-                let zig_release = app.to_install.take().ok_or_else(|| {
+                // Get the Either that was set by resolve_zig_version
+                let install_either = app.to_install.take().ok_or_else(|| {
                     resolution_errors.push((
                         zig_version,
                         ZvError::ZigVersionResolveError(eyre!(
@@ -52,10 +54,12 @@ pub(crate) async fn install_versions(
                         )),
                     ));
                 });
-                if zig_release.is_err() {
+                if install_either.is_err() {
                     continue;
                 }
-                resolved_map.entry(resolved).or_insert(zig_release.unwrap());
+                resolved_map
+                    .entry(resolved)
+                    .or_insert(install_either.unwrap());
             }
             Err(e) => {
                 let error_msg = match e {
@@ -85,14 +89,14 @@ pub(crate) async fn install_versions(
     let mut failed_versions = Vec::new();
     println!(
         "📦 Installing {} version(s)...",
-        Paint::blue(&resolved_map.keys().len())
+        Paint::blue(&resolved_map.keys().len().to_string())
     );
 
     // Process each unique resolved version
-    for (resolved_version, zig_release) in resolved_map {
+    for (resolved_version, install_either) in resolved_map {
         match install_resolved_version(
             &resolved_version,
-            zig_release,
+            install_either,
             app,
             force_ziglang,
             should_set_active,
@@ -150,7 +154,7 @@ pub(crate) async fn install_versions(
 /// Install a single Zig version that has already been resolved
 async fn install_resolved_version(
     resolved_version: &ResolvedZigVersion,
-    zig_release: ZigRelease,
+    install_either: Either,
     app: &mut App,
     force_ziglang: bool,
     set_active: bool,
@@ -164,16 +168,27 @@ async fn install_resolved_version(
         return Ok(());
     }
 
-    // Set the ZigRelease for installation
-    app.to_install = Some(zig_release);
+    // Set the Either for installation
+    app.to_install = Some(install_either.clone());
 
-    // Now install with the correctly set app.to_install
-    app.install_release(force_ziglang).await.wrap_err_with(|| {
-        format!(
-            "Failed to download and install Zig version {}",
-            resolved_version
-        )
-    })?;
+    // Install based on the Either variant
+    match install_either {
+        Either::Release(_) => {
+            // Install a ZigRelease (resolved from index)
+            app.install_release(force_ziglang).await.wrap_err_with(|| {
+                format!(
+                    "Failed to download and install Zig version {}",
+                    resolved_version
+                )
+            })?;
+        }
+        Either::Version(_) => {
+            // Install a direct ResolvedZigVersion (without index resolution)
+            app.install_direct(force_ziglang)
+                .await
+                .wrap_err_with(|| format!("Failed to install Zig version {}", resolved_version))?;
+        }
+    }
 
     // Set as active if this is the special case (single version, no prior installations)
     if set_active {

@@ -1,3 +1,4 @@
+use crate::app::Either;
 use crate::{ResolvedZigVersion, ZigVersion};
 use crate::{
     Result, ZvError,
@@ -31,12 +32,21 @@ pub(crate) async fn use_version(
         // Version is already installed, just set it as active
         app.set_active_version(&resolved_version, Some(p)).await?
     } else {
-        app.install_release(force_ziglang).await.wrap_err_with(|| {
-            format!(
-                "Failed to download and install Zig version {}",
-                resolved_version
-            )
-        })?;
+        if let Some(Either::Version(_)) = app.to_install {
+            app.install_direct(force_ziglang).await.wrap_err_with(|| {
+                format!(
+                    "Failed to download and install Zig version {}",
+                    resolved_version
+                )
+            })?;
+        } else {
+            app.install_release(force_ziglang).await.wrap_err_with(|| {
+                format!(
+                    "Failed to download and install Zig version {}",
+                    resolved_version
+                )
+            })?;
+        }
 
         app.set_active_version(&resolved_version, None).await?
     }
@@ -67,9 +77,14 @@ pub async fn resolve_zig_version(
     match version {
         // Direct semver - validate it exists using app.validate_semver()
         ZigVersion::Semver(v) => {
+            if !v.pre.is_empty() {
+                tracing::trace!(target: TARGET, "Pre-release semver version, skipping index resolution: {v}");
+                app.to_install = Some(Either::Version(ResolvedZigVersion::Semver(v.to_owned())));
+                return Ok(ResolvedZigVersion::Semver(v.clone()));
+            }
             tracing::trace!(target: TARGET, "Resolving semver version: {}", v);
             let zig_release = app.validate_semver(v).await?;
-            app.to_install = Some(zig_release);
+            app.to_install = Some(Either::Release(zig_release));
             Ok(ResolvedZigVersion::Semver(v.clone()))
         }
 
@@ -87,7 +102,7 @@ pub async fn resolve_zig_version(
 
             // Verify the requested version matches the actual master version
             if index_master_version == v {
-                app.to_install = Some(master_release);
+                app.to_install = Some(master_release.into());
                 Ok(ResolvedZigVersion::Master(v.clone()))
             } else {
                 tracing::warn!(
@@ -108,12 +123,12 @@ pub async fn resolve_zig_version(
             // Extract the concrete version from the master release
             match master_version {
                 ResolvedZigVersion::Master(v) => {
-                    app.to_install = Some(master_release);
+                    app.to_install = Some(master_release.into());
                     Ok(ResolvedZigVersion::Master(v))
                 }
                 ResolvedZigVersion::Semver(v) => {
                     // If master is returned as a semver, convert it to MasterVersion
-                    app.to_install = Some(master_release);
+                    app.to_install = Some(master_release.into());
                     Ok(ResolvedZigVersion::Master(v))
                 }
             }
@@ -132,7 +147,7 @@ pub async fn resolve_zig_version(
 
             // Validate the version exists using RespectTTL strategy
             let zig_release = app.validate_semver(v).await?;
-            app.to_install = Some(zig_release);
+            app.to_install = Some(zig_release.into());
             Ok(ResolvedZigVersion::Semver(v.clone()))
         }
 
@@ -146,7 +161,7 @@ pub async fn resolve_zig_version(
             // Extract the semver from the resolved version
             match stable_version {
                 ResolvedZigVersion::Semver(semver) => {
-                    app.to_install = Some(stable_release);
+                    app.to_install = Some(stable_release.into());
                     Ok(ResolvedZigVersion::Semver(semver.clone()))
                 }
                 _ => Err(ZvError::ZigVersionResolveError(eyre!(
@@ -159,7 +174,7 @@ pub async fn resolve_zig_version(
         ZigVersion::Latest(Some(v)) => {
             tracing::trace!(target: TARGET, "Resolving latest version: {}", v);
             let zig_release = app.validate_semver(v).await?;
-            app.to_install = Some(zig_release);
+            app.to_install = Some(zig_release.into());
             Ok(ResolvedZigVersion::Semver(v.clone()))
         }
 
@@ -175,7 +190,7 @@ pub async fn resolve_zig_version(
             // Extract the semver from the resolved version
             match latest_version {
                 ResolvedZigVersion::Semver(semver) => {
-                    app.to_install = Some(latest_release);
+                    app.to_install = Some(latest_release.into());
                     Ok(ResolvedZigVersion::Semver(semver.clone()))
                 }
                 _ => Err(ZvError::ZigVersionResolveError(eyre!(
