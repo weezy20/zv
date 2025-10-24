@@ -370,9 +370,38 @@ impl ZvNetwork {
             .ensure_loaded(CacheStrategy::RespectTtl)
             .await
         {
-            Ok(index) => index.contains_version(version).cloned().ok_or_else(|| {
-                ZvError::ZigNotFound(eyre!("Version {} not found in Zig download index", version))
-            }),
+            Ok(index) => match index.contains_version(version).cloned() {
+                Some(release) => Ok(release),
+                None => {
+                    // Try updating zig index first. Maybe the semver is newer than our index contents and TTL hasn't refreshed index
+                    match self
+                        .index_manager
+                        .ensure_loaded(CacheStrategy::AlwaysRefresh)
+                        .await
+                    {
+                        Ok(updated_index) => updated_index
+                            .contains_version(version)
+                            .cloned()
+                            .ok_or_else(|| {
+                                ZvError::ZigNotFound(eyre!(
+                                    "Version {} not found in Zig download index after refresh",
+                                    version
+                                ))
+                            }),
+
+                        Err(network_err) => {
+                            tracing::error!(
+                                target: "zv::network::validate_semver",
+                                "Failed to refresh index from network: {network_err}. Cannot validate version"
+                            );
+                            Err(ZvError::ZigNotFound(
+                                eyre!("Version {} not found in Zig download index", version)
+                                    .wrap_err(network_err),
+                            ))
+                        }
+                    }
+                }
+            },
             Err(network_err) => {
                 tracing::error!(
                     target: "zv::network::validate_semver",
