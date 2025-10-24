@@ -251,6 +251,10 @@ impl ShellErr {
 #[derive(thiserror::Error, Debug)]
 /// ZV error type
 pub enum ZvError {
+    /// ZLS Error
+    #[error("ZLS error: {0}")]
+    ZlsError(#[source] Report),
+    
     /// Cannot Set Active Version
     #[error("Cannot set active version to {version}: {reason}")]
     CannotSetActiveVersion {

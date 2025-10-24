@@ -120,9 +120,8 @@ impl Template {
 
         let file_statuses = match &self.r#type {
             TemplateType::App { zon } => {
-                if let Some(zig_version) = app.get_active_version()
-                    && let Some(v) = zig_version.version()
-                {
+                if let Some(zig_version) = app.get_active_version() {
+                    let v = zig_version.version();
                     let mszv = include_str!(concat!(
                         env!("CARGO_MANIFEST_DIR"),
                         "/templates/.zigversion"
@@ -178,7 +177,9 @@ impl Template {
             (".gitignore", GITIGNORE_ZIG),
         ];
 
-        let build_zig_zon = self.generate_build_zig_zon(app, &minimal_files[..2]).await?;
+        let build_zig_zon = self
+            .generate_build_zig_zon(app, &minimal_files[..2])
+            .await?;
 
         self.create_template_files(&[
             minimal_files[0],
@@ -298,11 +299,12 @@ impl Template {
         path_files: &[(&str, &str)],
     ) -> Result<String, ZvError> {
         let active_zig_version = if let Some(active_version) = app.get_active_version() {
-            active_version.version().expect("valid semver").clone()
+            active_version.version().clone()
         } else {
             // Fetch latest version asynchronously
-            if let Ok(stable) =
-                app.fetch_latest_version(crate::app::CacheStrategy::OnlyCache).await
+            if let Ok(stable) = app
+                .fetch_latest_version(crate::app::CacheStrategy::OnlyCache)
+                .await
             {
                 tracing::debug!(
                     "Stable resolved version: {}",
