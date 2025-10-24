@@ -1,5 +1,12 @@
 # Changelog 
 
+## v0.5.0 → v0.5.1
+
+## Bug Fixes
+- Before: `zv install 0.15.2` would fail if zig index hadn't expired and `zv sync` was not run, or `zv install latest` wasn't used to fetch latest zig.
+- Now: `zv install <version>` falls back to fetching latest zig index if specified version is not found in cached index instead of erroring out.
+- That doesn't mean `zv v0.5.0` can't install the latest without a sync, you just had to use `zv install latest` or `zv use latest` or `zv use 0.15.2 -f` without any kind of sync beforehand.
+
 ## v0.4.0 → v0.5.0
 ## ✨ Features
 - **`zv install`**: Install without setting a zig version as active.
