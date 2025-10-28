@@ -160,14 +160,25 @@ impl ZvNetwork {
         &mut self,
         semver_version: &semver::Version,
         zig_tarball: &str,
-        download_artifact: &ArtifactInfo,
+        download_artifact: Option<&ArtifactInfo>,
     ) -> Result<ZigDownload, ZvError> {
         use crate::app::MAX_RETRIES;
         const TARGET: &str = "zv::network::download_version";
-        tracing::debug!(target: TARGET,
-            "Starting download: {zig_tarball} (version: {semver_version}, size: {size} bytes, checksum: {shasum})",shasum = download_artifact.shasum, size = download_artifact.size);
+        
+        if let Some(artifact) = download_artifact {
+            tracing::debug!(target: TARGET,
+                "Starting download: {zig_tarball} (version: {semver_version}, size: {size} bytes, checksum: {shasum})",
+                shasum = artifact.shasum, size = artifact.size);
+        } else {
+            tracing::debug!(target: TARGET,
+                "Starting download: {zig_tarball} (version: {semver_version}) - no artifact info available");
+        }
 
-        let (shasum, size) = (&download_artifact.shasum, download_artifact.size);
+        let (shasum, size) = if let Some(artifact) = download_artifact {
+            (Some(&artifact.shasum), Some(artifact.size))
+        } else {
+            (None, None)
+        };
 
         // Ensure mirror manager is loaded first. This is already done in app.install_release() so it's an error to not have it loaded
         // Also, we make sure of this by limiting visibility of this function to app module only
@@ -201,7 +212,11 @@ impl ZvNetwork {
             .map_err(ZvError::NetworkError)?;
 
         for attempt in 1..=max_retries {
-            tracing::debug!(target: TARGET, "Download attempt {attempt}/{max_retries} for {zig_tarball} (expected size: {:.1} MB)", size as f64 / 1_048_576.0);
+            if let Some(s) = size {
+                tracing::debug!(target: TARGET, "Download attempt {attempt}/{max_retries} for {zig_tarball} (expected size: {:.1} MB)", s as f64 / 1_048_576.0);
+            } else {
+                tracing::debug!(target: TARGET, "Download attempt {attempt}/{max_retries} for {zig_tarball} (expected size: unknown)");
+            }
             // Select mirror based on attempt number
             let selected_mirror = {
                 // For subsequent attempts, get ranked mirrors and select the best available
@@ -226,7 +241,7 @@ impl ZvNetwork {
                     zig_tarball,
                     &temp_tarball_path,
                     &temp_minisig_path,
-                    shasum,
+                    shasum.map(|s| s.as_str()),
                     size,
                     &progress_handle,
                 )
@@ -280,8 +295,13 @@ impl ZvNetwork {
                         }
                     }
 
-                    tracing::debug!(target: TARGET, "Successfully downloaded {} ({:.1} MB) using mirror {} after {} attempt(s)", 
-                                 zig_tarball, size as f64 / 1_048_576.0, selected_mirror.base_url, attempt);
+                    if let Some(s) = size {
+                        tracing::debug!(target: TARGET, "Successfully downloaded {} ({:.1} MB) using mirror {} after {} attempt(s)", 
+                                     zig_tarball, s as f64 / 1_048_576.0, selected_mirror.base_url, attempt);
+                    } else {
+                        tracing::debug!(target: TARGET, "Successfully downloaded {} using mirror {} after {} attempt(s)", 
+                                     zig_tarball, selected_mirror.base_url, attempt);
+                    }
 
                     let download_result = ZigDownload {
                         tarball_path: final_tarball_path,
@@ -583,16 +603,24 @@ impl ZvNetwork {
         tarball_url: &str,
         minisig_url: &str,
         zig_tarball: &str,
-        expected_shasum: &str,
-        expected_size: u64,
+        expected_shasum: Option<&str>,
+        expected_size: Option<u64>,
     ) -> Result<ZigDownload, ZvError> {
         const TARGET: &str = "zv::network::direct_download";
 
         tracing::debug!(target: TARGET, "Starting direct download from ziglang.org");
         tracing::debug!(target: TARGET, "Tarball URL: {}", tarball_url);
         tracing::debug!(target: TARGET, "Minisig URL: {}", minisig_url);
-        tracing::debug!(target: TARGET, "Expected size: {} bytes ({:.1} MB)", expected_size, expected_size as f64 / 1_048_576.0);
-        tracing::debug!(target: TARGET, "Expected checksum: {}", expected_shasum);
+        if let Some(size) = expected_size {
+            tracing::debug!(target: TARGET, "Expected size: {} bytes ({:.1} MB)", size, size as f64 / 1_048_576.0);
+        } else {
+            tracing::debug!(target: TARGET, "Expected size: unknown");
+        }
+        if let Some(shasum) = expected_shasum {
+            tracing::debug!(target: TARGET, "Expected checksum: {}", shasum);
+        } else {
+            tracing::debug!(target: TARGET, "Expected checksum: unknown");
+        }
 
         // Ensure download cache directory exists
         if !self.download_cache.exists() {
@@ -618,15 +646,19 @@ impl ZvNetwork {
             &self.client,
             tarball_url,
             &final_tarball_path,
-            expected_size,
+            expected_size.unwrap_or(0),
             &progress_handle,
         )
         .await
         .map_err(ZvError::NetworkError)?;
 
-        // Phase 2: Verify checksum
-        tracing::debug!(target: TARGET, "Verifying tarball checksum");
-        verify_checksum(&final_tarball_path, expected_shasum).await?;
+        // Phase 2: Verify checksum (if available)
+        if let Some(shasum) = expected_shasum {
+            tracing::debug!(target: TARGET, "Verifying tarball checksum");
+            verify_checksum(&final_tarball_path, shasum).await?;
+        } else {
+            tracing::debug!(target: TARGET, "Skipping checksum verification - no expected checksum provided");
+        }
 
         // Phase 3: Download minisig file directly from ziglang.org
         tracing::debug!(target: TARGET, "Downloading signature file directly from {}", minisig_url);
@@ -663,8 +695,12 @@ impl ZvNetwork {
             tracing::debug!(target: TARGET, "Failed to finish progress handle: {} - This is non-critical", e);
         }
 
-        tracing::debug!(target: TARGET, "Successfully downloaded and verified {} ({:.1} MB) from ziglang.org", 
-                     zig_tarball, expected_size as f64 / 1_048_576.0);
+        if let Some(size) = expected_size {
+            tracing::debug!(target: TARGET, "Successfully downloaded and verified {} ({:.1} MB) from ziglang.org", 
+                         zig_tarball, size as f64 / 1_048_576.0);
+        } else {
+            tracing::debug!(target: TARGET, "Successfully downloaded {} from ziglang.org", zig_tarball);
+        }
 
         Ok(ZigDownload {
             tarball_path: final_tarball_path,

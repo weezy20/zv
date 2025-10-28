@@ -121,8 +121,8 @@ impl Mirror {
     /// * `zig_tarball` - Name of the tarball file
     /// * `tarball_path` - Path where tarball should be saved
     /// * `minisig_path` - Path where minisig file should be saved
-    /// * `expected_shasum` - Expected SHA256 checksum for verification
-    /// * `expected_size` - Expected size of the tarball in bytes
+    /// * `expected_shasum` - Optional expected SHA256 checksum for verification
+    /// * `expected_size` - Optional expected size of the tarball in bytes
     /// * `progress_handle` - Handle for progress reporting
     ///
     /// # Returns
@@ -136,8 +136,8 @@ impl Mirror {
         zig_tarball: &str,
         tarball_path: &Path,
         minisig_path: &Path,
-        expected_shasum: &str,
-        expected_size: u64,
+        expected_shasum: Option<&str>,
+        expected_size: Option<u64>,
         progress_handle: &ProgressHandle,
     ) -> Result<()> {
         const TARGET: &str = "zv::network::mirror::download";
@@ -151,8 +151,16 @@ impl Mirror {
         tracing::trace!(target: TARGET, "Download URLs configured:");
         tracing::trace!(target: TARGET, "  Tarball: {}", tarball_url);
         tracing::trace!(target: TARGET, "  Minisig:  {}", minisig_url);
-        tracing::trace!(target: TARGET, "  Expected size: {} bytes ({:.1} MB)", expected_size, expected_size as f64 / 1_048_576.0);
-        tracing::trace!(target: TARGET, "  Expected checksum: {}", expected_shasum);
+        if let Some(size) = expected_size {
+            tracing::trace!(target: TARGET, "  Expected size: {} bytes ({:.1} MB)", size, size as f64 / 1_048_576.0);
+        } else {
+            tracing::trace!(target: TARGET, "  Expected size: unknown");
+        }
+        if let Some(shasum) = expected_shasum {
+            tracing::trace!(target: TARGET, "  Expected checksum: {}", shasum);
+        } else {
+            tracing::trace!(target: TARGET, "  Expected checksum: unknown");
+        }
 
         // Initialize progress reporting
         let progress_msg = format!("Downloading {} from {}", zig_tarball, self.base_url);
@@ -168,7 +176,7 @@ impl Mirror {
             client,
             &tarball_url,
             tarball_path,
-            expected_size,
+            expected_size.unwrap_or(0),
             progress_handle,
         )
         .await
@@ -195,24 +203,28 @@ impl Mirror {
             }
         }
 
-        // Phase 2: Verify checksum
-        tracing::debug!(target: TARGET, "Verifying tarball integrity");
-        match verify_checksum(tarball_path, expected_shasum).await {
-            Ok(()) => {
-                tracing::debug!(target: TARGET, "Checksum verification successful");
-            }
-            Err(e) => {
-                tracing::error!(target: TARGET, "Checksum verification failed for tarball from mirror {}: {}", self.base_url, e);
-                // Clean up the corrupted file
-                if tarball_path.exists() {
-                    if let Err(cleanup_err) = tokio::fs::remove_file(tarball_path).await {
-                        tracing::warn!(target: TARGET, "Failed to remove corrupted tarball file: {}", cleanup_err);
-                    } else {
-                        tracing::debug!(target: TARGET, "Removed corrupted tarball file");
-                    }
+        // Phase 2: Verify checksum (if available)
+        if let Some(shasum) = expected_shasum {
+            tracing::debug!(target: TARGET, "Verifying tarball integrity");
+            match verify_checksum(tarball_path, shasum).await {
+                Ok(()) => {
+                    tracing::debug!(target: TARGET, "Checksum verification successful");
                 }
-                bail!(e);
+                Err(e) => {
+                    tracing::error!(target: TARGET, "Checksum verification failed for tarball from mirror {}: {}", self.base_url, e);
+                    // Clean up the corrupted file
+                    if tarball_path.exists() {
+                        if let Err(cleanup_err) = tokio::fs::remove_file(tarball_path).await {
+                            tracing::warn!(target: TARGET, "Failed to remove corrupted tarball file: {}", cleanup_err);
+                        } else {
+                            tracing::debug!(target: TARGET, "Removed corrupted tarball file");
+                        }
+                    }
+                    bail!(e);
+                }
             }
+        } else {
+            tracing::debug!(target: TARGET, "Skipping checksum verification - no expected checksum provided");
         }
 
         // Phase 3: Download minisig file
@@ -276,8 +288,12 @@ impl Mirror {
                 let size = metadata.len();
                 tracing::debug!(target: TARGET, "Final tarball size: {} bytes ({:.1} MB)", size, size as f64 / 1_048_576.0);
 
-                if size != expected_size {
-                    tracing::warn!(target: TARGET, "Tarball size {} doesn't match expected size {} - this may indicate an issue", size, expected_size);
+                if let Some(expected) = expected_size {
+                    if size != expected {
+                        tracing::warn!(target: TARGET, "Tarball size {} doesn't match expected size {} - this may indicate an issue", size, expected);
+                    }
+                } else {
+                    tracing::debug!(target: TARGET, "No expected size provided for verification");
                 }
 
                 size
