@@ -1,5 +1,10 @@
 # Changelog 
 
+## v0.5.1 → v0.6.0
+
+## ✨ Features
+- Support installations of non indexed zig versions. MachEngine and many other projects rely on zig versions that are not available in the official zig index. Now `zv` supports installations of non-indexed zig versions as they're most likely present on community mirrors even if not indexed. Maybe a future version of `zv` will expand the index to include the machengine zig index for shasum/size information.
+
 ## v0.5.0 → v0.5.1
 
 ## Bug Fixes

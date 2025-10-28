@@ -1,6 +1,6 @@
 [package]
 name = "zv"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
 description = "Ziglang Version Manager and Project Starter"
 license = "MIT"
