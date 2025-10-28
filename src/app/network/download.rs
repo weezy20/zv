@@ -138,7 +138,8 @@ pub(in crate::app::network) async fn stream_download_file(
 
     // Get content length for progress calculation
     let content_length = response.content_length().unwrap_or(expected_size);
-    tracing::debug!(target: TARGET, "Starting download: {} bytes from {}", content_length, url);
+    let actual_size = if expected_size == 0 { content_length } else { expected_size };
+    tracing::debug!(target: TARGET, "Starting download: {} bytes from {} (content-length: {})", actual_size, url, content_length);
 
     // Create the destination file
     let mut file = tokio::fs::File::create(dest_path)
@@ -174,16 +175,16 @@ pub(in crate::app::network) async fn stream_download_file(
         // Update progress periodically to avoid overwhelming the progress bar
         let now = Instant::now();
         if now.duration_since(last_progress_update) >= PROGRESS_UPDATE_INTERVAL {
-            let percentage = if content_length > 0 {
-                (downloaded * 100) / content_length
+            let percentage = if actual_size > 0 {
+                (downloaded * 100) / actual_size
             } else {
                 0
             };
 
             let downloaded_mb = downloaded as f64 / 1_048_576.0; // Convert to MB
-            let total_mb = content_length as f64 / 1_048_576.0;
+            let total_mb = actual_size as f64 / 1_048_576.0;
 
-            let progress_msg = if content_length > 0 {
+            let progress_msg = if actual_size > 0 {
                 format!(
                     "Downloading {:.1}/{:.1} MB ({}%)",
                     downloaded_mb, total_mb, percentage
