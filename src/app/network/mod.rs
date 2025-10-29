@@ -46,9 +46,9 @@ pub struct ZigDownload {
 #[derive(Debug, Clone)]
 pub struct ZvNetwork {
     /// Management layer for community-mirrors
-    mirror_manager: Option<MirrorManager>,
+    pub mirror_manager: Option<MirrorManager>,
     /// Zig version index
-    index_manager: IndexManager,
+    pub index_manager: IndexManager,
     /// ZV_DIR
     base_path: PathBuf,
     /// Download cache path (ZV_DIR/downloads)

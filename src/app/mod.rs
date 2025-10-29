@@ -216,7 +216,11 @@ impl App {
         }
         Ok(())
     }
-
+    /// Fetch a handle to IndexManger
+    pub async fn index_manager(&mut self) -> Result<&mut network::IndexManager, ZvError> {
+        self.ensure_network().await?;
+        Ok(&mut self.network.as_mut().unwrap().index_manager)
+    }
     /// Force refresh the Zig index from network
     pub async fn sync_zig_index(&mut self) -> Result<(), ZvError> {
         self.ensure_network().await?;
@@ -453,7 +457,10 @@ impl App {
             let ziglang_org_tarball = if !semver_version.pre.is_empty() {
                 format!("https://ziglang.org/builds/{zig_tarball}")
             } else {
-                format!("https://ziglang.org/download/{}/{zig_tarball}", semver_version.to_string())
+                format!(
+                    "https://ziglang.org/download/{}/{zig_tarball}",
+                    semver_version.to_string()
+                )
             };
             let ziglang_org_minisig = format!("{}.minisig", ziglang_org_tarball);
 
