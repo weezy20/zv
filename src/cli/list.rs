@@ -1,42 +1,45 @@
+use std::time::Duration;
+
 use crate::{App, Result};
+use semver::Version;
 use yansi::Paint;
 
 const SEPARATOR: &str = "\n----------------------------------------\n";
 
-pub async fn list_opts(app: &mut App, all: bool, mirrors: bool) -> Result<()> {
+pub async fn list_opts(mut app: App, all: bool, mirrors: bool) -> Result<()> {
     if !all && !mirrors {
-        list_versions(app).await
+        list_versions(&app).await
     } else if all && mirrors {
-        list_all(app).await?;
+        let mut app = list_all(app).await?;
         println!("{SEPARATOR}");
-        list_mirrors(app).await?;
+        let _ = list_mirrors(&mut app).await?;
         Ok(())
     } else if all {
-        list_all(app).await
+        list_all(app).await.and_then(|_| Ok(()))
     } else if mirrors {
-        list_mirrors(app).await
+        list_mirrors(&mut app).await
     } else {
         Ok(())
     }
 }
 
-pub async fn list_versions(app: &mut App) -> Result<()> {
+pub async fn list_versions(app: &App) -> Result<()> {
     let installed = app.toolchain_manager.list_installations();
-
-    for (version, is_active, is_master) in installed {
-        let active_marker = if is_active {
+    println!("{}","Installed zig versions:".italic());
+    for (version, is_active, is_master) in installed.iter() {
+        let active_marker = if *is_active {
             Paint::green("★ ").to_string()
         } else {
             "  ".into()
         };
 
-        let master_marker = if is_master {
+        let master_marker = if *is_master {
             Paint::yellow(" (master)").to_string()
         } else {
             "  ".into()
         };
 
-        let version_display = if is_active {
+        let version_display = if *is_active {
             Paint::green(&version.to_string()).bold().to_string()
         } else {
             version.to_string()
@@ -48,7 +51,14 @@ pub async fn list_versions(app: &mut App) -> Result<()> {
     Ok(())
 }
 
-async fn list_all(app: &mut App) -> Result<()> {
+async fn list_all(mut app: App) -> Result<App> {
+    let installed = app
+        .toolchain_manager
+        .list_installations()
+        .iter()
+        .map(|i| i.0.clone())
+        .collect::<Vec<Version>>();
+
     let index = app.index_manager().await?;
     let zig_index = index
         .ensure_loaded(crate::app::CacheStrategy::PreferCache)
@@ -62,9 +72,14 @@ async fn list_all(app: &mut App) -> Result<()> {
     let target_width = (term_width as f32 * 0.6) as usize;
     let mut current_line_width = 0;
     let mut is_first = true;
-    println!("Available Zig Versions:");
-    for version in zig_index.releases().keys() {
-        let version_str = format!("{}", version);
+
+    println!("{}","Available zig versions in cached index:".italic());
+    for version in zig_index.releases().keys().rev() {
+        let version_str = if installed.contains(version.version()) {
+            format!("{}", Paint::green(version).bold())
+        } else {
+            format!("{}", version)
+        };
         let item_width = version_str.len() + 3; // +3 for ", " separator and padding
 
         // Check if adding this version would exceed target width
@@ -86,7 +101,7 @@ async fn list_all(app: &mut App) -> Result<()> {
 
     println!(); // Final newline
 
-    Ok(())
+    Ok(app)
 }
 
 async fn list_mirrors(app: &mut App) -> Result<()> {

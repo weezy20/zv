@@ -1,4 +1,3 @@
-use crate::app::FETCH_TIMEOUT_SECS;
 use crate::app::constants::ZIG_DOWNLOAD_INDEX_JSON;
 use crate::app::utils::{ProgressHandle, remove_files, verify_checksum, zv_agent};
 use crate::{NetErr, ZvError};
@@ -164,7 +163,7 @@ impl ZvNetwork {
     ) -> Result<ZigDownload, ZvError> {
         use crate::app::MAX_RETRIES;
         const TARGET: &str = "zv::network::download_version";
-        
+
         if let Some(artifact) = download_artifact {
             tracing::debug!(target: TARGET,
                 "Starting download: {zig_tarball} (version: {semver_version}, size: {size} bytes, checksum: {shasum})",
@@ -747,7 +746,7 @@ pub(crate) async fn try_partial_fetch_master(
     let response = client
         .get(ZIG_DOWNLOAD_INDEX_JSON)
         .header("Range", "bytes=0-8191") // 8KB should be enough for most master objects
-        .timeout(Duration::from_secs(*FETCH_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(2))
         .send()
         .await
         .map_err(|err| {

@@ -308,7 +308,7 @@ impl Commands {
                 versions,
                 force_ziglang,
             } => install::install_versions(versions, &mut app, force_ziglang).await,
-            Commands::List { all, mirrors } => list::list_opts(&mut app, all, mirrors).await,
+            Commands::List { all, mirrors } => list::list_opts(app, all, mirrors).await,
             Commands::Clean {
                 except,
                 outdated,

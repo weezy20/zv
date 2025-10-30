@@ -33,7 +33,7 @@ pub static FETCH_TIMEOUT_SECS: LazyLock<u64> = LazyLock::new(|| {
     std::env::var("ZV_FETCH_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(15)
+        .unwrap_or(4)
 });
 /// Maximum number of retry attempts for downloads
 pub static MAX_RETRIES: LazyLock<u32> = LazyLock::new(|| {
