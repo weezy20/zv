@@ -684,7 +684,11 @@ impl ZvNetwork {
             tracing::warn!(target: TARGET, "Failed to update progress for signature verification: {} - continuing", e);
         }
 
-        crate::app::minisign::verify_minisign_signature(&final_tarball_path, &final_minisig_path)?;
+        crate::app::minisign::verify_minisign_signature(
+            &zig_tarball,
+            &final_tarball_path,
+            &final_minisig_path,
+        )?;
 
         // Finish progress reporting
         if let Err(e) = progress_handle

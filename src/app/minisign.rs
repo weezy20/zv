@@ -7,6 +7,7 @@ use color_eyre::eyre::eyre;
 use minisign_verify::{PublicKey, Signature};
 
 pub fn verify_minisign_signature(
+    expected_filename: &str,
     tarball: &std::path::Path,
     signature: &std::path::Path,
 ) -> Result<(), ZvError> {
@@ -15,6 +16,17 @@ pub fn verify_minisign_signature(
     })?;
     let sig = Signature::from_file(signature)
         .map_err(|e| ZvError::MinisignError(eyre!("Failed to read signature file: {e}")))?;
+
+    let trusted_comment = sig.trusted_comment();
+
+    if !trusted_comment.contains(expected_filename) {
+        return Err(ZvError::MinisignError(eyre!(
+            "Signature filename mismatch: expected '{}' in trusted comment, got '{}'",
+            expected_filename,
+            trusted_comment
+        )));
+    }
+
     // Stream verifier
     let mut verifier = pubkey
         .verify_stream(&sig)
