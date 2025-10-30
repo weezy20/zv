@@ -22,10 +22,25 @@ pub async fn list_opts(mut app: App, all: bool, mirrors: bool) -> Result<()> {
         Ok(())
     }
 }
-
 pub async fn list_versions(app: &App) -> Result<()> {
     let installed = app.toolchain_manager.list_installations();
-    println!("{}","Installed zig versions:".italic());
+
+    if installed.is_empty() {
+        println!("{}", "No zig versions installed.".italic());
+        return Ok(());
+    }
+
+    println!("{}", "Installed zig versions:".italic());
+
+    // Get terminal width, default to 80 if unable to determine
+    let term_width = terminal_size::terminal_size()
+        .map(|(w, _)| w.0 as usize)
+        .unwrap_or(80);
+
+    let target_width = (term_width as f32 * 0.6) as usize;
+    let mut current_line_width = 0;
+    let mut is_first = true;
+
     for (version, is_active, is_master) in installed.iter() {
         let active_marker = if *is_active {
             Paint::green("★ ").to_string()
@@ -36,7 +51,7 @@ pub async fn list_versions(app: &App) -> Result<()> {
         let master_marker = if *is_master {
             Paint::yellow(" (master)").to_string()
         } else {
-            "  ".into()
+            "".into()
         };
 
         let version_display = if *is_active {
@@ -45,12 +60,33 @@ pub async fn list_versions(app: &App) -> Result<()> {
             version.to_string()
         };
 
-        println!("{active_marker}{version_display}{master_marker}");
+        let full_item = format!("{}{}{}", active_marker, version_display, master_marker);
+
+        // Calculate visible width (approximate, not accounting for ANSI codes)
+        let visible_width = version.to_string().len() + 2 + master_marker.len(); // +2 for active_marker space
+        let item_width = visible_width + 3; // +3 for separator padding
+
+        // Check if adding this version would exceed target width
+        if !is_first && current_line_width + item_width > target_width {
+            println!(); // Start new line
+            current_line_width = 0;
+        }
+
+        if current_line_width == 0 {
+            print!("{}", full_item);
+            current_line_width = visible_width;
+        } else {
+            print!(",  {}", full_item);
+            current_line_width += item_width;
+        }
+
+        is_first = false;
     }
+
+    println!(); // Final newline
 
     Ok(())
 }
-
 async fn list_all(mut app: App) -> Result<App> {
     let installed = app
         .toolchain_manager
@@ -73,7 +109,7 @@ async fn list_all(mut app: App) -> Result<App> {
     let mut current_line_width = 0;
     let mut is_first = true;
 
-    println!("{}","Available zig versions in cached index:".italic());
+    println!("{}", "Available zig versions in cached index:".italic());
     for version in zig_index.releases().keys().rev() {
         let version_str = if installed.contains(version.version()) {
             format!("{}", Paint::green(version).bold())
