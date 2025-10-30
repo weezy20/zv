@@ -165,7 +165,28 @@ pub enum Commands {
 
     /// List installed Zig versions
     #[clap(name = "list", alias = "ls")]
-    List,
+    List {
+        /// List all versions present in cached index
+        #[arg(
+            long = "all",
+            short = 'a',
+            help = "List all available versions from the index"
+        )]
+        all: bool,
+        #[arg(
+            long = "mirrors",
+            short = 'm',
+            help = "List current mirrors list with rank"
+        )]
+        mirrors: bool,
+        /// Force mirrors/index network refresh.
+        #[arg(
+            long = "refresh",
+            short = 'r',
+            help = "Force refresh mirrors and/or index from network (only affects -a/--all and -m/--mirrors)"
+        )]
+        refresh: bool,
+    },
 
     /// Clean up Zig installations. Non-zv managed installations will not be affected.
     #[clap(name = "clean", alias = "rm")]
@@ -239,10 +260,7 @@ pub enum Commands {
             help = "Force update even if the current version is the latest"
         )]
         force: bool,
-        #[arg(
-            long,
-            help = "Include pre-release versions when checking for updates"
-        )]
+        #[arg(long, help = "Include pre-release versions when checking for updates")]
         rc: bool,
     },
     /// Synchronize index, mirrors list and metadata for zv. Also replaces `ZV_DIR/bin/zv` if outdated against current invocation.
@@ -297,7 +315,7 @@ impl Commands {
                 versions,
                 force_ziglang,
             } => install::install_versions(versions, &mut app, force_ziglang).await,
-            Commands::List => list::list_versions(&mut app).await,
+            Commands::List { all, mirrors, refresh } => list::list_opts(app, all, mirrors, refresh).await,
             Commands::Clean {
                 except,
                 outdated,

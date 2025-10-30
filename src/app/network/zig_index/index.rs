@@ -107,7 +107,7 @@ impl IndexManager {
     ) -> Result<&ZigIndex, ZvError> {
         match cache_strategy {
             CacheStrategy::AlwaysRefresh => {
-                // Always fetch fresh data from network
+                // Always fetch fresh data from network; For timeout we prefer the env var FETCH_TIMEOUT_SECS
                 tracing::debug!(target: TARGET, "Refreshing index - fetching from network");
                 self.refresh_from_network().await?;
             }
