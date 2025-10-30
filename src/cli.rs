@@ -179,6 +179,13 @@ pub enum Commands {
             help = "List current mirrors list with rank"
         )]
         mirrors: bool,
+        /// Force mirrors/index network refresh.
+        #[arg(
+            long = "refresh",
+            short = 'r',
+            help = "Force refresh mirrors and/or index from network (only affects -a/--all and -m/--mirrors)"
+        )]
+        refresh: bool,
     },
 
     /// Clean up Zig installations. Non-zv managed installations will not be affected.
@@ -308,7 +315,7 @@ impl Commands {
                 versions,
                 force_ziglang,
             } => install::install_versions(versions, &mut app, force_ziglang).await,
-            Commands::List { all, mirrors } => list::list_opts(app, all, mirrors).await,
+            Commands::List { all, mirrors, refresh } => list::list_opts(app, all, mirrors, refresh).await,
             Commands::Clean {
                 except,
                 outdated,

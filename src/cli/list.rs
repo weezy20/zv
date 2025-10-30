@@ -4,18 +4,18 @@ use yansi::Paint;
 
 const SEPARATOR: &str = "\n----------------------------------------\n";
 
-pub async fn list_opts(mut app: App, all: bool, mirrors: bool) -> Result<()> {
+pub async fn list_opts(mut app: App, all: bool, mirrors: bool, refresh: bool) -> Result<()> {
     if !all && !mirrors {
         list_versions(&app).await
     } else if all && mirrors {
-        let mut app = list_all(app).await?;
+        let mut app = list_all(app, refresh).await?;
         println!("{SEPARATOR}");
-        let _ = list_mirrors(&mut app).await?;
+        let _ = list_mirrors(&mut app, refresh).await?;
         Ok(())
     } else if all {
-        list_all(app).await.and_then(|_| Ok(()))
+        list_all(app, refresh).await.and_then(|_| Ok(()))
     } else if mirrors {
-        list_mirrors(&mut app).await
+        list_mirrors(&mut app, refresh).await
     } else {
         Ok(())
     }
@@ -85,7 +85,7 @@ pub async fn list_versions(app: &App) -> Result<()> {
 
     Ok(())
 }
-async fn list_all(mut app: App) -> Result<App> {
+async fn list_all(mut app: App, refresh: bool) -> Result<App> {
     let installed = app
         .toolchain_manager
         .list_installations()
@@ -93,10 +93,14 @@ async fn list_all(mut app: App) -> Result<App> {
         .map(|i| i.0.clone())
         .collect::<Vec<Version>>();
 
+    let cache_strategy = if refresh {
+        crate::app::CacheStrategy::AlwaysRefresh
+    } else {
+        crate::app::CacheStrategy::PreferCache
+    };
+
     let index = app.index_manager().await?;
-    let zig_index = index
-        .ensure_loaded(crate::app::CacheStrategy::PreferCache)
-        .await?;
+    let zig_index = index.ensure_loaded(cache_strategy).await?;
 
     // Get terminal width, default to 80 if unable to determine
     let term_width = terminal_size::terminal_size()
@@ -138,13 +142,19 @@ async fn list_all(mut app: App) -> Result<App> {
     Ok(app)
 }
 
-async fn list_mirrors(app: &mut App) -> Result<()> {
-    // Get the mirror manager and load mirrors using PreferCache strategy
+async fn list_mirrors(app: &mut App, refresh: bool) -> Result<()> {
+    let cache_strategy = if refresh {
+        crate::app::CacheStrategy::AlwaysRefresh
+    } else {
+        crate::app::CacheStrategy::PreferCache
+    };
+
+    // Get the mirror manager and load mirrors using the appropriate strategy
     let mirror_manager = app.mirror_manager().await?;
 
-    // Load mirrors with PreferCache strategy
+    // Load mirrors with the selected cache strategy
     mirror_manager
-        .load_mirrors(crate::app::CacheStrategy::PreferCache)
+        .load_mirrors(cache_strategy)
         .await
         .map_err(crate::ZvError::NetworkError)?;
 
