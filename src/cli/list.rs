@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::{App, Result};
 use semver::Version;
 use yansi::Paint;
@@ -109,7 +107,7 @@ async fn list_all(mut app: App) -> Result<App> {
     let mut current_line_width = 0;
     let mut is_first = true;
 
-    println!("{}", "Available zig versions in cached index:".italic());
+    println!("{}\n", "Available zig versions in cached index:".italic());
     for version in zig_index.releases().keys().rev() {
         let version_str = if installed.contains(version.version()) {
             format!("{}", Paint::green(version).bold())
@@ -141,5 +139,69 @@ async fn list_all(mut app: App) -> Result<App> {
 }
 
 async fn list_mirrors(app: &mut App) -> Result<()> {
-    todo!()
+    // Get the mirror manager and load mirrors using PreferCache strategy
+    let mirror_manager = app.mirror_manager().await?;
+
+    // Load mirrors with PreferCache strategy
+    mirror_manager
+        .load_mirrors(crate::app::CacheStrategy::PreferCache)
+        .await
+        .map_err(crate::ZvError::NetworkError)?;
+
+    // Get all mirrors and sort by rank
+    let mirrors = mirror_manager
+        .sort_by_rank()
+        .await
+        .map_err(crate::ZvError::NetworkError)?;
+
+    if mirrors.is_empty() {
+        println!("{}", "No community mirrors available.".italic());
+        return Ok(());
+    }
+
+    println!("{}", "Community mirrors:".italic());
+    println!();
+
+    // Display each mirror with rank and URL
+    for mirror in mirrors.iter() {
+        let rank_str = format!("#{}", mirror.rank);
+        let rank_display = match mirror.rank {
+            1 => Paint::green(&rank_str).bold().to_string(),
+            2..=3 => Paint::yellow(&rank_str).to_string(),
+            _ => Paint::red(&rank_str).to_string(),
+        };
+
+        let layout_display = match mirror.layout {
+            crate::app::network::mirror::Layout::Flat => "flat",
+            crate::app::network::mirror::Layout::Versioned => "versioned",
+        };
+
+        println!(
+            "  {} {} ({})",
+            rank_display,
+            mirror.base_url,
+            Paint::cyan(layout_display).italic()
+        );
+    }
+    println!();
+    println!(
+        "{}",
+        "Lower rank numbers indicate higher priority mirrors."
+            .italic()
+            .dim()
+    );
+
+    let zv_dir_display = match crate::tools::fetch_zv_dir() {
+        Ok((path, _)) => path.display().to_string(),
+        Err(_) => "ZV_DIR".to_string(),
+    };
+
+    println!(
+        "{}",
+        format!("You can edit mirror rankings in your {zv_dir_display}/mirrors.toml file.")
+            .italic()
+            .dim()
+    );
+
+    Ok(())
 }

@@ -9,7 +9,7 @@ use std::{
 
 use crate::types::{ResolvedZigVersion, TargetTriple};
 use std::collections::HashMap;
-mod mirror;
+pub mod mirror;
 use mirror::*;
 mod zig_index;
 pub use zig_index::*;

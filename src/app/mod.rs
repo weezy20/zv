@@ -221,6 +221,11 @@ impl App {
         self.ensure_network().await?;
         Ok(&mut self.network.as_mut().unwrap().index_manager)
     }
+    /// Fetch a handle to MirrorManager
+    pub async fn mirror_manager(&mut self) -> Result<&mut network::mirror::MirrorManager, ZvError> {
+        self.ensure_network_with_mirrors().await?;
+        Ok(self.network.as_mut().unwrap().mirror_manager.as_mut().unwrap())
+    }
     /// Force refresh the Zig index from network
     pub async fn sync_zig_index(&mut self) -> Result<(), ZvError> {
         self.ensure_network().await?;
