@@ -94,10 +94,7 @@ pub async fn resolve_zig_version(
             let master_version = master_release.resolved_version();
 
             // Extract the semver version from the resolved version for comparison
-            let index_master_version = match master_version {
-                ResolvedZigVersion::Semver(semver) => semver,
-                ResolvedZigVersion::Master(semver) => semver,
-            };
+            let index_master_version = master_version.version();
 
             // Verify the requested version matches the actual master version
             if index_master_version == v {

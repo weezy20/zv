@@ -300,19 +300,22 @@ impl From<&Version> for ResolvedZigVersion {
 
 impl ResolvedZigVersion {
     /// Extracts the version from ResolvedZigVersion variants that contain a Version
+    #[inline]
     pub fn version(&self) -> &Version {
         match self {
             ResolvedZigVersion::Semver(v) => v,
             ResolvedZigVersion::Master(v) => v,
         }
     }
-
+    
     /// Returns true if this is a master variant (MasterVersion)
+    #[inline]
     pub fn is_master(&self) -> bool {
         matches!(self, ResolvedZigVersion::Master(_))
     }
-
+    
     /// Returns true if this is a semver variant
+    #[inline]
     pub fn is_semver(&self) -> bool {
         matches!(self, ResolvedZigVersion::Semver(_))
     }
