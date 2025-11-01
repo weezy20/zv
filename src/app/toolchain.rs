@@ -182,17 +182,35 @@ impl ToolchainManager {
 
     /// Check if a specific version is installed
     pub fn is_version_installed(&self, rzv: &ResolvedZigVersion) -> Option<PathBuf> {
-        let (is_master, version) = (rzv.is_master(), rzv.version());
-        let base = if is_master {
-            self.versions_path.join("master").join(version.to_string())
-        } else {
-            self.versions_path.join(version.to_string())
-        };
-        if !base.is_dir() {
-            return None;
+        let version = rzv.version();
+        if rzv.is_master() {
+            let base = self.versions_path.join("master").join(version.to_string());
+            if !base.is_dir() {
+                return None;
+            }
+            let zig = base.join(Shim::Zig.executable_name());
+            if zig.is_file() {
+                return Some(zig);
+            }
         }
-        let zig = base.join(Shim::Zig.executable_name());
-        if zig.is_file() { Some(zig) } else { None }
+        // Else fallback to checking versions/<semver>
+        let zig = self
+            .versions_path
+            .join(version.to_string())
+            .join(Shim::Zig.executable_name());
+        if zig.is_file() {
+            Some(zig)
+        } else {
+            // Check master dir for pre-releases semver which might not trigger is_master():
+            if !version.pre.is_empty() {
+                let alt_base = self.versions_path.join("master").join(version.to_string());
+                let alt_zig = alt_base.join(Shim::Zig.executable_name());
+                if alt_zig.is_file() {
+                    return Some(alt_zig);
+                }
+            }
+            None
+        }
     }
 
     /// Install a Zig version from a downloaded archive
