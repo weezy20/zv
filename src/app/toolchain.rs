@@ -192,6 +192,12 @@ impl ToolchainManager {
             if zig.is_file() {
                 return Some(zig);
             }
+            // For older masters that've been moved into `versions/<semver>` following the oncoming changes:
+            let alt_base = self.versions_path.join(version.to_string());
+            let alt_zig = alt_base.join(Shim::Zig.executable_name());
+            if alt_zig.is_file() {
+                return Some(alt_zig);
+            }
         }
         // Else fallback to checking versions/<semver>
         let zig = self

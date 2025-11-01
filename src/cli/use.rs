@@ -104,7 +104,7 @@ pub async fn resolve_zig_version(
                 app.to_install = Some(master_release.into());
             } else {
                 tracing::warn!(
-                    "Master version mismatch: requested {}, but master is at {}",
+                    "Master version mismatch: requested {}, but current master is at {}",
                     v,
                     index_master_version
                 );
