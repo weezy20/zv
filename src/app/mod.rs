@@ -224,7 +224,13 @@ impl App {
     /// Fetch a handle to MirrorManager
     pub async fn mirror_manager(&mut self) -> Result<&mut network::mirror::MirrorManager, ZvError> {
         self.ensure_network_with_mirrors().await?;
-        Ok(self.network.as_mut().unwrap().mirror_manager.as_mut().unwrap())
+        Ok(self
+            .network
+            .as_mut()
+            .unwrap()
+            .mirror_manager
+            .as_mut()
+            .unwrap())
     }
     /// Force refresh the Zig index from network
     pub async fn sync_zig_index(&mut self) -> Result<(), ZvError> {
@@ -370,11 +376,8 @@ impl App {
             .await?;
         Ok(zig_release)
     }
-    /// Validate if a semver version exists in the index and returns a [ZigRelease]
-    pub async fn validate_semver(
-        &mut self,
-        version: &semver::Version,
-    ) -> Result<ZigRelease, ZvError> {
+    /// Validate if a semver version exists in the index and returns a [ZigRelease] or [ResolvedZigVersion]
+    pub async fn validate_semver(&mut self, version: &semver::Version) -> Result<Either, ZvError> {
         // todo!("Implement semver validation against installed versions and return early or else");
         self.ensure_network().await?;
         let zig_release = self
@@ -382,8 +385,11 @@ impl App {
             .as_mut()
             .unwrap()
             .validate_semver(version)
-            .await?;
-        Ok(zig_release)
+            .await;
+        match zig_release {
+            Ok(release) => Ok(Either::Release(release)),
+            Err(_) => Ok(Either::Version(ResolvedZigVersion::Semver(version.clone()))),
+        }
     }
 
     /// Check if version is installed returning Some(path) to zig binary if so
