@@ -1,12 +1,12 @@
 //! Migration system for zv
 //!
 //! Handles data migrations between different versions of zv.
-//! For 0.9.0 onwards we have the following migrations:
+//! For 0.9.0 onwards we have to following migrations:
 //! - Flattening versions/master/* → versions/*
 //! - Migrating active.json → zv.toml
 //! - Text file for tracking master version (cache)
 
-use color_eyre::eyre::{Context, Result, eyre};
+use color_eyre::eyre::{Context, Result};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::fs as sync_fs;
@@ -91,17 +91,17 @@ pub async fn migrate(zv_root: &Path) -> Result<()> {
 
     if needs_migration {
         println!(
-            "Performing zv {} migrations",
+            "Performing zv  -> {} migrations",
             Paint::green(current_version)
         );
 
         // Perform 0.8.0 -> 0.9.0 migration
-        migrate_0_8_0_to_0_9_0(zv_root).await?;
+        let migrated_active_zig = migrate_0_8_0_to_0_9_0(zv_root).await?;
 
-        // Save updated config
+        // Save updated config with migrated active zig (if any)
         let config = ZvConfig {
             version: current_version.to_string(),
-            active_zig: None,
+            active_zig: migrated_active_zig,
         };
 
         save_zv_config(&zv_toml_path, &config)?;
@@ -134,12 +134,15 @@ pub fn save_zv_config(path: &Path, config: &ZvConfig) -> Result<(), MigrationErr
 /// Migration from 0.8.0 to 0.9.0
 /// - Flattens versions/master/* → versions/*
 /// - Migrates active.json → zv.toml
-async fn migrate_0_8_0_to_0_9_0(zv_root: &Path) -> Result<()> {
+/// Returns migrated active zig (if any)
+async fn migrate_0_8_0_to_0_9_0(zv_root: &Path) -> Result<Option<ActiveZig>> {
     tracing::info!("Starting migration from 0.8.0 to 0.9.0");
 
     let versions_path = zv_root.join("versions");
     let master_dir = versions_path.join("master");
     let active_json_path = zv_root.join("active.json");
+
+    let mut migrated_active_zig = None;
 
     // Step 1: Flatten versions/master/* → versions/*
     if master_dir.exists() {
@@ -148,7 +151,7 @@ async fn migrate_0_8_0_to_0_9_0(zv_root: &Path) -> Result<()> {
 
     // Step 2: Migrate active.json to zv.toml
     if active_json_path.exists() {
-        migrate_active_json(&active_json_path).await?;
+        migrated_active_zig = Some(migrate_active_json(&active_json_path).await?);
     }
 
     // Step 3: Clean up versions/master directory
@@ -160,7 +163,7 @@ async fn migrate_0_8_0_to_0_9_0(zv_root: &Path) -> Result<()> {
     }
 
     tracing::info!("Migration from 0.8.0 to 0.9.0 completed successfully");
-    Ok(())
+    Ok(migrated_active_zig)
 }
 
 /// Flatten versions/master/* → versions/*
@@ -215,7 +218,7 @@ async fn flatten_master_to_versions(versions_path: &Path, master_dir: &Path) -> 
             continue;
         }
 
-        // Move the version directory
+        // Move version directory
         tracing::debug!("Moving {} to versions/{}", version_str, version_str);
         fs::rename(master_version_path, &target_version_path)
             .await
@@ -245,9 +248,9 @@ async fn flatten_master_to_versions(versions_path: &Path, master_dir: &Path) -> 
     Ok(())
 }
 
-/// Migrate active.json to zv.toml
-/// Reads active.json and stores the active zig info in zv.toml
-async fn migrate_active_json(active_json_path: &Path) -> Result<()> {
+/// Migrate active.json to ActiveZig
+/// Reads active.json and returns the active zig info
+async fn migrate_active_json(active_json_path: &Path) -> Result<ActiveZig> {
     tracing::debug!("Migrating active.json to zv.toml");
 
     let active_json = fs::read_to_string(active_json_path)
@@ -277,20 +280,6 @@ async fn migrate_active_json(active_json_path: &Path) -> Result<()> {
         active_zig.is_master
     );
 
-    // Save to a temporary file to be picked up by the main migration flow
-    let temp_path = active_json_path.parent().unwrap().join("zv.toml.migration");
-    let temp_config = ZvConfig {
-        version: "0.8.0".to_string(),
-        active_zig: Some(active_zig),
-    };
-
-    let contents = toml::to_string_pretty(&temp_config)
-        .map_err(|e| eyre!("Failed to serialize active zig config: {}", e))?;
-
-    fs::write(&temp_path, contents)
-        .await
-        .wrap_err("Failed to write temporary zv.toml.migration")?;
-
     // Delete active.json
     fs::remove_file(active_json_path)
         .await
@@ -298,7 +287,7 @@ async fn migrate_active_json(active_json_path: &Path) -> Result<()> {
 
     tracing::debug!("Removed active.json after migration");
 
-    Ok(())
+    Ok(active_zig)
 }
 
 /// Update the master file with the given version
@@ -306,30 +295,12 @@ async fn migrate_active_json(active_json_path: &Path) -> Result<()> {
 pub async fn update_master_file(zv_root: &Path, version: &str) {
     let master_file_path = zv_root.join("master");
 
-    match fs::write(&master_file_path, version).await {
+    match sync_fs::write(&master_file_path, version) {
         Ok(_) => {
             tracing::debug!("Updated master file with version: {}", version);
         }
         Err(e) => {
             tracing::error!("Failed to update master file: {}", e);
         }
-    }
-}
-
-/// Read the current master version from the master file
-/// Returns None if file doesn't exist or can't be read
-pub async fn _read_master_file(zv_root: &Path) -> Option<String> {
-    let master_file_path = zv_root.join("master");
-
-    match fs::read_to_string(&master_file_path).await {
-        Ok(contents) => {
-            let version = contents.trim().to_string();
-            if version.is_empty() {
-                None
-            } else {
-                Some(version)
-            }
-        }
-        Err(_) => None,
     }
 }
