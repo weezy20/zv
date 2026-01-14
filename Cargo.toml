@@ -23,7 +23,7 @@ name = "zv"
 clap = { version = "4.5.48", features = ["derive"] }
 dotenv = { version = "0.15", optional = true }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-tokio = { version = "1.47.1", features = ["fs", "macros", "rt-multi-thread"] }
+tokio = { version = "1.47.1", features = ["fs", "macros", "rt-multi-thread", "io-util"] }
 serde = { version = "1.0.219", features = ["derive"] }
 semver = { version = "1.0.27", features = ["serde"] }
 color-eyre = "0.6.5"
@@ -35,7 +35,6 @@ target-lexicon = "0.13.3"
 serde_json = "1.0.145"
 reqwest = { version = "0.13.1", features = [
     "stream",
-    "rustls",
     "json",
 ], default-features = false }
 toml = "0.9.8"
