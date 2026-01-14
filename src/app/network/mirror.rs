@@ -242,15 +242,7 @@ impl Mirror {
         }
 
         // For minisig, we don't have size info, so use 0
-        match download_file(
-            client,
-            &minisig_url,
-            minisig_path,
-            0,
-            progress_handle,
-        )
-        .await
-        {
+        match download_file(client, &minisig_url, minisig_path, 0, progress_handle).await {
             Ok(()) => {
                 tracing::debug!(target: TARGET, "Minisig download completed successfully");
             }

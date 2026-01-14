@@ -178,7 +178,9 @@ impl Template {
             (".gitignore", GITIGNORE_ZIG),
         ];
 
-        let build_zig_zon = self.generate_build_zig_zon(app, &minimal_files[..2]).await?;
+        let build_zig_zon = self
+            .generate_build_zig_zon(app, &minimal_files[..2])
+            .await?;
 
         self.create_template_files(&[
             minimal_files[0],
@@ -301,8 +303,9 @@ impl Template {
             active_version.version().expect("valid semver").clone()
         } else {
             // Fetch latest version asynchronously
-            if let Ok(stable) =
-                app.fetch_latest_version(crate::app::CacheStrategy::OnlyCache).await
+            if let Ok(stable) = app
+                .fetch_latest_version(crate::app::CacheStrategy::OnlyCache)
+                .await
             {
                 tracing::debug!(
                     "Stable resolved version: {}",

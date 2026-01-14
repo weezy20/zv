@@ -307,13 +307,13 @@ impl ResolvedZigVersion {
             ResolvedZigVersion::Master(v) => v,
         }
     }
-    
+
     /// Returns true if this is a master variant (MasterVersion)
     #[inline]
     pub fn is_master(&self) -> bool {
         matches!(self, ResolvedZigVersion::Master(_))
     }
-    
+
     /// Returns true if this is a semver variant
     #[inline]
     pub fn is_semver(&self) -> bool {

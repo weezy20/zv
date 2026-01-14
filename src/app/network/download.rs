@@ -138,7 +138,11 @@ pub(in crate::app::network) async fn stream_download_file(
 
     // Get content length for progress calculation
     let content_length = response.content_length().unwrap_or(expected_size);
-    let actual_size = if expected_size == 0 { content_length } else { expected_size };
+    let actual_size = if expected_size == 0 {
+        content_length
+    } else {
+        expected_size
+    };
     tracing::debug!(target: TARGET, "Starting download: {} bytes from {} (content-length: {})", actual_size, url, content_length);
 
     // Create the destination file

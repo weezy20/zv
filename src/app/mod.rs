@@ -1,4 +1,5 @@
 pub mod constants;
+pub(crate) mod migrations;
 pub(crate) mod network;
 pub(crate) mod toolchain;
 pub(crate) mod utils;
@@ -139,6 +140,11 @@ impl App {
             std::fs::create_dir_all(&versions_path)
                 .map_err(ZvError::Io)
                 .wrap_err("Creation of versions directory failed")?;
+        }
+
+        // Run migrations if needed
+        if let Err(e) = migrations::migrate(&zv_base_path).await {
+            tracing::warn!("Migration failed: {}", e);
         }
 
         let env_path = if let Some(ref shell_type) = shell {
@@ -360,6 +366,11 @@ impl App {
             .unwrap()
             .fetch_master_version()
             .await?;
+
+        // Update master file with the fetched version
+        let version_str = zig_release.resolved_version().version().to_string();
+        crate::app::migrations::update_master_file(&self.zv_base_path, &version_str).await;
+
         Ok(zig_release)
     }
     /// Fetch latest stable and returns a [ZigRelease]

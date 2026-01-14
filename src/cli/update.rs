@@ -5,12 +5,12 @@
 
 use color_eyre::eyre::{Context, Result, bail, eyre};
 use semver::Version;
-use yansi::Paint;
 use serde::Deserialize;
 use std::{path::Path, time::Duration};
 use tokio::task;
+use yansi::Paint;
 
-use crate::{App, tools, app::utils};
+use crate::{App, app::utils, tools};
 use walkdir::WalkDir;
 
 #[derive(Deserialize, Debug, Clone)]
@@ -32,7 +32,7 @@ pub async fn update_zv(app: &mut App, force: bool, include_prerelease: bool) -> 
         .expect("CARGO_PKG_VERSION should be valid semver");
 
     println!("Current version: {}", Paint::yellow(&current_version));
-    
+
     // Get target triple for this platform
     // The TARGET env var is set at compile time via build.rs
     let target = env!("TARGET");
@@ -47,24 +47,32 @@ pub async fn update_zv(app: &mut App, force: bool, include_prerelease: bool) -> 
         .wrap_err("Failed to create HTTP client")?;
 
     let (latest_release, latest_version) = if include_prerelease {
-        let releases = fetch_all_releases(&client).await
+        let releases = fetch_all_releases(&client)
+            .await
             .wrap_err("Failed to fetch releases from GitHub")?;
-        
-        find_latest_version(&releases, true)
-            .wrap_err("No valid releases found")?
+
+        find_latest_version(&releases, true).wrap_err("No valid releases found")?
     } else {
-        let release = fetch_latest_release(&client).await
+        let release = fetch_latest_release(&client)
+            .await
             .wrap_err("Failed to fetch latest release from GitHub")?;
-        
+
         // Parse version from tag_name (remove 'v' prefix if present)
-        let version_str = release.tag_name.strip_prefix('v').unwrap_or(&release.tag_name);
+        let version_str = release
+            .tag_name
+            .strip_prefix('v')
+            .unwrap_or(&release.tag_name);
         let version = Version::parse(version_str)
             .wrap_err("Failed to parse latest version from GitHub release tag")?;
-        
+
         (release, version)
     };
 
-    let release_type = if latest_version.pre.is_empty() { "stable" } else { "pre-release" };
+    let release_type = if latest_version.pre.is_empty() {
+        "stable"
+    } else {
+        "pre-release"
+    };
     println!(
         "  {} Latest {} version from releases:  {}",
         "→".blue(),
@@ -121,7 +129,7 @@ pub async fn update_zv(app: &mut App, force: bool, include_prerelease: bool) -> 
         // MacOS/Linux: prefer .tar.gz, fallback to .tar.xz
         let gz_asset_name = format!("zv-{target}.tar.gz");
         let xz_asset_name = format!("zv-{target}.tar.xz");
-        
+
         latest_release
             .assets
             .iter()
@@ -175,15 +183,17 @@ pub async fn update_zv(app: &mut App, force: bool, include_prerelease: bool) -> 
         // Download and replace the binary in place
         println!("  {} Downloading and installing update...", "→".blue());
 
-        let _temp_extract_dir = download_and_replace_binary(&client, asset, &expected_zv_exe_path, true).await
-            .wrap_err("Failed to update zv")?;
+        let _temp_extract_dir =
+            download_and_replace_binary(&client, asset, &expected_zv_exe_path, true)
+                .await
+                .wrap_err("Failed to update zv")?;
         // Keep _temp_extract_dir alive until after self_replace completes
 
         println!(
             "  {} Updated successfully to zv {}!",
             "✓".green(),
             latest_version
-        );        
+        );
     } else {
         // Running from outside ZV_DIR (e.g., cargo install, custom location)
         // Download to temp location and then copy to ZV_DIR
@@ -203,29 +213,40 @@ pub async fn update_zv(app: &mut App, force: bool, include_prerelease: bool) -> 
             .join(if cfg!(windows) { "zv.exe" } else { "zv" });
 
         // Download the binary to temp location
-        let _temp_extract_dir = download_and_replace_binary(&client, asset, &temp_binary, false).await
+        let _temp_extract_dir = download_and_replace_binary(&client, asset, &temp_binary, false)
+            .await
             .wrap_err("Failed to download binary to temporary location")?;
         // Keep _temp_extract_dir alive until after copy completes
 
         println!("  {} Downloaded version {}", "✓".green(), latest_version);
-        
+
         // Copy the new binary to ZV_DIR/bin/zv
         println!("  {} Installing ...", "→".blue());
-        
+
         // Ensure ZV_DIR/bin exists
         if let Some(parent) = expected_zv_exe_path.parent() {
-            tokio::fs::create_dir_all(parent).await
-                .wrap_err_with(|| format!("Failed to create ZV_DIR/bin directory: {}", parent.display()))?;
+            tokio::fs::create_dir_all(parent).await.wrap_err_with(|| {
+                format!(
+                    "Failed to create ZV_DIR/bin directory: {}",
+                    parent.display()
+                )
+            })?;
         }
-        
+
         // Copy the binary
-        tokio::fs::copy(&temp_binary, &expected_zv_exe_path).await
+        tokio::fs::copy(&temp_binary, &expected_zv_exe_path)
+            .await
             .wrap_err("Failed to copy binary to ZV_DIR")?;
-        
+
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if let Err(e) = tokio::fs::set_permissions(&expected_zv_exe_path, std::fs::Permissions::from_mode(0o755)).await {
+            if let Err(e) = tokio::fs::set_permissions(
+                &expected_zv_exe_path,
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .await
+            {
                 tools::warn(format!("Failed to set binary permissions: {}", e));
             }
         }
@@ -246,6 +267,11 @@ pub async fn update_zv(app: &mut App, force: bool, include_prerelease: bool) -> 
         println!("  {} Shims regenerated successfully", "✓".green());
     }
 
+    // Run migrations after update
+    if let Err(e) = crate::app::migrations::migrate(app.path()).await {
+        eprintln!("  {} Warning: Migration failed: {}", "⚠".yellow(), e);
+    }
+
     println!("\n{} {}", "✓".green(), "Update complete".green().bold());
 
     Ok(())
@@ -254,7 +280,7 @@ pub async fn update_zv(app: &mut App, force: bool, include_prerelease: bool) -> 
 /// Fetch the latest release from GitHub API
 async fn fetch_latest_release(client: &reqwest::Client) -> Result<GitHubRelease> {
     let url = "https://api.github.com/repos/weezy20/zv/releases/latest";
-    
+
     let response = client
         .get(url)
         .send()
@@ -262,7 +288,10 @@ async fn fetch_latest_release(client: &reqwest::Client) -> Result<GitHubRelease>
         .wrap_err("Failed to send request to GitHub API")?;
 
     if !response.status().is_success() {
-        bail!("GitHub API request failed with status: {}", response.status());
+        bail!(
+            "GitHub API request failed with status: {}",
+            response.status()
+        );
     }
 
     let release = response
@@ -276,7 +305,7 @@ async fn fetch_latest_release(client: &reqwest::Client) -> Result<GitHubRelease>
 /// Fetch all releases from GitHub API (including pre-releases)
 async fn fetch_all_releases(client: &reqwest::Client) -> Result<Vec<GitHubRelease>> {
     let url = "https://api.github.com/repos/weezy20/zv/releases";
-    
+
     let response = client
         .get(url)
         .send()
@@ -284,7 +313,10 @@ async fn fetch_all_releases(client: &reqwest::Client) -> Result<Vec<GitHubReleas
         .wrap_err("Failed to send request to GitHub API")?;
 
     if !response.status().is_success() {
-        bail!("GitHub API request failed with status: {}", response.status());
+        bail!(
+            "GitHub API request failed with status: {}",
+            response.status()
+        );
     }
 
     let releases = response
@@ -297,14 +329,20 @@ async fn fetch_all_releases(client: &reqwest::Client) -> Result<Vec<GitHubReleas
 
 /// Find the latest version from a list of releases
 /// If include_prerelease is true, considers all releases; otherwise only stable releases
-fn find_latest_version(releases: &[GitHubRelease], include_prerelease: bool) -> Result<(GitHubRelease, Version)> {
+fn find_latest_version(
+    releases: &[GitHubRelease],
+    include_prerelease: bool,
+) -> Result<(GitHubRelease, Version)> {
     let mut best_release: Option<&GitHubRelease> = None;
     let mut best_version: Option<Version> = None;
 
     for release in releases {
         // Parse version from tag_name (remove 'v' prefix if present)
-        let version_str = release.tag_name.strip_prefix('v').unwrap_or(&release.tag_name);
-        
+        let version_str = release
+            .tag_name
+            .strip_prefix('v')
+            .unwrap_or(&release.tag_name);
+
         if let Ok(version) = Version::parse(version_str) {
             // Skip pre-releases if not requested
             if !include_prerelease && !version.pre.is_empty() {
@@ -334,13 +372,13 @@ async fn download_and_replace_binary(
     use_self_replace: bool,
 ) -> Result<tempfile::TempDir> {
     // Create a temporary file for the download with the correct extension
-    let temp_dir = tempfile::tempdir()
-        .wrap_err("Failed to create temporary directory for download")?;
+    let temp_dir =
+        tempfile::tempdir().wrap_err("Failed to create temporary directory for download")?;
     let temp_file_path = temp_dir.path().join(&asset.name);
 
     // Download the asset
     println!("  {} Downloading {}...", "→".blue(), asset.name);
-    
+
     let response = client
         .get(&asset.browser_download_url)
         .send()
@@ -352,7 +390,8 @@ async fn download_and_replace_binary(
     }
 
     // Write to temporary file
-    let mut file = tokio::fs::File::create(&temp_file_path).await
+    let mut file = tokio::fs::File::create(&temp_file_path)
+        .await
         .wrap_err("Failed to create temporary download file")?;
 
     let mut stream = response.bytes_stream();
@@ -361,11 +400,14 @@ async fn download_and_replace_binary(
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.wrap_err("Failed to read download chunk")?;
-        file.write_all(&chunk).await
+        file.write_all(&chunk)
+            .await
             .wrap_err("Failed to write download chunk")?;
     }
 
-    file.sync_all().await.wrap_err("Failed to sync download file to disk")?;
+    file.sync_all()
+        .await
+        .wrap_err("Failed to sync download file to disk")?;
     drop(file); // Close the file
 
     // Fetch sha256 checksum file:
@@ -378,7 +420,10 @@ async fn download_and_replace_binary(
         .wrap_err("Failed to download checksum file")?;
 
     if !checksum_response.status().is_success() {
-        bail!("Failed to download checksum file: HTTP {}", checksum_response.status());
+        bail!(
+            "Failed to download checksum file: HTTP {}",
+            checksum_response.status()
+        );
     }
 
     let checksum_content = checksum_response
@@ -404,8 +449,8 @@ async fn download_and_replace_binary(
     println!("  {} Extracting binary...", "→".blue());
 
     // Extract the binary from the archive
-    let temp_extract_dir = tempfile::tempdir()
-        .wrap_err("Failed to create temporary extraction directory")?;
+    let temp_extract_dir =
+        tempfile::tempdir().wrap_err("Failed to create temporary extraction directory")?;
 
     extract(&temp_file_path, temp_extract_dir.path()).await?;
 
@@ -415,7 +460,7 @@ async fn download_and_replace_binary(
     // - Windows archives (.zip) extract files directly to the temp directory
     let target = env!("TARGET");
     let binary_name = if cfg!(windows) { "zv.exe" } else { "zv" };
-    
+
     // Try the subdirectory structure first (Unix archives)
     let mut extracted_binary = temp_extract_dir
         .path()
@@ -439,15 +484,19 @@ async fn download_and_replace_binary(
             println!("{prefix}{}", entry.path().display());
         }
 
-        bail!("Could not find zv binary in extracted archive at: {}", extracted_binary.display());
+        bail!(
+            "Could not find zv binary in extracted archive at: {}",
+            extracted_binary.display()
+        );
     }
 
     // Install the binary
     println!("  {} Installing update...", "→".blue());
-    
+
     // Ensure target directory exists
     if let Some(parent) = target_path.parent() {
-        tokio::fs::create_dir_all(parent).await
+        tokio::fs::create_dir_all(parent)
+            .await
             .wrap_err("Failed to create target directory")?;
     }
 
@@ -456,13 +505,17 @@ async fn download_and_replace_binary(
         self_replace::self_replace(&extracted_binary)
             .wrap_err("Failed to replace binary with updated version")?;
     } else {
-        tokio::fs::copy(&extracted_binary, target_path).await
+        tokio::fs::copy(&extracted_binary, target_path)
+            .await
             .wrap_err("Failed to copy binary to target location")?;
-        
+
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if let Err(e) = tokio::fs::set_permissions(target_path, std::fs::Permissions::from_mode(0o755)).await {
+            if let Err(e) =
+                tokio::fs::set_permissions(target_path, std::fs::Permissions::from_mode(0o755))
+                    .await
+            {
                 tools::warn(format!("Failed to set binary permissions: {}", e));
             }
         }
@@ -473,8 +526,12 @@ async fn download_and_replace_binary(
 
 /// Dispatch extraction for zip/tar.xz/tar.gz
 async fn extract(archive: &Path, dest: &Path) -> Result<()> {
-    let ext = archive.extension().and_then(|e| e.to_str()).unwrap_or_default();
-    let ext2 = archive.file_stem()
+    let ext = archive
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default();
+    let ext2 = archive
+        .file_stem()
         .and_then(|n| n.to_str()?.rsplit_once('.'))
         .map(|(_, e)| e); // foo.tar.gz  ->  tar
 
@@ -504,7 +561,9 @@ async fn extract_tar(archive: &Path, dest: &Path, decoder: TarDecoder) -> Result
         };
 
         let mut archive = tar::Archive::new(boxed_decoder);
-        archive.unpack(&dest).wrap_err("Failed to unpack tar archive")?;
+        archive
+            .unpack(&dest)
+            .wrap_err("Failed to unpack tar archive")?;
 
         Ok(())
     })

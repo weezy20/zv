@@ -1,3 +1,4 @@
+use crate::app::migrations::ZvConfig;
 use crate::{ArchiveExt, ResolvedZigVersion, Result, Shim, ZvError, app::utils::ProgressHandle};
 use color_eyre::eyre::{Context, eyre};
 use serde::{Deserialize, Serialize};
@@ -22,7 +23,7 @@ pub struct ToolchainManager {
     installations: Vec<ZigInstall>,
     active_install: Option<ZigInstall>,
     bin_path: PathBuf,
-    active_file: PathBuf,
+    zv_config_file: PathBuf,
 }
 
 impl ToolchainManager {
@@ -30,7 +31,7 @@ impl ToolchainManager {
         let zv_root = zv_root.as_ref().to_path_buf();
         let versions_path = zv_root.join("versions");
         let bin_path = zv_root.join("bin");
-        let active_file = zv_root.join("active.json");
+        let zv_config_file = zv_root.join("zv.toml");
 
         // discover what is on disk
         let installations =
@@ -57,9 +58,17 @@ impl ToolchainManager {
                 .cloned();
 
             if let Some(ref zi) = fallback {
-                let json =
-                    serde_json::to_vec(zi).expect("ZigInstall serialization should never fail");
-                if let Err(e) = std::fs::write(&active_file, json) {
+                // Write fallback to zv.toml
+                let config = ZvConfig {
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    active_zig: Some(crate::app::migrations::ActiveZig {
+                        version: zi.version.to_string(),
+                        path: zi.path.to_string_lossy().to_string(),
+                        is_master: zi.is_master,
+                    }),
+                };
+
+                if let Err(e) = crate::app::migrations::save_zv_config(&zv_config_file, &config) {
                     tracing::error!(target: TARGET, "Failed to write fallback active install to file: {}", e);
                 }
             }
@@ -67,39 +76,50 @@ impl ToolchainManager {
             fallback
         };
 
-        // load last active install
-        let active_install = if active_file.is_file() {
-            match fs::read(&active_file).await {
-                Ok(bytes) => {
-                    match serde_json::from_slice::<ZigInstall>(&bytes) {
-                        Ok(zig_install) => {
-                            // Verify the install exists in our installations list
-                            let exists = installations.iter().any(|i| *i == zig_install);
+        // load last active install from zv.toml
+        let active_install = if zv_config_file.is_file() {
+            match crate::app::migrations::load_zv_config(&zv_config_file) {
+                Ok(config) => {
+                    if let Some(active_zig) = config.active_zig {
+                        // Parse version string
+                        match semver::Version::parse(&active_zig.version) {
+                            Ok(version) => {
+                                // Verify the install exists in our installations list
+                                let path = PathBuf::from(&active_zig.path);
+                                let exists = installations
+                                    .iter()
+                                    .any(|i| i.version == version && i.path == path);
 
-                            if exists {
-                                Some(zig_install)
-                            } else {
+                                if exists {
+                                    Some(ZigInstall {
+                                        version,
+                                        path,
+                                        is_master: active_zig.is_master,
+                                    })
+                                } else {
+                                    tracing::debug!(target: TARGET,
+                                        "Active install from file not found in installations, using fallback"
+                                    );
+                                    find_fallback_install(&installations)
+                                }
+                            }
+                            Err(err) => {
                                 tracing::debug!(target: TARGET,
-                                    "Active install from file not found in installations, using fallback"
+                                    "Failed to parse active version from config: {}, using fallback",
+                                    err
                                 );
                                 find_fallback_install(&installations)
                             }
                         }
-                        Err(err) => {
-                            tracing::debug!(target: TARGET,
-                                "Failed to deserialize active install file {}: {}, using fallback",
-                                active_file.display(),
-                                err
-                            );
-                            find_fallback_install(&installations)
-                        }
+                    } else {
+                        find_fallback_install(&installations)
                     }
                 }
-                Err(io_err) => {
+                Err(err) => {
                     tracing::debug!(target: TARGET,
-                        "Failed to read active install file {}: {}, using fallback",
-                        active_file.display(),
-                        io_err
+                        "Failed to read config file {}: {}, using fallback",
+                        zv_config_file.display(),
+                        err
                     );
                     find_fallback_install(&installations)
                 }
@@ -113,7 +133,7 @@ impl ToolchainManager {
             installations,
             active_install,
             bin_path,
-            active_file,
+            zv_config_file,
         };
 
         Ok(toolchain_manager)
@@ -396,9 +416,17 @@ impl ToolchainManager {
         tracing::debug!(target: TARGET, install_path = %install.path.display(), "Found installation, deploying shims");
         self.deploy_shims(install, false, false).await?;
 
-        let json = serde_json::to_vec(&install)
-            .wrap_err("Failed to serialize Zig install for active file")?;
-        fs::write(&self.active_file, json).await?;
+        // Write to zv.toml
+        let config = ZvConfig {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            active_zig: Some(crate::app::migrations::ActiveZig {
+                version: install.version.to_string(),
+                path: install.path.to_string_lossy().to_string(),
+                is_master: install.is_master,
+            }),
+        };
+
+        crate::app::migrations::save_zv_config(&self.zv_config_file, &config)?;
         self.active_install = Some(install.clone());
 
         tracing::trace!(target: TARGET, %version, "Set active Zig version");
@@ -425,9 +453,18 @@ impl ToolchainManager {
         };
         tracing::debug!(target: TARGET, "Deploying shims");
         self.deploy_shims(&zig_install, false, false).await?;
-        let json = serde_json::to_vec(&zig_install)
-            .wrap_err("Failed to serialize Zig install for active file")?;
-        fs::write(&self.active_file, json).await?;
+
+        // Write to zv.toml
+        let config = ZvConfig {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            active_zig: Some(crate::app::migrations::ActiveZig {
+                version: zig_install.version.to_string(),
+                path: zig_install.path.to_string_lossy().to_string(),
+                is_master: zig_install.is_master,
+            }),
+        };
+
+        crate::app::migrations::save_zv_config(&self.zv_config_file, &config)?;
         self.active_install = Some(zig_install.clone());
         tracing::trace!(target: TARGET, version = ?rzv.version().to_string(), "Set active Zig completed");
         Ok(())
@@ -624,12 +661,33 @@ impl ToolchainManager {
     }
     /// Clear the active version without setting a new one
     pub fn clear_active_version(&mut self) -> Result<()> {
-        if self.active_file.exists() {
-            if let Err(e) = std::fs::remove_file(&self.active_file) {
-                tracing::warn!(target: TARGET, "Failed to remove active version file: {}", e);
-                return Err(eyre!(e).wrap_err("Failed to remove active version file"));
+        // Update config to remove active zig
+        if let Ok(config) = crate::app::migrations::load_zv_config(&self.zv_config_file) {
+            let updated_config = ZvConfig {
+                version: config.version,
+                active_zig: None,
+            };
+
+            if let Err(e) =
+                crate::app::migrations::save_zv_config(&self.zv_config_file, &updated_config)
+            {
+                tracing::warn!(target: TARGET, "Failed to clear active zig from config: {}", e);
+                return Err(eyre!(e).wrap_err("Failed to clear active version from config"));
+            }
+        } else {
+            // Config file doesn't exist, create one with no active zig
+            let config = ZvConfig {
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                active_zig: None,
+            };
+
+            if let Err(e) = crate::app::migrations::save_zv_config(&self.zv_config_file, &config) {
+                tracing::warn!(target: TARGET, "Failed to create config file: {}", e);
+                return Err(eyre!(e).wrap_err("Failed to create config file"));
             }
         }
+
+        self.active_install = None;
         Ok(())
     }
 }
