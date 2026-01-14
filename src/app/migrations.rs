@@ -136,7 +136,7 @@ pub fn save_zv_config(path: &Path, config: &ZvConfig) -> Result<(), MigrationErr
 /// - Migrates active.json → zv.toml
 /// Returns migrated active zig (if any)
 async fn migrate_0_8_0_to_0_9_0(zv_root: &Path) -> Result<Option<ActiveZig>> {
-    tracing::info!("Starting migration from 0.8.0 to 0.9.0");
+    tracing::info!("Running v0.9.0 migrations");
 
     let versions_path = zv_root.join("versions");
     let master_dir = versions_path.join("master");
