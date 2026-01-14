@@ -12,6 +12,7 @@ mod install;
 mod list;
 mod setup;
 pub mod sync; // Make sync public so other modules can use check_and_update_zv_binary
+mod uninstall;
 mod update;
 mod r#use;
 mod zig;
@@ -265,6 +266,9 @@ pub enum Commands {
     },
     /// Synchronize index, mirrors list and metadata for zv. Also replaces `ZV_DIR/bin/zv` if outdated against current invocation.
     Sync,
+
+    /// Uninstall zv and remove all installed Zig versions
+    Uninstall,
 }
 
 impl Commands {
@@ -330,6 +334,7 @@ impl Commands {
                 no_interactive,
             } => setup::setup_shell(&mut app, using_env, dry_run, no_interactive).await,
             Commands::Sync => sync::sync(&mut app).await,
+            Commands::Uninstall => uninstall::uninstall(&mut app).await,
             Commands::Update { force, rc } => update::update_zv(&mut app, force, rc).await,
         }
     }
@@ -501,6 +506,10 @@ fn print_welcome_message(app: App) {
     print_command(
         "sync",
         "Synchronize index, mirrors list and metadata for zv",
+    );
+    print_command(
+        "uninstall",
+        "Uninstall zv and remove all installed Zig versions",
     );
     print_command(
         "help",
