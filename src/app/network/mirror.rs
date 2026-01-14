@@ -383,6 +383,7 @@ impl TryFrom<&str> for Mirror {
             u if u.contains("zig.florent.dev") => Layout::Flat,
             u if u.contains("zig.squirl.dev") => Layout::Flat,
             u if u.contains("zigmirror.meox.dev") => Layout::Flat,
+            u if u.contains("zig-mirror.tsimnet.eu") => Layout::Flat,
             _ => Layout::Versioned,
         };
 
