@@ -18,7 +18,11 @@ pub async fn uninstall(app: &mut App) -> crate::Result<()> {
         return Ok(());
     }
 
-    println!("{} zv directory detected: {}", Paint::cyan("→"), zv_dir.display());
+    println!(
+        "{} zv directory detected: {}",
+        Paint::cyan("→"),
+        zv_dir.display()
+    );
 
     match fs::remove_dir_all(zv_dir).await {
         Ok(()) => {

@@ -541,7 +541,7 @@ impl MirrorManager {
         let index = MirrorsIndex::load_from_disk(&self.cache_path)
             .await
             .map_err(|err| {
-                tracing::warn!(target: TARGET, "Failed to load mirrors cache from disk: {err}");
+                tracing::debug!(target: TARGET, "Failed to load mirrors cache from disk: {err}");
                 NetErr::EmptyMirrors
             })?;
 

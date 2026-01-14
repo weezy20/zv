@@ -23,22 +23,12 @@ pub(crate) async fn install_versions(
     let is_single_version = zig_versions.len() == 1;
     let should_set_active = is_single_version && app.toolchain_manager.installations_empty();
 
-    if should_set_active {
-        println!(
-            "📦 Installing {} (will be set as active zig)...",
-            Paint::blue(&zig_versions[0].to_string())
-        );
-    } else if is_single_version {
-        println!(
-            "📦 Installing {}...",
-            Paint::blue(&zig_versions[0].to_string())
-        );
-    }
     // Deduplicate semver variants before resolution
     // e.g., latest@0.14.0, stable@0.14.0, 0.14.0 all become just 0.14.0
     let zig_versions = crate::tools::deduplicate_semver_variants(zig_versions);
 
     // First, resolve all versions to detect duplicates and store their Either objects
+    // This also fetches the actual version for master/stable/latest variants
     let mut resolved_map: HashMap<ResolvedZigVersion, Either> = HashMap::new();
     let mut resolution_errors: Vec<(ZigVersion, ZvError)> = Vec::new();
 
@@ -85,12 +75,25 @@ pub(crate) async fn install_versions(
         return Err(eyre!("Failed to resolve any versions"));
     }
 
-    let mut installed_versions = Vec::new();
-    let mut failed_versions = Vec::new();
+    let resolved_versions: Vec<_> = resolved_map.keys().collect();
+    if should_set_active {
+        println!(
+            "📦 Installing {} (will be set as active zig)...",
+            Paint::blue(&resolved_versions[0].to_string())
+        );
+    } else if is_single_version {
+        println!(
+            "📦 Installing {}...",
+            Paint::blue(&resolved_versions[0].to_string())
+        );
+    }
     println!(
         "📦 Installing {} version(s)...",
         Paint::blue(&resolved_map.keys().len().to_string())
     );
+
+    let mut installed_versions = Vec::new();
+    let mut failed_versions = Vec::new();
 
     // Process each unique resolved version
     for (resolved_version, install_either) in resolved_map {
