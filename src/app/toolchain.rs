@@ -23,7 +23,7 @@ pub struct ToolchainManager {
     installations: Vec<ZigInstall>,
     active_install: Option<ZigInstall>,
     bin_path: PathBuf,
-    pub zv_config_file: PathBuf,
+    zv_config_file: PathBuf,
 }
 
 impl ToolchainManager {
