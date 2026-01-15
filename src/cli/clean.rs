@@ -579,6 +579,7 @@ async fn handle_active_version_removal(app: &mut App) -> crate::Result<()> {
             "{} No Zig versions remain installed. Run 'zv use <version>' to install and activate a version.",
             Paint::cyan("ℹ")
         );
+        let _ = app.toolchain_manager.clear_active_version();
         return Ok(());
     }
 
