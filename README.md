@@ -56,13 +56,14 @@ zv setup
 brew uninstall zv
 ```
 
-**NPM:**
+**NPM/Bun:**
 ```sh
 npm install -g @weezy20/zv
-# Run zv setup to self-install
-zv setup
-# Remove npm installation
-npm uninstall -g @weezy20/zv
+```
+
+Or you can also use bun (recommended):
+```sh
+bun i -g @weezy20/zv
 ```
 
 <details>
