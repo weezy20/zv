@@ -24,7 +24,7 @@ which will always use version `0.15.1` when you run any `zig` command inside it.
 
 It also doubles as a project template starter, providing multiple variants of a Zig project, from a barebones template with a very trimmed-down `build.zig` and `main.zig` file, or the standard Zig project template. Find out more with `zv init --help`.
 
-`zv` prefers community mirrors for downloads, as that's the official recommendation, with `minisign` and `shasum` verification done before any toolchain is installed.
+`zv` uses randomized ranked community mirrors for downloads (can be overridden to use ziglang.org with -f), as that's the official recommendation, with `minisign` and `shasum` verification done before any toolchain is installed. Future versions should bring in an optimization to rank the mirrors based on speed so that faster mirrors are selected more often without user intervention.
 
 ## Installation
 
