@@ -1,4 +1,10 @@
-# zv (zig version) manager
+<h1 align="center">
+zv (zig version)
+</h1>
+
+<p align="center">
+  <img src="logo/zv.png" alt="zv logo" width="400" />
+</p>
 
 `zv` is a blazing-fast, cross-platform, simple-to-use compiler toolchain manager for Zig, written in Rust. `zv` aims to be a fast and dependable manager for Zig and ZLS, both system-wide and project-specific, with either inline syntax `zig +<version>` or by using a `.zigversion` file in your project root. A `version` can be a semver, `master`, or `latest` for the latest stable. These values are fetched from the cached Ziglang download index available at <a href="https://ziglang.org/download/index.json">Zig official index</a>.
 
