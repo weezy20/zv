@@ -212,6 +212,7 @@ zv setup                               # Set up shell environment for zv with in
 zv sync                                # Resync community mirrors list from [ziglang.org/download/community-mirrors.txt]; also force resync of index to fetch latest nightly builds. Replaces `ZV_DIR/bin/zv` if outdated against current invocation.
 zv upgrade | update                    # Update zv to the latest release only if present in GH Releases: https://github.com/weezy20/zv/releases
 zv help                                # Detailed instructions for zv. Use `--help` for long help or `-h` for short help with a subcommand.
+zv uninstall                           # Uninstall zv completely by attempting to remove ZV_DIR.
 ```
 
 `minisign` verification is done using [jedisct1/rust-minisign-verify](https://github.com/jedisct1/rust-minisign-verify) — a small minisign library in pure Rust.
