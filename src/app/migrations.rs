@@ -268,9 +268,24 @@ async fn migrate_active_json(active_json_path: &Path) -> Result<ActiveZig> {
     let zig_install: LegacyZigInstall =
         serde_json::from_str(&active_json).wrap_err("Failed to parse active.json")?;
 
+    let mut path = zig_install.path;
+    // If it was a master build, the path in active.json points to .../versions/master/<hash>
+    // We need to update it to .../versions/<hash> as we flattened the directory
+    if zig_install.is_master {
+        if let Some(parent) = path.parent() {
+            if parent.file_name() == Some(std::ffi::OsStr::new("master")) {
+                if let Some(grandparent) = parent.parent() {
+                    if let Some(file_name) = path.file_name() {
+                        path = grandparent.join(file_name);
+                    }
+                }
+            }
+        }
+    }
+
     let active_zig = ActiveZig {
         version: zig_install.version.to_string(),
-        path: zig_install.path.to_string_lossy().to_string(),
+        path: path.to_string_lossy().to_string(),
         is_master: zig_install.is_master,
     };
 

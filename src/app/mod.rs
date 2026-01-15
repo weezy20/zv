@@ -128,6 +128,11 @@ impl App {
                 .map_err(ZvError::Io)
                 .wrap_err("Creation of bin directory failed")?;
         }
+        // Run migrations if needed
+        if let Err(e) = migrations::migrate(&zv_base_path).await {
+            tracing::warn!("Migration failed: {}", e);
+        }
+
         let toolchain_manager = ToolchainManager::new(&zv_base_path).await?;
         // Check for existing ZV zig/zls shims in bin directory
         let zig = toolchain_manager
@@ -140,11 +145,6 @@ impl App {
             std::fs::create_dir_all(&versions_path)
                 .map_err(ZvError::Io)
                 .wrap_err("Creation of versions directory failed")?;
-        }
-
-        // Run migrations if needed
-        if let Err(e) = migrations::migrate(&zv_base_path).await {
-            tracing::warn!("Migration failed: {}", e);
         }
 
         let env_path = if let Some(ref shell_type) = shell {
