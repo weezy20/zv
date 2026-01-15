@@ -1,10 +1,10 @@
 [package]
 name = "zv"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 description = "Ziglang Version Manager and Project Starter"
 license = "MIT"
-authors = ["Abhishek Shah <abhishekshah3@gmail.com>"]
+authors = ["Abhishek Shah"]
 homepage = "https://github.com/weezy20/zv"
 repository = "https://github.com/weezy20/zv"
 keywords = [
@@ -23,7 +23,12 @@ name = "zv"
 clap = { version = "4.5.48", features = ["derive"] }
 dotenv = { version = "0.15", optional = true }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-tokio = { version = "1.47.1", features = ["fs", "macros", "rt-multi-thread"] }
+tokio = { version = "1.47.1", features = [
+    "fs",
+    "macros",
+    "rt-multi-thread",
+    "io-util",
+] }
 serde = { version = "1.0.219", features = ["derive"] }
 semver = { version = "1.0.27", features = ["serde"] }
 color-eyre = "0.6.5"
@@ -33,13 +38,13 @@ chrono = { version = "0.4.41", features = ["serde"] }
 yansi = { version = "1.0.1", features = ["detect-tty", "detect-env"] }
 target-lexicon = "0.13.3"
 serde_json = "1.0.145"
-reqwest = { version = "0.12.23", features = [
+reqwest = { version = "0.12.28", features = [
     "stream",
     "rustls-tls",
     "json",
 ], default-features = false }
 toml = "0.9.8"
-toml_edit = "0.23.7"
+toml_edit = "0.23.9"
 thiserror = "2.0.17"
 ahash = "0.8.12"
 walkdir = "2.5.0"
@@ -53,13 +58,13 @@ cfg-if = "1.0.3"
 indicatif = "0.18.0"
 futures = "0.3.31"
 rand = "0.9.2"
-url = "2.5.7"
+url = { version = "2.5.7", features = ["serde"] }
 tempfile = "3.23.0"
 sha2 = "0.10.8"
 minisign-verify = "0.2.4"
 tar = "0.4.44"
 xz2 = "0.1.7"
-zip = "6.0.0"
+zip = "7.1.0"
 flate2 = "1.0.35"
 dialoguer = { version = "0.12.0", default-features = false }
 terminal_size = "0.4.3"

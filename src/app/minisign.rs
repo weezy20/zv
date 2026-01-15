@@ -6,6 +6,21 @@ use color_eyre::Result;
 use color_eyre::eyre::eyre;
 use minisign_verify::{PublicKey, Signature};
 
+/// Extract filename from minisign trusted comment
+/// Trusted comment format: "timestamp:<ts>\tfile:<filename>\t<metadata>"
+fn extract_filename_from_trusted_comment(trusted_comment: &str) -> Result<String, ZvError> {
+    for part in trusted_comment.split('\t') {
+        if let Some(filename) = part.strip_prefix("file:") {
+            return Ok(filename.to_string());
+        }
+    }
+
+    Err(ZvError::MinisignError(eyre!(
+        "Trusted comment missing 'file:' field: {}",
+        trusted_comment
+    )))
+}
+
 pub fn verify_minisign_signature(
     expected_filename: &str,
     tarball: &std::path::Path,
@@ -18,12 +33,13 @@ pub fn verify_minisign_signature(
         .map_err(|e| ZvError::MinisignError(eyre!("Failed to read signature file: {e}")))?;
 
     let trusted_comment = sig.trusted_comment();
+    let actual_filename = extract_filename_from_trusted_comment(trusted_comment)?;
 
-    if !trusted_comment.contains(expected_filename) {
+    if actual_filename != expected_filename {
         return Err(ZvError::MinisignError(eyre!(
-            "Signature filename mismatch: expected '{}' in trusted comment, got '{}'",
+            "Signature filename mismatch: expected '{}', got '{}'",
             expected_filename,
-            trusted_comment
+            actual_filename
         )));
     }
 

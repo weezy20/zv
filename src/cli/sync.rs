@@ -2,7 +2,7 @@
 //!
 //! This module provides:
 //! - `zv sync` command to refresh Zig indices, mirrors, and zv binary
-//! - `check_and_update_zv_binary()` - centralized function for updating the zv binary
+//! - `check_and_update_zv_binary()` - centralized function for updating zv binary
 //!   across different commands (sync, setup, use)
 //!
 //! The binary update logic includes:
@@ -18,12 +18,12 @@ pub async fn sync(app: &mut crate::App) -> crate::Result<()> {
 
     println!("{}", "Syncing Zig indices...".cyan());
 
-    // Force refresh the Zig index from network
+    // Force refresh of Zig index from network
     println!("  {} Refreshing Zig index...", "→".blue());
     app.sync_zig_index().await?;
     println!("  {} Zig index synced successfully", "✓".green());
 
-    // Force refresh the mirrors list
+    // Force refresh of mirrors list
     println!("  {} Refreshing community mirrors...", "→".blue());
     let mirror_count = app.sync_mirrors().await?;
     println!(
@@ -34,15 +34,23 @@ pub async fn sync(app: &mut crate::App) -> crate::Result<()> {
 
     // Check and update zv binary if needed
     println!("  {} Checking zv binary...", "→".blue());
-    check_and_update_zv_binary(app, false).await?;
+    let binary_updated = check_and_update_zv_binary(app, false).await?;
+
+    // Run migrations only if binary was actually updated
+    if binary_updated {
+        if let Err(e) = crate::app::migrations::migrate(app.path()).await {
+            eprintln!("  {} Warning: Migration failed: {}", "⚠".yellow(), e);
+        }
+    }
 
     println!("{}", "Sync completed successfully!".green().bold());
     Ok(())
 }
 
-/// Public API for checking and updating the zv binary
+/// Public API for checking and updating zv binary
 /// This can be called from setup, sync, or other commands
-pub async fn check_and_update_zv_binary(app: &crate::App, quiet: bool) -> crate::Result<()> {
+/// Returns true if binary was updated, false if it was already up to date
+pub async fn check_and_update_zv_binary(app: &crate::App, quiet: bool) -> crate::Result<bool> {
     tracing::debug!(target: "zv::cli::sync", "Checking for zv binary updates");
     check_and_update_zv_binary_impl(app, quiet, true).await
 }
@@ -51,7 +59,7 @@ async fn check_and_update_zv_binary_impl(
     app: &crate::App,
     quiet: bool,
     prompt_on_downgrade: bool,
-) -> crate::Result<()> {
+) -> crate::Result<bool> {
     use crate::tools::files_have_same_hash;
     use color_eyre::eyre::Context;
 
@@ -74,16 +82,17 @@ async fn check_and_update_zv_binary_impl(
         if !quiet {
             tracing::info!("zv binary installed");
         }
-        return Ok(());
+        return Ok(true);
     }
 
     // Compare checksums
     match files_have_same_hash(&current_exe, &target_exe) {
         Ok(true) => {
+            // Checksums match, versions are the same - no update
             if !quiet {
                 println!("  {} zv binary is up to date", "✓".green());
             }
-            Ok(())
+            Ok(false)
         }
         Ok(false) => {
             // Checksums differ - need to compare versions
@@ -98,6 +107,7 @@ async fn check_and_update_zv_binary_impl(
                     use std::cmp::Ordering;
                     match current_version.cmp(&target_version) {
                         Ordering::Greater => {
+                            // Current is newer - update target
                             if !quiet {
                                 println!(
                                     "  {} Updating zv binary ({} -> {})",
@@ -111,9 +121,10 @@ async fn check_and_update_zv_binary_impl(
                             if !quiet {
                                 println!("  {} zv binary updated", "✓".green());
                             }
-                            Ok(())
+                            Ok(true)
                         }
                         Ordering::Less => {
+                            // Target is newer than current
                             if !quiet {
                                 println!(
                                     "  {} Warning: ZV_DIR/bin/zv is newer ({}) than current binary ({})",
@@ -128,7 +139,7 @@ async fn check_and_update_zv_binary_impl(
                                 if !quiet {
                                     println!("  {} Skipping zv binary update", "→".blue());
                                 }
-                                return Ok(());
+                                return Ok(false);
                             }
 
                             if !quiet {
@@ -157,10 +168,10 @@ async fn check_and_update_zv_binary_impl(
                                     }
                                 );
                             }
-                            Ok(())
+                            Ok(true)
                         }
                         Ordering::Equal => {
-                            // Same version but different checksum - just update
+                            // Same version but different checksum - update
                             if !quiet {
                                 println!(
                                     "  {} Updating zv binary (checksum mismatch for version {})",
@@ -173,7 +184,7 @@ async fn check_and_update_zv_binary_impl(
                             if !quiet {
                                 println!("  {} zv binary updated", "✓".green());
                             }
-                            Ok(())
+                            Ok(true)
                         }
                     }
                 }
@@ -194,11 +205,12 @@ async fn check_and_update_zv_binary_impl(
                     if !quiet {
                         println!("  {} zv binary updated", "✓".green());
                     }
-                    Ok(())
+                    Ok(true)
                 }
             }
         }
         Err(e) => {
+            // Checksum comparison failed - update anyway
             if !quiet {
                 println!(
                     "  {} Warning: checksum comparison failed: {}, updating anyway",
@@ -210,7 +222,7 @@ async fn check_and_update_zv_binary_impl(
             if !quiet {
                 println!("  {} zv binary updated", "✓".green());
             }
-            Ok(())
+            Ok(true)
         }
     }
 }
@@ -261,7 +273,7 @@ fn prompt_user_to_downgrade() -> crate::Result<bool> {
 
     // Default is NO (false) for downgrades
     let proceed = Confirm::new()
-        .with_prompt("  Do you want to replace it with the older version?")
+        .with_prompt("  Do you want to replace it with an older version?")
         .default(false)
         .interact()
         .unwrap_or(false);
@@ -269,8 +281,8 @@ fn prompt_user_to_downgrade() -> crate::Result<bool> {
     Ok(proceed)
 }
 
-/// Copy the binary and regenerate shims
-/// This ensures the shims point to the correct binary
+/// Copy zv binary and regenerate shims
+/// This ensures that shims point to the correct binary
 async fn copy_binary_and_regenerate_shims(
     source: &Path,
     target: &Path,
@@ -279,7 +291,7 @@ async fn copy_binary_and_regenerate_shims(
 ) -> crate::Result<()> {
     use color_eyre::eyre::Context;
 
-    // Ensure the bin directory exists using app's canonical path
+    // Ensure bin directory exists using app's canonical path
     tokio::fs::create_dir_all(app.bin_path())
         .await
         .with_context(|| format!("Failed to create directory {}", app.bin_path().display()))?;

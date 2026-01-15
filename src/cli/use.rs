@@ -83,8 +83,7 @@ pub async fn resolve_zig_version(
                 return Ok(ResolvedZigVersion::Semver(v.clone()));
             }
             tracing::trace!(target: TARGET, "Resolving semver version: {}", v);
-            let zig_release = app.validate_semver(v).await?;
-            app.to_install = Some(Either::Release(zig_release));
+            app.to_install = Some(app.validate_semver(v).await?);
             Ok(ResolvedZigVersion::Semver(v.clone()))
         }
 
@@ -95,23 +94,19 @@ pub async fn resolve_zig_version(
             let master_version = master_release.resolved_version();
 
             // Extract the semver version from the resolved version for comparison
-            let index_master_version = match master_version {
-                ResolvedZigVersion::Semver(semver) => semver,
-                ResolvedZigVersion::Master(semver) => semver,
-            };
+            let index_master_version = master_version.version();
 
             // Verify the requested version matches the actual master version
             if index_master_version == v {
                 app.to_install = Some(master_release.into());
-                Ok(ResolvedZigVersion::Master(v.clone()))
             } else {
                 tracing::warn!(
-                    "Master version mismatch: requested {}, but master is at {}",
+                    "Master version mismatch: requested {}, but current master is at {}",
                     v,
                     index_master_version
                 );
-                Ok(ResolvedZigVersion::Master(v.clone()))
             }
+            Ok(ResolvedZigVersion::Master(v.clone()))
         }
 
         // Master without version - fetch current master

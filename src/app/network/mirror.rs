@@ -51,7 +51,7 @@ use std::{
 use super::download::download_file;
 use super::{CacheStrategy, TARGET};
 use crate::{
-    CfgErr, NetErr, ZvError,
+    CfgErr, NetErr,
     app::{
         MIRRORS_TTL_DAYS,
         constants::ZIG_COMMUNITY_MIRRORS,
@@ -59,7 +59,7 @@ use crate::{
     },
 };
 use chrono::{DateTime, Utc};
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::Result;
 use reqwest::Client;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -69,7 +69,7 @@ use url::Url;
 // LAYOUT AND MIRROR TYPES
 // ============================================================================
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
 pub enum Layout {
     /// Flat layout: {url}/{tarball}
     Flat,
@@ -114,6 +114,9 @@ pub struct Mirror {
 impl Mirror {
     /// Attempt to download both tarball and minisig files using this mirror
     ///
+    /// This function will automatically try both layouts (flat and versioned) if the first
+    /// attempt fails with HTTP 404. If both layouts fail, it returns the error.
+    ///
     /// # Arguments
     ///
     /// * `client` - HTTP client for making requests
@@ -127,8 +130,8 @@ impl Mirror {
     ///
     /// # Returns
     ///
-    /// `Ok(())` if both files are successfully downloaded and verified, otherwise returns
-    /// the appropriate `ZvError` with detailed context about the failure.
+    /// `Ok(Layout)` with the layout that was successfully used if download succeeds,
+    /// otherwise returns the appropriate `NetErr` with detailed context about the failure.
     pub async fn download(
         &self,
         client: &reqwest::Client,
@@ -139,14 +142,82 @@ impl Mirror {
         expected_shasum: Option<&str>,
         expected_size: Option<u64>,
         progress_handle: &ProgressHandle,
-    ) -> Result<()> {
+    ) -> Result<Layout, NetErr> {
         const TARGET: &str = "zv::network::mirror::download";
         tracing::debug!(target: TARGET, "Starting download with mirror: {} (rank: {})", self.base_url, self.rank);
 
+        // Try download with current layout, fall back to alternate on HTTP 404
+        match self
+            .try_download_with_layout(
+                client,
+                semver_version,
+                zig_tarball,
+                tarball_path,
+                minisig_path,
+                expected_shasum,
+                expected_size,
+                progress_handle,
+                false,
+            )
+            .await
+        {
+            Ok(layout) => Ok(layout),
+            Err(net_err) => {
+                // If the failure was an HTTP 404, try the alternate layout
+                if matches!(net_err, NetErr::HTTP(status) if status.as_u16() == 404) {
+                    tracing::info!(target: TARGET,
+                                  "Initial layout failed with HTTP 404. Trying alternate layout for mirror {}...",
+                                  self.base_url);
+
+                    return self
+                        .try_download_with_layout(
+                            client,
+                            semver_version,
+                            zig_tarball,
+                            tarball_path,
+                            minisig_path,
+                            expected_shasum,
+                            expected_size,
+                            progress_handle,
+                            true,
+                        )
+                        .await;
+                }
+
+                // Otherwise propagate the concrete network error
+                Err(net_err)
+            }
+        }
+    }
+
+    /// Internal helper to try download with a specific layout
+    async fn try_download_with_layout(
+        &self,
+        client: &reqwest::Client,
+        semver_version: &semver::Version,
+        zig_tarball: &str,
+        tarball_path: &Path,
+        minisig_path: &Path,
+        expected_shasum: Option<&str>,
+        expected_size: Option<u64>,
+        progress_handle: &ProgressHandle,
+        use_alternate_layout: bool,
+    ) -> Result<Layout, NetErr> {
+        const TARGET: &str = "zv::network::mirror::try_download_with_layout";
+
+        // Determine which layout to use
+        let mirror_for_download = if use_alternate_layout {
+            let mut alternate = self.clone();
+            alternate.layout = !alternate.layout;
+            alternate
+        } else {
+            self.clone()
+        };
+
         // Get download URLs
-        let tarball_url = self.get_download_url(semver_version, zig_tarball);
+        let tarball_url = mirror_for_download.get_download_url(semver_version, zig_tarball);
         let minisig_filename = format!("{}.minisig", zig_tarball);
-        let minisig_url = self.get_download_url(semver_version, &minisig_filename);
+        let minisig_url = mirror_for_download.get_download_url(semver_version, &minisig_filename);
 
         tracing::trace!(target: TARGET, "Download URLs configured:");
         tracing::trace!(target: TARGET, "  Tarball: {}", tarball_url);
@@ -163,7 +234,10 @@ impl Mirror {
         }
 
         // Initialize progress reporting
-        let progress_msg = format!("Downloading {} from {}", zig_tarball, self.base_url);
+        let progress_msg = format!(
+            "Downloading {} from {}",
+            zig_tarball, mirror_for_download.base_url
+        );
         match progress_handle.start(&progress_msg).await {
             Ok(()) => {}
             Err(e) => {
@@ -185,7 +259,7 @@ impl Mirror {
                 tracing::debug!(target: TARGET, "Proceeding to checksum verification...");
             }
             Err(net_err) => {
-                tracing::trace!(target: TARGET, "Tarball download failed from mirror {}: {}", self.base_url, net_err);
+                tracing::trace!(target: TARGET, "Tarball download failed from mirror {}: {}", mirror_for_download.base_url, net_err);
 
                 match net_err {
                     crate::NetErr::HTTP(status) => {
@@ -199,7 +273,7 @@ impl Mirror {
                     }
                 }
 
-                bail!(net_err);
+                return Err(net_err);
             }
         }
 
@@ -211,7 +285,7 @@ impl Mirror {
                     tracing::debug!(target: TARGET, "Checksum verification successful");
                 }
                 Err(e) => {
-                    tracing::error!(target: TARGET, "Checksum verification failed for tarball from mirror {}: {}", self.base_url, e);
+                    tracing::error!(target: TARGET, "Checksum verification failed for tarball from mirror {}: {}", mirror_for_download.base_url, e);
                     // Clean up the corrupted file
                     if tarball_path.exists() {
                         if let Err(cleanup_err) = tokio::fs::remove_file(tarball_path).await {
@@ -220,7 +294,7 @@ impl Mirror {
                             tracing::debug!(target: TARGET, "Removed corrupted tarball file");
                         }
                     }
-                    bail!(e);
+                    return Err(NetErr::Checksum(e.into()));
                 }
             }
         } else {
@@ -242,20 +316,12 @@ impl Mirror {
         }
 
         // For minisig, we don't have size info, so use 0
-        match download_file(
-            client,
-            &minisig_url,
-            minisig_path,
-            0,
-            progress_handle,
-        )
-        .await
-        {
+        match download_file(client, &minisig_url, minisig_path, 0, progress_handle).await {
             Ok(()) => {
                 tracing::debug!(target: TARGET, "Minisig download completed successfully");
             }
             Err(net_err) => {
-                tracing::error!(target: TARGET, "Minisig download failed from mirror {}: {}", self.base_url, net_err);
+                tracing::error!(target: TARGET, "Minisig download failed from mirror {}: {}", mirror_for_download.base_url, net_err);
 
                 // Provide context about the failure
                 match net_err {
@@ -278,7 +344,7 @@ impl Mirror {
                         tracing::trace!(target: TARGET, "Cleaned up tarball after minisig download failure");
                     }
                 }
-                bail!(net_err);
+                return Err(net_err);
             }
         }
 
@@ -300,7 +366,7 @@ impl Mirror {
             }
             Err(e) => {
                 tracing::error!(target: TARGET, "Failed to verify final tarball file: {}", e);
-                bail!(ZvError::Io(e));
+                return Err(NetErr::FileIo(e));
             }
         };
 
@@ -319,14 +385,14 @@ impl Mirror {
             }
             Err(e) => {
                 tracing::error!(target: TARGET, "Failed to verify final minisig file: {}", e);
-                bail!(ZvError::Io(e));
+                return Err(NetErr::FileIo(e));
             }
         };
 
-        tracing::debug!(target: TARGET, "Download attempt completed successfully with mirror {} - tarball: {:.1} MB, minisig: {} bytes", 
+        tracing::debug!(target: TARGET, "Download attempt completed successfully with mirror {} - tarball: {:.1} MB, minisig: {} bytes",
                      self.base_url, tarball_size as f64 / 1_048_576.0, minisig_size);
 
-        Ok(())
+        Ok(mirror_for_download.layout)
     }
 
     /// Get the primary download URL based on layout
@@ -391,6 +457,10 @@ impl TryFrom<&str> for Mirror {
             u if u.contains("zig.florent.dev") => Layout::Flat,
             u if u.contains("zig.squirl.dev") => Layout::Flat,
             u if u.contains("zigmirror.meox.dev") => Layout::Flat,
+            u if u.contains("zig-mirror.tsimnet.eu") => Layout::Flat,
+            u if u.contains("pkg.earth") => Layout::Flat,
+            u if u.contains("ziglang.freetls.fastly.net") => Layout::Flat,
+            u if u.contains("zig.tilok.dev") => Layout::Flat,
             _ => Layout::Versioned,
         };
 
@@ -549,7 +619,7 @@ impl MirrorManager {
         let index = MirrorsIndex::load_from_disk(&self.cache_path)
             .await
             .map_err(|err| {
-                tracing::warn!(target: TARGET, "Failed to load mirrors cache from disk: {err}");
+                tracing::debug!(target: TARGET, "Failed to load mirrors cache from disk: {err}");
                 NetErr::EmptyMirrors
             })?;
 
@@ -564,10 +634,43 @@ impl MirrorManager {
         }
     }
 
-    /// Refresh mirrors from network and cache them
+    /// Refresh mirrors from network and cache them, preserving existing layouts and ranks
     async fn refresh_from_network(&mut self) -> Result<(), NetErr> {
         let fresh_mirrors = self.fetch_network_mirrors().await?;
-        self.mirrors = fresh_mirrors;
+
+        // Try to load existing cached mirrors to preserve layouts and ranks
+        let merged_mirrors = match MirrorsIndex::load_from_disk(&self.cache_path).await {
+            Ok(cached_index) => {
+                let cached_mirrors_map: std::collections::HashMap<String, Mirror> = cached_index
+                    .mirrors
+                    .into_iter()
+                    .map(|m| (m.base_url.to_string(), m))
+                    .collect();
+
+                let merged: Vec<Mirror> = fresh_mirrors
+                    .into_iter()
+                    .map(|mut fresh_mirror| {
+                        if let Some(cached_mirror) =
+                            cached_mirrors_map.get(fresh_mirror.base_url.as_str())
+                        {
+                            fresh_mirror.layout = cached_mirror.layout;
+                            fresh_mirror.rank = cached_mirror.rank;
+                        }
+                        fresh_mirror
+                    })
+                    .collect();
+
+                tracing::debug!(target: TARGET, "Merged layouts and ranks from {} cached mirrors into {} fresh mirrors",
+                             cached_mirrors_map.len(), merged.len());
+                merged
+            }
+            Err(_) => {
+                tracing::debug!(target: TARGET, "No cached mirrors found, using fresh mirrors from network");
+                fresh_mirrors
+            }
+        };
+
+        self.mirrors = merged_mirrors;
         let index = MirrorsIndex::new(self.mirrors.clone());
 
         // Save to cache (log errors but don't fail)
