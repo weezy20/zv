@@ -6,6 +6,7 @@
 //! - Migrating active.json → zv.toml
 //! - Text file for tracking master version (cache)
 
+use crate::app::constants::ZV_MASTER_FILE;
 use color_eyre::eyre::{Context, Result};
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -20,7 +21,11 @@ pub struct ZvConfig {
     /// Current zv version
     pub version: String,
     /// Active Zig installation (migrated from active.json)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub active_zig: Option<ActiveZig>,
+    /// Tracked master version (local-master-zig)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_master_zig: Option<String>,
 }
 
 /// Active Zig installation information (migrated from active.json)
@@ -98,13 +103,46 @@ pub async fn migrate(zv_root: &Path) -> Result<()> {
         // Perform 0.8.0 -> 0.9.0 migration
         let migrated_active_zig = migrate_0_8_0_to_0_9_0(zv_root).await?;
 
+        // Check for existing master installation to migrate local_master_zig
+        let mut local_master_zig = None;
+        let master_file = zv_root.join(ZV_MASTER_FILE);
+        if master_file.exists() {
+            if let Ok(version) = std::fs::read_to_string(&master_file) {
+                let version = version.trim().to_string();
+                if !version.is_empty() {
+                    tracing::debug!("Migrating local_master_zig to {}", version);
+                    local_master_zig = Some(version);
+                }
+            }
+        }
+
         // Save updated config with migrated active zig (if any)
         let config = ZvConfig {
             version: current_version.to_string(),
             active_zig: migrated_active_zig,
+            local_master_zig,
         };
 
         save_zv_config(&zv_toml_path, &config)?;
+    } else {
+        // Run migration for existing zv.toml if needed (e.g. adding local_master_zig to 0.9.0)
+        if let Ok(mut config) = load_zv_config(&zv_toml_path) {
+            if config.local_master_zig.is_none() {
+                let master_file = zv_root.join(ZV_MASTER_FILE);
+                if master_file.exists() {
+                    if let Ok(version) = std::fs::read_to_string(&master_file) {
+                        let version = version.trim().to_string();
+                        if !version.is_empty() {
+                            tracing::debug!("Migrating local_master_zig to {}", version);
+                            config.local_master_zig = Some(version);
+                            if let Err(e) = save_zv_config(&zv_toml_path, &config) {
+                                tracing::error!("Failed to save migrated config: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
@@ -308,7 +346,7 @@ async fn migrate_active_json(active_json_path: &Path) -> Result<ActiveZig> {
 /// Update the master file with the given version
 /// This should be called whenever fetch_master_version succeeds
 pub async fn update_master_file(zv_root: &Path, version: &str) {
-    let master_file_path = zv_root.join("master");
+    let master_file_path = zv_root.join(ZV_MASTER_FILE);
 
     match sync_fs::write(&master_file_path, version) {
         Ok(_) => {
