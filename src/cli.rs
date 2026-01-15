@@ -216,7 +216,7 @@ pub enum Commands {
 
         /// Target to clean: 'all', 'downloads', version(s), or 'master'
         #[arg(
-            value_delimiter = ',',
+
             value_parser = parse_clean_target,
             help = "What to clean: 'all', 'downloads', version(s), or omit for all",
             long_help = "Specify what to clean:\n\
