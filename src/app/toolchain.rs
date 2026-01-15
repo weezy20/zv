@@ -23,7 +23,7 @@ pub struct ToolchainManager {
     installations: Vec<ZigInstall>,
     active_install: Option<ZigInstall>,
     bin_path: PathBuf,
-    zv_config_file: PathBuf,
+    pub zv_config_file: PathBuf,
 }
 
 impl ToolchainManager {
@@ -66,6 +66,7 @@ impl ToolchainManager {
                         path: zi.path.to_string_lossy().to_string(),
                         is_master: zi.is_master,
                     }),
+                    local_master_zig: None,
                 };
 
                 if let Err(e) = crate::app::migrations::save_zv_config(&zv_config_file, &config) {
@@ -391,6 +392,27 @@ impl ToolchainManager {
             path: install_destination.clone(),
             is_master,
         };
+
+        // Update local_master_zig if this is a master version
+        if is_master {
+            if let Ok(mut config) = crate::app::migrations::load_zv_config(&self.zv_config_file) {
+                config.local_master_zig = Some(version.to_string());
+                if let Err(e) = crate::app::migrations::save_zv_config(&self.zv_config_file, &config) {
+                    tracing::error!(target: TARGET, "Failed to update local_master_zig: {}", e);
+                }
+            } else {
+                 // Try to create config if it doesn't exist
+                let config = ZvConfig {
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    active_zig: None,
+                    local_master_zig: Some(version.to_string()),
+                };
+                 if let Err(e) = crate::app::migrations::save_zv_config(&self.zv_config_file, &config) {
+                    tracing::error!(target: TARGET, "Failed to create config with local_master_zig: {}", e);
+                }
+            }
+        }
+
         let exe_path = new_install.path.join(Shim::Zig.executable_name());
         match self
             .installations
@@ -416,15 +438,19 @@ impl ToolchainManager {
         tracing::debug!(target: TARGET, install_path = %install.path.display(), "Found installation, deploying shims");
         self.deploy_shims(install, false, false).await?;
 
-        // Write to zv.toml
-        let config = ZvConfig {
+        // Write to zv.toml - preserve local_master_zig
+        let mut config = crate::app::migrations::load_zv_config(&self.zv_config_file).unwrap_or(ZvConfig {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            active_zig: Some(crate::app::migrations::ActiveZig {
-                version: install.version.to_string(),
-                path: install.path.to_string_lossy().to_string(),
-                is_master: install.is_master,
-            }),
-        };
+            active_zig: None,
+            local_master_zig: None,
+        });
+
+        config.version = env!("CARGO_PKG_VERSION").to_string();
+        config.active_zig = Some(crate::app::migrations::ActiveZig {
+            version: install.version.to_string(),
+            path: install.path.to_string_lossy().to_string(),
+            is_master: install.is_master,
+        });
 
         crate::app::migrations::save_zv_config(&self.zv_config_file, &config)?;
         self.active_install = Some(install.clone());
@@ -454,15 +480,19 @@ impl ToolchainManager {
         tracing::debug!(target: TARGET, "Deploying shims");
         self.deploy_shims(&zig_install, false, false).await?;
 
-        // Write to zv.toml
-        let config = ZvConfig {
+        // Write to zv.toml - preserve local_master_zig
+        let mut config = crate::app::migrations::load_zv_config(&self.zv_config_file).unwrap_or(ZvConfig {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            active_zig: Some(crate::app::migrations::ActiveZig {
-                version: zig_install.version.to_string(),
-                path: zig_install.path.to_string_lossy().to_string(),
-                is_master: zig_install.is_master,
-            }),
-        };
+            active_zig: None,
+            local_master_zig: None,
+        });
+
+        config.version = env!("CARGO_PKG_VERSION").to_string();
+        config.active_zig = Some(crate::app::migrations::ActiveZig {
+            version: zig_install.version.to_string(),
+            path: zig_install.path.to_string_lossy().to_string(),
+            is_master: zig_install.is_master,
+        });
 
         crate::app::migrations::save_zv_config(&self.zv_config_file, &config)?;
         self.active_install = Some(zig_install.clone());
@@ -666,28 +696,103 @@ impl ToolchainManager {
             let updated_config = ZvConfig {
                 version: config.version,
                 active_zig: None,
+                local_master_zig: config.local_master_zig,
             };
 
             if let Err(e) =
                 crate::app::migrations::save_zv_config(&self.zv_config_file, &updated_config)
             {
                 tracing::warn!(target: TARGET, "Failed to clear active zig from config: {}", e);
-                return Err(eyre!(e).wrap_err("Failed to clear active version from config"));
+                return Err(eyre!(e).wrap_err("Failed to clear active version from config").into());
             }
         } else {
             // Config file doesn't exist, create one with no active zig
             let config = ZvConfig {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 active_zig: None,
+                local_master_zig: None,
             };
 
             if let Err(e) = crate::app::migrations::save_zv_config(&self.zv_config_file, &config) {
                 tracing::warn!(target: TARGET, "Failed to create config file: {}", e);
-                return Err(eyre!(e).wrap_err("Failed to create config file"));
+                return Err(eyre!(e).wrap_err("Failed to create config file").into());
             }
         }
 
         self.active_install = None;
         Ok(())
+    }
+
+    /// Delete a specific installation
+    pub async fn delete_install(&mut self, install: &ZigInstall) -> Result<()> {
+        tracing::debug!(target: TARGET, version = %install.version, is_master = install.is_master, "Deleting installation");
+        
+        fs::remove_dir_all(&install.path).await.map_err(ZvError::Io)?;
+
+        // If this was the local master tracked in config, verify if we should clear it
+        if install.is_master {
+             // We can check if this specific version matches local_master_zig if needed,
+             // or just let the caller handle config updates.
+             // But to be fully encapsulated, we should arguably handle it here.
+             // However, scan_installations and finding the "right" master to delete is done by the caller logic right now.
+             // Let's stick to simple deletion here and maybe expose a method to clear local master config.
+        }
+
+        // Remove from memory
+        if let Some(pos) = self.installations.iter().position(|i| i == install) {
+            self.installations.remove(pos);
+        }
+
+        Ok(())
+    }
+
+    /// Clean the downloads cache directory
+    pub async fn clean_downloads_cache(&self) -> Result<()> {
+        let downloads_path = self.versions_path.parent().unwrap().join("downloads"); // version_path is <root>/versions
+        tracing::debug!(target: TARGET, path = %downloads_path.display(), "Cleaning downloads directory");
+
+        if !downloads_path.exists() {
+            return Ok(());
+        }
+
+        fs::remove_dir_all(&downloads_path).await.map_err(ZvError::Io)?;
+        fs::create_dir_all(downloads_path.join("tmp")).await.map_err(ZvError::Io)?;
+        Ok(())
+    }
+
+    /// Delete all installed versions
+    pub async fn delete_all_versions(&mut self) -> Result<()> {
+        tracing::debug!(target: TARGET, "Deleting all versions");
+        
+        if self.versions_path.exists() {
+             fs::remove_dir_all(&self.versions_path).await.map_err(ZvError::Io)?;
+             fs::create_dir(&self.versions_path).await.map_err(ZvError::Io)?;
+        }
+        
+        self.installations.clear();
+        self.active_install = None;
+        
+        // Also clear config? Or just let verify/init handle it?
+        // Ideally we should clear active_zig from config.
+        self.clear_active_version()?;
+
+        Ok(())
+    }
+
+    /// Get the locally tracked master version string from config
+    pub fn get_local_master_version(&self) -> Option<String> {
+        crate::app::migrations::load_zv_config(&self.zv_config_file)
+            .ok()
+            .and_then(|c| c.local_master_zig)
+    }
+
+    /// Clear the locally tracked master version in config
+    pub fn clear_local_master_version(&self) -> Result<()> {
+         if let Ok(mut config) = crate::app::migrations::load_zv_config(&self.zv_config_file) {
+             config.local_master_zig = None;
+             crate::app::migrations::save_zv_config(&self.zv_config_file, &config).map_err(|e| eyre!(e).into())
+         } else {
+             Ok(())
+         }
     }
 }

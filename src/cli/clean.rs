@@ -5,36 +5,22 @@ use yansi::Paint;
 
 pub async fn clean(
     app: &mut App,
-    target: Option<CleanTarget>,
+    targets: Vec<CleanTarget>,
     except: Vec<ZigVersion>,
     outdated: bool,
 ) -> crate::Result<()> {
     // Handle --outdated flag
-    // If --outdated is specified without a target or with 'master', clean outdated master versions
     if outdated {
-        let should_clean_outdated = match &target {
-            None => true, // `zv clean --outdated`
-            Some(CleanTarget::Versions(versions)) => {
-                // `zv clean master --outdated` or similar
-                versions
-                    .iter()
-                    .any(|ver| matches!(ver, ZigVersion::Master(_)))
-            }
-            Some(CleanTarget::All) | Some(CleanTarget::Downloads) => false,
+        let should_clean_outdated = if targets.is_empty() {
+             true 
+        } else {
+             targets.iter().any(|t| matches!(t, CleanTarget::Versions(versions) if versions.iter().any(|v| matches!(v, ZigVersion::Master(_)))))
         };
 
         if should_clean_outdated {
             return clean_outdated_master(app).await;
         } else {
-            eprintln!(
-                "{} --outdated flag can only be used where clean target is 'master'",
-                Paint::red("✗")
-            );
-            eprintln!(
-                "{} Usage: zv clean --outdated  OR  zv clean master --outdated",
-                Paint::yellow("ℹ")
-            );
-            return Ok(());
+             return Ok(());
         }
     }
 
@@ -43,16 +29,78 @@ pub async fn clean(
         return clean_except_versions(app, except).await;
     }
 
-    // Handle target-based cleaning
-    match target {
-        None => clean_all(app).await,
-        Some(CleanTarget::All) => clean_all(app).await,
-        Some(CleanTarget::Downloads) => clean_downloads_only(app).await,
-        Some(CleanTarget::Versions(versions)) => clean_specific_versions(app, versions).await,
+    // Strict Target Parsing
+    let mut should_clean_all = false;
+    let mut should_clean_downloads = false; 
+    
+    let has_all = targets.iter().any(|t| matches!(t, CleanTarget::All));
+    let has_versions = targets.iter().any(|t| matches!(t, CleanTarget::Versions(_)));
+    
+    // Validate mutual exclusivity
+    if has_all && has_versions {
+        eprintln!("{} Usage: zv clean [all] OR zv clean <version>...", Paint::red("✗"));
+         return Ok(());
     }
+
+    let mut specific_versions = Vec::new();
+
+    if targets.is_empty() {
+        // No targets -> prompt for all
+        if !confirm_clean_all()? {
+             return Ok(());
+        }
+        should_clean_all = true;
+        should_clean_downloads = true;
+    } else if has_all {
+         should_clean_all = true;
+         should_clean_downloads = true; 
+    } else {
+        // Collect versions
+        for target in targets {
+            match target {
+                CleanTarget::Versions(versions) => specific_versions.extend(versions),
+                CleanTarget::Downloads => should_clean_downloads = true,
+                _ => {}
+            }
+        }
+    }
+
+    if should_clean_all {
+        clean_all_versions(app).await?;
+    } else if !specific_versions.is_empty() {
+        clean_specific_versions(app, specific_versions).await?;
+    }
+
+    if should_clean_downloads {
+        clean_downloads(app).await?;
+    }
+    
+    // Summary
+    if should_clean_all && should_clean_downloads {
+         println!("{}", Paint::green("Full cleanup completed!").bold());
+    }
+
+    Ok(())
 }
 
-/// Clean specific versions from the comma-separated list
+fn confirm_clean_all() -> crate::Result<bool> {
+    if !crate::tools::supports_interactive_prompts() {
+        return Ok(true); // Assume yes in non-interactive mode
+    }
+
+    use dialoguer::theme::ColorfulTheme;
+    
+    println!();
+    println!("{}", Paint::yellow("WARNING: This will remove ALL installed Zig versions and cached downloads.").bold());
+    
+    dialoguer::Confirm::with_theme(&ColorfulTheme::default())
+        .with_prompt("Are you sure you want to continue?")
+        .default(true)
+        .interact()
+        .map_err(|e| crate::ZvError::from(color_eyre::eyre::eyre!(e)).into())
+}
+
+/// Clean specific versions from the list
 async fn clean_specific_versions(app: &mut App, versions: Vec<ZigVersion>) -> crate::Result<()> {
     // Deduplicate semver variants
     let versions = crate::tools::deduplicate_semver_variants(versions);
@@ -60,12 +108,7 @@ async fn clean_specific_versions(app: &mut App, versions: Vec<ZigVersion>) -> cr
     // Format the version list for display
     let version_list: Vec<String> = versions
         .iter()
-        .map(|v| match v {
-            ZigVersion::Semver(ver) => ver.to_string(),
-            ZigVersion::Master(Some(ver)) => format!("master/{}", ver),
-            ZigVersion::Master(None) => "master".to_string(),
-            _ => format!("{:?}", v),
-        })
+        .map(|v| v.to_string())
         .collect();
 
     let versions_display = if version_list.len() == 1 {
@@ -79,89 +122,86 @@ async fn clean_specific_versions(app: &mut App, versions: Vec<ZigVersion>) -> cr
         Paint::cyan(&format!("Removing version(s): {}", versions_display)).bold()
     );
 
-    // Get all installed versions with their paths using scan_installations
     let installations = ToolchainManager::scan_installations(&app.versions_path)?;
-    let active_install = app.toolchain_manager.get_active_install();
+    let active_install = app.toolchain_manager.get_active_install().cloned();
+    let local_master_version = app.toolchain_manager.get_local_master_version();
 
     let mut removed_count = 0;
     let mut not_found_count = 0;
     let mut failed_count = 0;
     let mut active_version_removed = false;
+    let mut master_version_removed = false;
 
     for version in versions {
-        // Find if this version is actually installed
-        let installation = installations.iter().find(|install| {
-            match &version {
-                ZigVersion::Semver(target_v) => !install.is_master && &install.version == target_v,
-                ZigVersion::Master(Some(target_v)) => {
-                    install.is_master && &install.version == target_v
-                }
-                ZigVersion::Master(None) => install.is_master, // Match any master version
-                ZigVersion::Stable(Some(target_v)) | ZigVersion::Latest(Some(target_v)) => {
-                    // Stable@version and Latest@version should match like regular semver
-                    !install.is_master && &install.version == target_v
-                }
-                ZigVersion::Stable(None) | ZigVersion::Latest(None) => {
-                    // Match the highest stable version (non-master)
-                    !install.is_master && {
-                        // Find the highest stable version among all installations
-                        let highest_stable = installations
-                            .iter()
-                            .filter(|i| !i.is_master)
-                            .max_by(|a, b| a.version.cmp(&b.version));
-
-                        if let Some(highest) = highest_stable {
-                            &install.version == &highest.version
-                        } else {
-                            false
-                        }
-                    }
-                }
+        let installation = match version {
+            ZigVersion::Master(Some(ref v)) => {
+                 // Target specific master version
+                 installations.iter().find(|i| i.is_master && &i.version == v)
             }
-        });
+            ZigVersion::Master(None) => {
+                 // Target generic master - prefer local_master_version if it exists
+                 if let Some(ref local_master) = local_master_version {
+                      installations.iter().find(|i| i.is_master && i.version.to_string() == *local_master)
+                 } else {
+                      // fallback to any master? or maybe latest master?
+                      // current logic was: find ANY master (first one found)
+                      installations.iter().find(|i| i.is_master)
+                 }
+            }
+             _ => {
+                 installations.iter().find(|install| {
+                    match &version {
+                        ZigVersion::Semver(target_v) => !install.is_master && &install.version == target_v,
+                        ZigVersion::Stable(Some(target_v)) | ZigVersion::Latest(Some(target_v)) => {
+                            !install.is_master && &install.version == target_v
+                        }
+                        _ => false,
+                    }
+                })
+            }
+        };
 
         match installation {
             Some(install) => {
-                // Check if we're removing the currently active version
-                let is_active = active_install.is_some_and(|active| {
+                let is_active = active_install.as_ref().is_some_and(|active| {
                     active.version == install.version && active.is_master == install.is_master
                 });
 
                 if is_active {
                     active_version_removed = true;
-                    let display_name = if install.is_master {
-                        format!("master/{}", install.version)
-                    } else {
-                        install.version.to_string()
-                    };
                     println!(
                         "{} Warning: Removing currently active version: {}",
                         Paint::yellow("⚠"),
-                        display_name
+                        if install.is_master { format!("master/{}", install.version) } else { install.version.to_string() }
                     );
                 }
+                
+                if install.is_master {
+                     // Only clear local_master_verison if we are removing the one that is tracked
+                     if let Some(ref local_master) = local_master_version {
+                         if install.version.to_string() == *local_master {
+                             master_version_removed = true;
+                         }
+                     } else {
+                         // if we don't know which one is local master, assume we might be removing it?
+                         // or maybe we shouldn't clear it if we don't know. 
+                         // But if local_master_version is None, then there is nothing to clear.
+                         // So master_version_removed=true is fine, clear_local_master_version handles it.
+                         master_version_removed = true;
+                     }
+                }
 
-                match tokio::fs::remove_dir_all(&install.path).await {
+                match app.toolchain_manager.delete_install(install).await {
                     Ok(()) => {
                         removed_count += 1;
-                        let display_name = if install.is_master {
-                            format!("master/{}", install.version)
-                        } else {
-                            install.version.to_string()
-                        };
-                        println!("{} Removed: {}", Paint::red("✗"), display_name);
+                        println!("{} Removed: {}", Paint::green("✓"), if install.is_master { format!("master/{}", install.version) } else { install.version.to_string() });
                     }
                     Err(e) => {
                         failed_count += 1;
-                        let display_name = if install.is_master {
-                            format!("master/{}", install.version)
-                        } else {
-                            install.version.to_string()
-                        };
                         eprintln!(
                             "{} Failed to remove {}: {}",
-                            Paint::red("✗"),
-                            display_name,
+                            Paint::yellow("⚠"),
+                             if install.is_master { format!("master/{}", install.version) } else { install.version.to_string() },
                             e
                         );
                     }
@@ -169,23 +209,19 @@ async fn clean_specific_versions(app: &mut App, versions: Vec<ZigVersion>) -> cr
             }
             None => {
                 not_found_count += 1;
-                let display_name = match version {
-                    ZigVersion::Semver(v) => v.to_string(),
-                    ZigVersion::Master(Some(v)) => format!("master/{}", v),
-                    ZigVersion::Master(None) => "master".to_string(),
-                    _ => format!("{:?}", version),
-                };
-                println!("{} Version {} not found", Paint::yellow("⚠"), display_name);
+                println!("{} Version {} not found", Paint::yellow("⚠"), version);
             }
         }
     }
+    
+    if master_version_removed {
+         let _ = app.toolchain_manager.clear_local_master_version();
+    }
 
-    // Handle active version removal by automatically selecting a new active version
     if active_version_removed {
         handle_active_version_removal(app).await?;
     }
 
-    // Provide summary feedback
     let mut summary_parts = Vec::new();
     if removed_count > 0 {
         summary_parts.push(format!("{} removed", removed_count));
@@ -203,26 +239,17 @@ async fn clean_specific_versions(app: &mut App, versions: Vec<ZigVersion>) -> cr
         summary_parts.join(", ")
     };
 
-    let icon = if failed_count > 0 {
-        Paint::yellow("⚠")
-    } else {
-        Paint::green("✓")
-    };
-
-    println!("{} Cleanup completed: {}", icon, summary);
+    println!("{} Cleanup completed: {}", Paint::green("ℹ"), summary);
 
     Ok(())
 }
 
-/// Clean all versions except the specified ones
 async fn clean_except_versions(
     app: &mut App,
     except_versions: Vec<ZigVersion>,
 ) -> crate::Result<()> {
-    // Deduplicate semver variants
     let except_versions = crate::tools::deduplicate_semver_variants(except_versions);
 
-    // Format the except version list for display
     let except_list: Vec<String> = except_versions
         .iter()
         .map(|v| match v {
@@ -244,15 +271,12 @@ async fn clean_except_versions(
         Paint::cyan(&format!("Removing all versions except: {}", except_display)).bold()
     );
 
-    // Get all installed versions using scan_installations
     let installations = ToolchainManager::scan_installations(&app.versions_path)?;
-    let active_install = app.toolchain_manager.get_active_install();
+    let active_install = app.toolchain_manager.get_active_install().cloned();
     let mut removed_count = 0;
     let mut kept_count = 0;
     let mut failed_count = 0;
     let mut active_version_removed = false;
-
-    // Track which except versions were actually found
     let mut found_except_versions = std::collections::HashSet::new();
 
     for install in &installations {
@@ -280,8 +304,7 @@ async fn clean_except_versions(
             };
             println!("{} Kept: {}", Paint::green("✓"), display_name);
         } else {
-            // Check if we're removing the currently active version
-            let is_active = active_install.is_some_and(|active| active == install);
+            let is_active = active_install.as_ref().is_some_and(|active| active == install);
 
             if is_active {
                 active_version_removed = true;
@@ -297,7 +320,7 @@ async fn clean_except_versions(
                 );
             }
 
-            match tokio::fs::remove_dir_all(&install.path).await {
+            match app.toolchain_manager.delete_install(install).await {
                 Ok(()) => {
                     removed_count += 1;
                     let display_name = if install.is_master {
@@ -325,7 +348,6 @@ async fn clean_except_versions(
         }
     }
 
-    // Report non-existent versions in --except list (Requirement 4.3)
     for except_ver in &except_versions {
         if !found_except_versions.contains(except_ver) {
             let display_name = match except_ver {
@@ -342,14 +364,12 @@ async fn clean_except_versions(
         }
     }
 
-    // Report when no cleanup was needed (Requirement 4.4)
     if removed_count == 0 && failed_count == 0 {
         println!(
             "{} No cleanup needed - all installed versions were in the --except list",
             Paint::green("✓")
         );
     } else {
-        // Provide summary feedback
         let mut summary_parts = Vec::new();
         if removed_count > 0 {
             summary_parts.push(format!("{} removed", removed_count));
@@ -371,7 +391,6 @@ async fn clean_except_versions(
         println!("{} Cleanup completed: {}", icon, summary);
     }
 
-    // Handle active version removal by automatically selecting a new active version
     if active_version_removed {
         handle_active_version_removal(app).await?;
     }
@@ -379,22 +398,14 @@ async fn clean_except_versions(
     Ok(())
 }
 
-/// Clean outdated master versions, keeping only the latest
 async fn clean_outdated_master(app: &mut App) -> crate::Result<()> {
     println!(
         "{}",
         Paint::cyan("Removing outdated master versions...").bold()
     );
 
-    let master_path = app.versions_path.join("master");
-    if !master_path.exists() {
-        println!("{} No master directory found", Paint::yellow("⚠"));
-        return Ok(());
-    }
-
-    // Get all master installations using scan_installations
     let installations = ToolchainManager::scan_installations(&app.versions_path)?;
-    let active_install = app.toolchain_manager.get_active_install();
+    let active_install = app.toolchain_manager.get_active_install().cloned();
     let mut master_installs: Vec<_> = installations
         .into_iter()
         .filter(|install| install.is_master)
@@ -405,18 +416,15 @@ async fn clean_outdated_master(app: &mut App) -> crate::Result<()> {
         return Ok(());
     }
 
-    // Sort to find the latest (highest version)
     master_installs.sort_by(|a, b| a.version.cmp(&b.version));
-    let latest_master = master_installs.last().unwrap();
+    let latest_master = master_installs.last().unwrap().clone();
 
     let mut removed_count = 0;
     let mut active_version_removed = false;
 
-    // Remove all master versions except the latest
     for install in &master_installs {
         if install.version != latest_master.version {
-            // Check if we're removing the currently active version
-            let is_active = active_install.is_some_and(|active| active == install);
+            let is_active = active_install.as_ref().is_some_and(|active| active == install);
 
             if is_active {
                 active_version_removed = true;
@@ -427,7 +435,7 @@ async fn clean_outdated_master(app: &mut App) -> crate::Result<()> {
                 );
             }
 
-            match tokio::fs::remove_dir_all(&install.path).await {
+            match app.toolchain_manager.delete_install(install).await {
                 Ok(()) => {
                     removed_count += 1;
                     println!(
@@ -462,7 +470,6 @@ async fn clean_outdated_master(app: &mut App) -> crate::Result<()> {
         );
     }
 
-    // Handle active version removal by automatically selecting a new active version
     if active_version_removed {
         handle_active_version_removal(app).await?;
     }
@@ -470,114 +477,23 @@ async fn clean_outdated_master(app: &mut App) -> crate::Result<()> {
     Ok(())
 }
 
-/// Clean downloads directory only
-async fn clean_downloads_only(app: &mut App) -> crate::Result<()> {
-    let downloads_path = app.download_cache();
-    println!("{}", Paint::cyan("Cleaning downloads directory...").bold());
-
-    // Check if downloads directory exists
-    if !downloads_path.exists() {
-        println!(
-            "{} Downloads directory doesn't exist: {}",
-            Paint::yellow("⚠"),
-            downloads_path.display()
-        );
-        return Ok(());
-    }
-
-    // Remove the entire downloads directory
-    match tokio::fs::remove_dir_all(&downloads_path).await {
-        Ok(()) => {
-            println!("{} Removed downloads directory", Paint::red("✗"));
-        }
-        Err(e) => {
-            eprintln!(
-                "{} Failed to remove downloads directory: {}",
-                Paint::red("✗"),
-                e
-            );
-            return Err(color_eyre::eyre::eyre!(
-                "Failed to remove downloads directory: {}",
-                e
-            ));
-        }
-    }
-
-    // Recreate downloads directory with tmp subfolder
-    match tokio::fs::create_dir_all(&downloads_path.join("tmp")).await {
-        Ok(()) => {
-            println!(
-                "{} Successfully cleaned downloads directory",
-                Paint::green("✓")
-            );
-        }
-        Err(e) => {
-            eprintln!(
-                "{} Failed to recreate downloads/tmp directory: {}",
-                Paint::yellow("⚠"),
-                e
-            );
-            return Err(color_eyre::eyre::eyre!(
-                "Failed to recreate downloads directory: {}",
-                e
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-/// Clean up all contents of the versions directory (for clean_all command)
 pub async fn clean_all_versions(app: &mut App) -> crate::Result<()> {
-    let versions_path = &app.versions_path;
-
     println!("{}", Paint::cyan("Removing all versions...").bold());
 
-    if !versions_path.exists() {
-        println!(
-            "{} Versions directory doesn't exist: {}",
-            Paint::yellow("⚠"),
-            versions_path.display()
-        );
-        return Ok(());
-    }
-
-    // Remove the entire versions directory
-    match tokio::fs::remove_dir_all(versions_path).await {
+    match app.toolchain_manager.delete_all_versions().await {
         Ok(()) => {
-            println!("{} Removed versions directory", Paint::red("✗"));
-        }
-        Err(e) => {
-            eprintln!(
-                "{} Failed to remove versions directory: {}",
-                Paint::red("✗"),
-                e
-            );
-            return Err(color_eyre::eyre::eyre!(
-                "Failed to remove versions directory: {}",
-                e
-            ));
-        }
-    }
-
-    // Recreate the versions directory
-    match tokio::fs::create_dir(versions_path).await {
-        Ok(()) => {
-            println!(
+             println!(
                 "{} Successfully cleaned versions directory",
                 Paint::green("✓")
             );
         }
         Err(e) => {
-            eprintln!(
-                "{} Failed to recreate versions directory: {}",
-                Paint::yellow("⚠"),
+               eprintln!(
+                "{} Failed to remove versions directory: {}",
+                Paint::red("✗"),
                 e
             );
-            return Err(color_eyre::eyre::eyre!(
-                "Failed to recreate versions directory: {}",
-                e
-            ));
+            return Err(e);
         }
     }
 
@@ -585,80 +501,31 @@ pub async fn clean_all_versions(app: &mut App) -> crate::Result<()> {
 }
 
 pub async fn clean_downloads(app: &mut App) -> crate::Result<()> {
-    let downloads_path = app.download_cache();
     println!("{}", Paint::cyan("Cleaning downloads directory...").bold());
 
-    if !downloads_path.exists() {
-        println!("{} Downloads directory doesn't exist", Paint::yellow("⚠"));
-        return Ok(());
-    }
-
-    // Remove the entire downloads directory
-    match tokio::fs::remove_dir_all(&downloads_path).await {
+    match app.toolchain_manager.clean_downloads_cache().await {
         Ok(()) => {
-            println!("{} Removed downloads directory", Paint::red("✗"));
+             println!(
+                "{} Successfully cleaned downloads directory",
+                Paint::green("✓")
+            );
         }
-        Err(e) => {
+         Err(e) => {
             eprintln!(
                 "{} Failed to remove downloads directory: {}",
                 Paint::red("✗"),
                 e
             );
-            return Err(color_eyre::eyre::eyre!(
-                "Failed to remove downloads directory: {}",
-                e
-            ));
-        }
-    }
-
-    // Recreate downloads directory with tmp subfolder
-    match tokio::fs::create_dir_all(&downloads_path.join("tmp")).await {
-        Ok(()) => {
-            println!(
-                "{} Successfully cleaned downloads directory",
-                Paint::green("✓")
-            );
-        }
-        Err(e) => {
-            eprintln!(
-                "{} Failed to recreate downloads/tmp directory: {}",
-                Paint::yellow("⚠"),
-                e
-            );
-            return Err(color_eyre::eyre::eyre!(
-                "Failed to recreate downloads directory: {}",
-                e
-            ));
+            return Err(e);
         }
     }
 
     Ok(())
 }
 
-/// Clean up both bin and versions directories
-pub async fn clean_all(app: &mut App) -> crate::Result<()> {
-    println!("{}", Paint::cyan("Performing full cleanup...").bold());
-
-    // Note: bin directory cleanup has been removed - shims are managed by 'zv use <version>'
-
-    // Clean all contents of versions/ directory (enhanced functionality)
-    clean_all_versions(app).await?;
-    println!(); // Add spacing
-
-    // Clean downloads/ directory and recreate with tmp subfolder
-    clean_downloads(app).await?;
-    println!();
-
-    println!("{}", Paint::green("Full cleanup completed!").bold());
-    Ok(())
-}
-
-/// Handle active version removal by automatically selecting a new active version
-/// Priority: highest stable > highest master > none
 async fn handle_active_version_removal(app: &mut App) -> crate::Result<()> {
     println!();
 
-    // Get all remaining installed versions
     let installations = ToolchainManager::scan_installations(&app.versions_path)?;
 
     if installations.is_empty() {
@@ -669,7 +536,6 @@ async fn handle_active_version_removal(app: &mut App) -> crate::Result<()> {
         return Ok(());
     }
 
-    // Find the best replacement version using priority: highest stable > highest master > none
     let new_active = installations
         .iter()
         .filter(|install| !install.is_master)
@@ -699,14 +565,12 @@ async fn handle_active_version_removal(app: &mut App) -> crate::Result<()> {
                 );
             };
 
-            // Create ResolvedZigVersion for the new active version
             let resolved_version = if is_master {
                 ResolvedZigVersion::Master(install.version.clone())
             } else {
                 ResolvedZigVersion::Semver(install.version.clone())
             };
 
-            // Use app's set_active_version method with the installation path to skip scanning
             match app
                 .set_active_version(&resolved_version, Some(install.path.clone()))
                 .await

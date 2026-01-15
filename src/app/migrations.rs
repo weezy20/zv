@@ -21,6 +21,8 @@ pub struct ZvConfig {
     pub version: String,
     /// Active Zig installation (migrated from active.json)
     pub active_zig: Option<ActiveZig>,
+    /// Tracked master version (local-master-zig)
+    pub local_master_zig: Option<String>,
 }
 
 /// Active Zig installation information (migrated from active.json)
@@ -98,13 +100,46 @@ pub async fn migrate(zv_root: &Path) -> Result<()> {
         // Perform 0.8.0 -> 0.9.0 migration
         let migrated_active_zig = migrate_0_8_0_to_0_9_0(zv_root).await?;
 
+        // Check for existing master installation to migrate local_master_zig
+        let mut local_master_zig = None;
+        let master_file = zv_root.join("master");
+        if master_file.exists() {
+             if let Ok(version) = std::fs::read_to_string(&master_file) {
+                 let version = version.trim().to_string();
+                 if !version.is_empty() {
+                     tracing::info!("Migrating local_master_zig to {}", version);
+                     local_master_zig = Some(version);
+                 }
+             }
+        }
+
         // Save updated config with migrated active zig (if any)
         let config = ZvConfig {
             version: current_version.to_string(),
             active_zig: migrated_active_zig,
+            local_master_zig,
         };
 
         save_zv_config(&zv_toml_path, &config)?;
+    } else {
+        // Run migration for existing zv.toml if needed (e.g. adding local_master_zig to 0.9.0)
+         if let Ok(mut config) = load_zv_config(&zv_toml_path) {
+             if config.local_master_zig.is_none() {
+                 let master_file = zv_root.join("master");
+                 if master_file.exists() {
+                     if let Ok(version) = std::fs::read_to_string(&master_file) {
+                         let version = version.trim().to_string();
+                         if !version.is_empty() {
+                             tracing::info!("Migrating local_master_zig to {}", version);
+                             config.local_master_zig = Some(version);
+                             if let Err(e) = save_zv_config(&zv_toml_path, &config) {
+                                 tracing::error!("Failed to save migrated config: {}", e);
+                             }
+                         }
+                     }
+                 }
+             }
+         }
     }
 
     Ok(())

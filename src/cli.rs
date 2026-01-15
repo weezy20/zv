@@ -216,6 +216,7 @@ pub enum Commands {
 
         /// Target to clean: 'all', 'downloads', version(s), or 'master'
         #[arg(
+            value_delimiter = ',',
             value_parser = parse_clean_target,
             help = "What to clean: 'all', 'downloads', version(s), or omit for all",
             long_help = "Specify what to clean:\n\
@@ -225,7 +226,7 @@ pub enum Commands {
                          • <v1,v2,...>  - Clean multiple versions (comma-separated)\n\
                          • master       - Clean all master versions (use with --outdated to keep latest)"
         )]
-        target: Option<CleanTarget>,
+        targets: Vec<CleanTarget>,
     },
 
     /// Setup shell environment for zv (required to make zig binaries available in $PATH)
@@ -327,8 +328,8 @@ impl Commands {
             Commands::Clean {
                 except,
                 outdated,
-                target,
-            } => clean::clean(&mut app, target, except, outdated).await,
+                targets,
+            } => clean::clean(&mut app, targets, except, outdated).await,
             Commands::Setup {
                 dry_run,
                 no_interactive,
