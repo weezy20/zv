@@ -470,6 +470,9 @@ pub enum NetErr {
     #[error("Mirror not found: {0}")]
     MirrorNotFound(String),
 
+    #[error("Checksum verification failed")]
+    Checksum(#[source] Report),
+
     #[error(transparent)]
     Other(#[from] Report),
 }

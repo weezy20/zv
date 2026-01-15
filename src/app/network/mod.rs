@@ -229,11 +229,12 @@ impl ZvNetwork {
                 }
             }; // end select_mirror
 
-            tracing::trace!(target: TARGET, "Using mirror: {} (rank: {}) for attempt {}/{}", 
-                         selected_mirror.base_url, selected_mirror.rank, attempt, max_retries);
+            tracing::trace!(target: TARGET, "Using mirror: {} (rank: {}) for attempt {}/{}",
+                          selected_mirror.base_url, selected_mirror.rank, attempt, max_retries);
 
             // Attempt download with this mirror
-            match selected_mirror
+            let original_layout = selected_mirror.layout;
+            let download_result = selected_mirror
                 .download(
                     &self.client,
                     semver_version,
@@ -244,16 +245,24 @@ impl ZvNetwork {
                     size,
                     &progress_handle,
                 )
-                .await
-            {
-                Ok(()) => {
+                .await;
+
+            match download_result {
+                Ok(used_layout) => {
+                    // If layout changed, update mirror permanently
+                    if used_layout != original_layout {
+                        selected_mirror.layout = used_layout;
+                        tracing::trace!(target: TARGET, "Updated mirror {} layout to {:?}",
+                                             selected_mirror.base_url, used_layout);
+                    }
+
                     // Download successful, move files to final location
                     match move_to_final_location(&temp_tarball_path, &final_tarball_path).await {
                         Ok(()) => {
                             tracing::trace!(target: TARGET, "Successfully moved tarball to final location: {}", final_tarball_path.display());
                         }
                         Err(e) => {
-                            tracing::error!(target: TARGET, "Failed to move tarball from {} to {}: {}", 
+                            tracing::error!(target: TARGET, "Failed to move tarball from {} to {}: {}",
                                           temp_tarball_path.display(), final_tarball_path.display(), e);
                             let _ = progress_handle
                                 .finish_with_error("Failed to move downloaded files")
@@ -267,7 +276,7 @@ impl ZvNetwork {
                             tracing::trace!(target: TARGET, "Successfully moved minisig to final location: {}", final_minisig_path.display());
                         }
                         Err(e) => {
-                            tracing::error!(target: TARGET, "Failed to move minisig from {} to {}: {}", 
+                            tracing::error!(target: TARGET, "Failed to move minisig from {} to {}: {}",
                                           temp_minisig_path.display(), final_minisig_path.display(), e);
                             let _ = progress_handle
                                 .finish_with_error("Failed to move signature file")
@@ -279,7 +288,7 @@ impl ZvNetwork {
                     // Promote the successful mirror and save rankings
                     let old_rank = selected_mirror.rank;
                     selected_mirror.promote();
-                    tracing::trace!(target: TARGET, "Promoting successful mirror {} from rank {} to {}", 
+                    tracing::trace!(target: TARGET, "Promoting successful mirror {} from rank {} to {}",
                                  selected_mirror.base_url, old_rank, selected_mirror.rank);
 
                     match progress_handle
@@ -295,10 +304,10 @@ impl ZvNetwork {
                     }
 
                     if let Some(s) = size {
-                        tracing::debug!(target: TARGET, "Successfully downloaded {} ({:.1} MB) using mirror {} after {} attempt(s)", 
+                        tracing::debug!(target: TARGET, "Successfully downloaded {} ({:.1} MB) using mirror {} after {} attempt(s)",
                                      zig_tarball, s as f64 / 1_048_576.0, selected_mirror.base_url, attempt);
                     } else {
-                        tracing::debug!(target: TARGET, "Successfully downloaded {} using mirror {} after {} attempt(s)", 
+                        tracing::debug!(target: TARGET, "Successfully downloaded {} using mirror {} after {} attempt(s)",
                                      zig_tarball, selected_mirror.base_url, attempt);
                     }
 
@@ -308,7 +317,7 @@ impl ZvNetwork {
                         mirror_used: selected_mirror.base_url.to_string(),
                     };
 
-                    // Update mirror ranking on disk
+                    // Update mirror ranking on disk (this will also persist layout changes)
                     if let Err(e) = mirror_manager.save_index_to_disk().await {
                         tracing::debug!(target: TARGET, "Failed to update mirror ranking after successful download: {} - Rankings may not persist", e);
                     } else {
@@ -318,13 +327,13 @@ impl ZvNetwork {
                     return Ok(download_result);
                 }
                 Err(err) => {
-                    tracing::warn!(target: TARGET, "Download attempt {}/{} failed with mirror {} (rank: {}): {}", 
+                    tracing::warn!(target: TARGET, "Download attempt {}/{} failed with mirror {} (rank: {}): {}",
                                  attempt, max_retries, selected_mirror.base_url, selected_mirror.rank, err);
 
                     // Demote the failed mirror and save rankings
                     let old_rank = selected_mirror.rank;
                     selected_mirror.demote();
-                    tracing::debug!(target: TARGET, "Demoting failed mirror {} from rank {} to rank {}", 
+                    tracing::debug!(target: TARGET, "Demoting failed mirror {} from rank {} to rank {}",
                                  selected_mirror.base_url, old_rank, selected_mirror.rank);
 
                     // Update mirror ranking
@@ -337,7 +346,7 @@ impl ZvNetwork {
                     // Clean up temporary files after download
                     remove_files(&[temp_tarball_path.as_path(), temp_minisig_path.as_path()]).await;
 
-                    last_error = Some(err.into());
+                    last_error = Some(ZvError::NetworkError(err));
 
                     // Check if this is the last attempt
                     if attempt == max_retries {
@@ -346,7 +355,7 @@ impl ZvNetwork {
                     }
 
                     // Log retry message with context
-                    tracing::debug!(target: TARGET, "Will retry download with different mirror (next attempt: {}/{}) after mirror failure", 
+                    tracing::debug!(target: TARGET, "Will retry download with different mirror (next attempt: {}/{}) after mirror failure",
                                  attempt + 1, max_retries);
                 }
             }

@@ -117,7 +117,6 @@ pub async fn update_zv(app: &mut App, force: bool, include_prerelease: bool) -> 
                     .map(|a| a.name.as_str())
                     .filter(|name| name.starts_with("zv-") && name.ends_with(".zip"))
                     .collect();
-                
                 eyre!(
                     "No compatible release asset found for platform: {} (expected: {})\nAvailable assets: {:?}",
                     target,
@@ -149,7 +148,6 @@ pub async fn update_zv(app: &mut App, force: bool, include_prerelease: bool) -> 
                         name.starts_with("zv-") && (name.ends_with(".tar.gz") || name.ends_with(".tar.xz"))
                     })
                     .collect();
-                
                 eyre!(
                     "No compatible release asset found for platform: {} (tried: {} and {})\nAvailable assets: {:?}",
                     target,
