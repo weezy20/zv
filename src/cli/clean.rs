@@ -12,15 +12,15 @@ pub async fn clean(
     // Handle --outdated flag
     if outdated {
         let should_clean_outdated = if targets.is_empty() {
-             true 
+            true
         } else {
-             targets.iter().any(|t| matches!(t, CleanTarget::Versions(versions) if versions.iter().any(|v| matches!(v, ZigVersion::Master(_)))))
+            targets.iter().any(|t| matches!(t, CleanTarget::Versions(versions) if versions.iter().any(|v| matches!(v, ZigVersion::Master(_)))))
         };
 
         if should_clean_outdated {
             return clean_outdated_master(app).await;
         } else {
-             return Ok(());
+            return Ok(());
         }
     }
 
@@ -31,15 +31,20 @@ pub async fn clean(
 
     // Strict Target Parsing
     let mut should_clean_all = false;
-    let mut should_clean_downloads = false; 
-    
+    let mut should_clean_downloads = false;
+
     let has_all = targets.iter().any(|t| matches!(t, CleanTarget::All));
-    let has_versions = targets.iter().any(|t| matches!(t, CleanTarget::Versions(_)));
-    
+    let has_versions = targets
+        .iter()
+        .any(|t| matches!(t, CleanTarget::Versions(_)));
+
     // Validate mutual exclusivity
     if has_all && has_versions {
-        eprintln!("{} Usage: zv clean [all] OR zv clean <version>...", Paint::red("✗"));
-         return Ok(());
+        eprintln!(
+            "{} Usage: zv clean [all] OR zv clean <version>...",
+            Paint::red("✗")
+        );
+        return Ok(());
     }
 
     let mut specific_versions = Vec::new();
@@ -47,13 +52,13 @@ pub async fn clean(
     if targets.is_empty() {
         // No targets -> prompt for all
         if !confirm_clean_all()? {
-             return Ok(());
+            return Ok(());
         }
         should_clean_all = true;
         should_clean_downloads = true;
     } else if has_all {
-         should_clean_all = true;
-         should_clean_downloads = true; 
+        should_clean_all = true;
+        should_clean_downloads = true;
     } else {
         // Collect versions
         for target in targets {
@@ -74,10 +79,10 @@ pub async fn clean(
     if should_clean_downloads {
         clean_downloads(app).await?;
     }
-    
+
     // Summary
     if should_clean_all && should_clean_downloads {
-         println!("{}", Paint::green("Full cleanup completed!").bold());
+        println!("{}", Paint::green("Full cleanup completed!").bold());
     }
 
     Ok(())
@@ -89,10 +94,14 @@ fn confirm_clean_all() -> crate::Result<bool> {
     }
 
     use dialoguer::theme::ColorfulTheme;
-    
+
     println!();
-    println!("{}", Paint::yellow("WARNING: This will remove ALL installed Zig versions and cached downloads.").bold());
-    
+    println!(
+        "{}",
+        Paint::yellow("WARNING: This will remove ALL installed Zig versions and cached downloads.")
+            .bold()
+    );
+
     dialoguer::Confirm::with_theme(&ColorfulTheme::default())
         .with_prompt("Are you sure you want to continue?")
         .default(true)
@@ -102,14 +111,34 @@ fn confirm_clean_all() -> crate::Result<bool> {
 
 /// Clean specific versions from the list
 async fn clean_specific_versions(app: &mut App, versions: Vec<ZigVersion>) -> crate::Result<()> {
+    // Get local master version early for resolution
+    let local_master_version: Option<String> = app.toolchain_manager.get_local_master_version();
+
+    // Resolve Master(None) to Master(Some(v)) if local_master_version is available
+    let versions: Vec<ZigVersion> = versions
+        .into_iter()
+        .map(|v| match v {
+            ZigVersion::Master(None) => {
+                if let Some(ref master_ver_str) = local_master_version {
+                    // Parse the local master version string to a Version
+                    if let Ok(master_ver) = semver::Version::parse(master_ver_str) {
+                        ZigVersion::Master(Some(master_ver))
+                    } else {
+                        v // Keep as Master(None) if parsing fails
+                    }
+                } else {
+                    v // Keep as Master(None) if no local master
+                }
+            }
+            _ => v,
+        })
+        .collect();
+
     // Deduplicate semver variants
     let versions = crate::tools::deduplicate_semver_variants(versions);
 
     // Format the version list for display
-    let version_list: Vec<String> = versions
-        .iter()
-        .map(|v| v.to_string())
-        .collect();
+    let version_list: Vec<String> = versions.iter().map(|v| v.to_string()).collect();
 
     let versions_display = if version_list.len() == 1 {
         version_list[0].clone()
@@ -124,7 +153,6 @@ async fn clean_specific_versions(app: &mut App, versions: Vec<ZigVersion>) -> cr
 
     let installations = ToolchainManager::scan_installations(&app.versions_path)?;
     let active_install = app.toolchain_manager.get_active_install().cloned();
-    let local_master_version = app.toolchain_manager.get_local_master_version();
 
     let mut removed_count = 0;
     let mut not_found_count = 0;
@@ -135,30 +163,28 @@ async fn clean_specific_versions(app: &mut App, versions: Vec<ZigVersion>) -> cr
     for version in versions {
         let installation = match version {
             ZigVersion::Master(Some(ref v)) => {
-                 // Target specific master version
-                 installations.iter().find(|i| i.is_master && &i.version == v)
+                // Target specific master version - just match on the semver
+                installations.iter().find(|i| &i.version == v)
             }
             ZigVersion::Master(None) => {
-                 // Target generic master - prefer local_master_version if it exists
-                 if let Some(ref local_master) = local_master_version {
-                      installations.iter().find(|i| i.is_master && i.version.to_string() == *local_master)
-                 } else {
-                      // fallback to any master? or maybe latest master?
-                      // current logic was: find ANY master (first one found)
-                      installations.iter().find(|i| i.is_master)
-                 }
+                // Target generic master - prefer local_master_version if it exists
+                if let Some(ref local_master) = local_master_version {
+                    installations
+                        .iter()
+                        .find(|i| i.is_master && i.version.to_string() == *local_master)
+                } else {
+                    // fallback to any master? or maybe latest master?
+                    // current logic was: find ANY master (first one found)
+                    installations.iter().find(|i| i.is_master)
+                }
             }
-             _ => {
-                 installations.iter().find(|install| {
-                    match &version {
-                        ZigVersion::Semver(target_v) => !install.is_master && &install.version == target_v,
-                        ZigVersion::Stable(Some(target_v)) | ZigVersion::Latest(Some(target_v)) => {
-                            !install.is_master && &install.version == target_v
-                        }
-                        _ => false,
-                    }
-                })
-            }
+            _ => installations.iter().find(|install| match &version {
+                ZigVersion::Semver(target_v) => !install.is_master && &install.version == target_v,
+                ZigVersion::Stable(Some(target_v)) | ZigVersion::Latest(Some(target_v)) => {
+                    !install.is_master && &install.version == target_v
+                }
+                _ => false,
+            }),
         };
 
         match installation {
@@ -172,36 +198,52 @@ async fn clean_specific_versions(app: &mut App, versions: Vec<ZigVersion>) -> cr
                     println!(
                         "{} Warning: Removing currently active version: {}",
                         Paint::yellow("⚠"),
-                        if install.is_master { format!("master/{}", install.version) } else { install.version.to_string() }
+                        if install.is_master {
+                            format!("master/{}", install.version)
+                        } else {
+                            install.version.to_string()
+                        }
                     );
                 }
-                
+
                 if install.is_master {
-                     // Only clear local_master_verison if we are removing the one that is tracked
-                     if let Some(ref local_master) = local_master_version {
-                         if install.version.to_string() == *local_master {
-                             master_version_removed = true;
-                         }
-                     } else {
-                         // if we don't know which one is local master, assume we might be removing it?
-                         // or maybe we shouldn't clear it if we don't know. 
-                         // But if local_master_version is None, then there is nothing to clear.
-                         // So master_version_removed=true is fine, clear_local_master_version handles it.
-                         master_version_removed = true;
-                     }
+                    // Only clear local_master_verison if we are removing the one that is tracked
+                    if let Some(ref local_master) = local_master_version {
+                        if install.version.to_string() == *local_master {
+                            master_version_removed = true;
+                        }
+                    } else {
+                        // if we don't know which one is local master, assume we might be removing it?
+                        // or maybe we shouldn't clear it if we don't know.
+                        // But if local_master_version is None, then there is nothing to clear.
+                        // So master_version_removed=true is fine, clear_local_master_version handles it.
+                        master_version_removed = true;
+                    }
                 }
 
                 match app.toolchain_manager.delete_install(install).await {
                     Ok(()) => {
                         removed_count += 1;
-                        println!("{} Removed: {}", Paint::green("✓"), if install.is_master { format!("master/{}", install.version) } else { install.version.to_string() });
+                        println!(
+                            "{} Removed: {}",
+                            Paint::green("✓"),
+                            if install.is_master {
+                                format!("master/{}", install.version)
+                            } else {
+                                install.version.to_string()
+                            }
+                        );
                     }
                     Err(e) => {
                         failed_count += 1;
                         eprintln!(
                             "{} Failed to remove {}: {}",
                             Paint::yellow("⚠"),
-                             if install.is_master { format!("master/{}", install.version) } else { install.version.to_string() },
+                            if install.is_master {
+                                format!("master/{}", install.version)
+                            } else {
+                                install.version.to_string()
+                            },
                             e
                         );
                     }
@@ -213,9 +255,9 @@ async fn clean_specific_versions(app: &mut App, versions: Vec<ZigVersion>) -> cr
             }
         }
     }
-    
+
     if master_version_removed {
-         let _ = app.toolchain_manager.clear_local_master_version();
+        let _ = app.toolchain_manager.clear_local_master_version();
     }
 
     if active_version_removed {
@@ -304,7 +346,9 @@ async fn clean_except_versions(
             };
             println!("{} Kept: {}", Paint::green("✓"), display_name);
         } else {
-            let is_active = active_install.as_ref().is_some_and(|active| active == install);
+            let is_active = active_install
+                .as_ref()
+                .is_some_and(|active| active == install);
 
             if is_active {
                 active_version_removed = true;
@@ -424,7 +468,9 @@ async fn clean_outdated_master(app: &mut App) -> crate::Result<()> {
 
     for install in &master_installs {
         if install.version != latest_master.version {
-            let is_active = active_install.as_ref().is_some_and(|active| active == install);
+            let is_active = active_install
+                .as_ref()
+                .is_some_and(|active| active == install);
 
             if is_active {
                 active_version_removed = true;
@@ -482,13 +528,13 @@ pub async fn clean_all_versions(app: &mut App) -> crate::Result<()> {
 
     match app.toolchain_manager.delete_all_versions().await {
         Ok(()) => {
-             println!(
+            println!(
                 "{} Successfully cleaned versions directory",
                 Paint::green("✓")
             );
         }
         Err(e) => {
-               eprintln!(
+            eprintln!(
                 "{} Failed to remove versions directory: {}",
                 Paint::red("✗"),
                 e
@@ -505,12 +551,12 @@ pub async fn clean_downloads(app: &mut App) -> crate::Result<()> {
 
     match app.toolchain_manager.clean_downloads_cache().await {
         Ok(()) => {
-             println!(
+            println!(
                 "{} Successfully cleaned downloads directory",
                 Paint::green("✓")
             );
         }
-         Err(e) => {
+        Err(e) => {
             eprintln!(
                 "{} Failed to remove downloads directory: {}",
                 Paint::red("✗"),

@@ -107,7 +107,7 @@ pub async fn migrate(zv_root: &Path) -> Result<()> {
              if let Ok(version) = std::fs::read_to_string(&master_file) {
                  let version = version.trim().to_string();
                  if !version.is_empty() {
-                     tracing::info!("Migrating local_master_zig to {}", version);
+                     tracing::debug!("Migrating local_master_zig to {}", version);
                      local_master_zig = Some(version);
                  }
              }
@@ -130,7 +130,7 @@ pub async fn migrate(zv_root: &Path) -> Result<()> {
                      if let Ok(version) = std::fs::read_to_string(&master_file) {
                          let version = version.trim().to_string();
                          if !version.is_empty() {
-                             tracing::info!("Migrating local_master_zig to {}", version);
+                             tracing::debug!("Migrating local_master_zig to {}", version);
                              config.local_master_zig = Some(version);
                              if let Err(e) = save_zv_config(&zv_toml_path, &config) {
                                  tracing::error!("Failed to save migrated config: {}", e);
