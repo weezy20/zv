@@ -414,7 +414,6 @@ impl Mirror {
     }
 
     /// Get the download URL with layout inverted
-    #[allow(unused)]
     pub fn get_alternate_url(&self, version: &Version, tarball: &str) -> String {
         let alternate = Mirror {
             base_url: self.base_url.clone(),
