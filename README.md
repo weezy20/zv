@@ -119,105 +119,72 @@ Silently moving files and re-patching shell configs without user consent is wors
 
 ## Installation
 
+There are two primary paths: fetch a prebuilt binary or build from source. Either way, finish with `zv sync` — that's all you need. `zv setup` is a legacy fallback covered at the end.
 
-**Quick install script (Recommended):**
+### Option 1 — Prebuilt binary (Recommended)
 
-Linux/macOS:
+**Linux/macOS:**
 ```sh
 curl -fsSL https://github.com/weezy20/zv/releases/latest/download/install.sh | bash
 ```
 
-Windows (PowerShell):
+**Windows (PowerShell):**
 ```powershell
 irm https://github.com/weezy20/zv/releases/latest/download/install.ps1 | iex
 ```
-If you encounter an execution policy error, you can temporarily allow script execution by running:
+
+If you get an execution policy error on Windows:
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "irm https://github.com/weezy20/zv/releases/latest/download/install.ps1 | iex"
 ```
 
-> After installing, run `zv setup` to configure your shell environment.
+The script downloads the release binary, places it at `~/.local/share/zv/bin/zv`, and creates a symlink at `~/.local/bin/zv` (Linux/macOS) or installs to `%USERPROFILE%\.zv\bin\zv.exe` (Windows). Then finish with:
 
-**HomeBrew:**
+```sh
+zv sync
+```
+
+### Option 2 — Build from source
+
+```sh
+# Clone and build
+cargo build --release
+
+# Sync using the freshly built binary
+./target/release/zv sync
+```
+
+Or via `cargo install`:
+```sh
+cargo install zv
+~/.cargo/bin/zv sync
+cargo uninstall zv   # optional: clean up the cargo copy; the live binary is now in ZV_DIR/bin
+```
+
+**HomeBrew / NPM / Bun:**
 ```sh
 brew install weezy20/tap/zv
-```
 
-**NPM/Bun:**
-```sh
 npm install -g @weezy20/zv
-```
-
-Or you can also use bun (recommended):
-```sh
+# or
 bun i -g @weezy20/zv
 ```
 
-<details>
-<summary><b>Cargo (crates.io or build from source)</b></summary>
-
-**Step 1:** Install the binary from crates.io or build from source
-
-Using `cargo install`:
-```sh
-# From crates.io
-cargo install zv
-
-# OR from GitHub
-cargo install --git https://github.com/weezy20/zv --locked
-```
-
-Or build from source (clone the repo first):
-```sh
-# Build release binary (creates target/release/zv)
-cargo build --release
-```
-
-**Step 2:** Preview setup changes (optional but recommended)
-
-Using `cargo installed binary`:
-```sh
-$HOME/.cargo/bin/zv setup --dry-run
-# OR shorthand:
-$HOME/.cargo/bin/zv setup -d
-```
-
-Or from source:
-```sh
-cargo run --release -- setup --dry-run
-# OR shorthand:
-cargo run --release -- setup -d
-```
-
-**Step 3:** Run setup to install `zv` to `ZV_DIR/bin` and configure your shell
-
-Using `cargo installed binary`:
-```sh
-$HOME/.cargo/bin/zv setup
-```
-
-Or from source:
-```sh
-cargo run --release -- setup
-# or if you already have ZV_DIR/bin in path
-cargo run --release -- sync
-```
-
-On Linux/macOS this self-installs `zv` to `~/.local/share/zv/bin/`, creates symlinks in `~/.local/bin/`, and adds `~/.local/bin` to your PATH if it isn't already.
-On Windows, installs to `%USERPROFILE%\.zv\bin` and adds it to PATH via the registry.
-
-**Step 4:** Remove the cargo binary (optional cleanup - only if you used `cargo install`)
-```sh
-cargo uninstall zv
-```
-
-From now on, use the `zv` symlinked in `~/.local/bin` (Linux/macOS) or installed in `%USERPROFILE%\.zv\bin` (Windows).
-
-</details>
-
 ---
 
-> **Note:** The quick install script places the binary at `~/.local/share/zv/bin/zv` with a symlink at `~/.local/bin/zv` (Linux/macOS), or `%USERPROFILE%\.zv\bin\zv.exe` (Windows). After installing, run `zv setup` to configure your shell. If you installed via cargo, follow the steps above.
+### `zv setup` — legacy PATH configuration (last resort)
+
+On **Linux**, `zv setup` is a no-op — run `zv sync` instead.
+
+On **macOS** (non-XDG layout) or **Windows**, if `zv sync` warns that your PATH isn't configured, run `zv setup`. It will make the following changes to your system:
+
+- **Creates** a shell environment file at `$ZV_DIR/env`
+- **Appends** a `source $ZV_DIR/env` line to your shell RC file (e.g. `~/.bashrc`, `~/.zshrc`, `~/.zprofile`)
+
+To preview these changes without applying them:
+```sh
+zv setup --dry-run
+```
 
 ## Updating `zv` 
 

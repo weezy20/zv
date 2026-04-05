@@ -215,6 +215,7 @@ jobs:
     needs:
       - plan
       - host
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -250,6 +251,7 @@ jobs:
     needs:
       - plan
       - host
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
