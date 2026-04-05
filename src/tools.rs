@@ -52,8 +52,12 @@ impl ZvPaths {
     pub fn resolve() -> Result<Self> {
         let (data_dir, using_env_var) = fetch_zv_dir()?;
 
+        // When ZV_DIR is explicitly set, treat it as a self-contained root (pre-XDG layout).
+        // XDG splitting only applies when the user has not expressed an opinion via ZV_DIR.
         #[cfg(not(windows))]
-        let (config_dir, cache_dir, public_bin_dir) = {
+        let (config_dir, cache_dir, public_bin_dir) = if using_env_var {
+            (data_dir.clone(), data_dir.clone(), None)
+        } else {
             let config = xdg_config_home()
                 .unwrap_or_else(|_| data_dir.clone())
                 .join("zv");
