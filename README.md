@@ -18,7 +18,7 @@ You can also specify a version number, e.g., `zig +0.15.1`. With `zv`, you also 
 
 ```py
 # file .zigversion
-0.15.1
+0.15.2
 ```
 which will always use version `0.15.1` when you run any `zig` command inside it. How cool is that?
 
