@@ -365,6 +365,13 @@ async fn copy_binary_and_regenerate_shims(
         .await
         .with_context(|| format!("Failed to create directory {}", app.bin_path().display()))?;
 
+    // Remove the target first to avoid ETXTBSY on Linux when the binary is running
+    if target.exists() {
+        tokio::fs::remove_file(target).await.with_context(|| {
+            format!("Failed to remove existing binary at {}", target.display())
+        })?;
+    }
+
     tokio::fs::copy(source, target).await.with_context(|| {
         format!(
             "Failed to copy zv binary from {} to {}",
