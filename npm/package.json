@@ -1,0 +1,28 @@
+{
+  "name": "@weezy20/zv",
+  "version": "0.0.0",
+  "description": "Ziglang Version Manager and Project Starter",
+  "homepage": "https://github.com/weezy20/zv",
+  "license": "MIT",
+  "bin": {
+    "zv": "run-zv.sh"
+  },
+  "scripts": {
+    "postinstall": "bash install.sh",
+    "prepack": "bash prepack.sh"
+  },
+  "files": [
+    "install.sh",
+    "run-zv.sh"
+  ],
+  "keywords": [
+    "ziglang",
+    "zig",
+    "version-manager",
+    "zvm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/weezy20/zv.git"
+  }
+}

@@ -124,27 +124,23 @@ Silently moving files and re-patching shell configs without user consent is wors
 
 Linux/macOS:
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/weezy20/zv/releases/latest/download/zv-installer.sh | sh
+curl -fsSL https://github.com/weezy20/zv/releases/latest/download/install.sh | bash
 ```
 
 Windows (PowerShell):
 ```powershell
-irm https://github.com/weezy20/zv/releases/latest/download/zv-installer.ps1 | iex
+irm https://github.com/weezy20/zv/releases/latest/download/install.ps1 | iex
 ```
 If you encounter an execution policy error, you can temporarily allow script execution by running:
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "irm https://github.com/weezy20/zv/releases/latest/download/zv-installer.ps1 | iex"
+powershell -ExecutionPolicy Bypass -Command "irm https://github.com/weezy20/zv/releases/latest/download/install.ps1 | iex"
 ```
 
->The following methods use different package managers hence, after running `zv setup` we uninstall the package manager version of `zv` to avoid confusion. Since `zv` can self update for popular OS/Arch combinations, you don't need to rely on package managers for updates.
+> After installing, run `zv setup` to configure your shell environment.
 
 **HomeBrew:**
 ```sh
 brew install weezy20/tap/zv
-# Run zv setup to self-install
-zv setup
-# Remove brew installation
-brew uninstall zv
 ```
 
 **NPM/Bun:**
@@ -221,7 +217,7 @@ From now on, use the `zv` symlinked in `~/.local/bin` (Linux/macOS) or installed
 
 ---
 
-> **Note:** The quick install scripts (shell/PowerShell), Homebrew, and npm all run `zv sync` + `zv setup` automatically, landing the binary in `~/.local/share/zv/bin/` with a symlink at `~/.local/bin/zv` on Linux/macOS, and `%USERPROFILE%\.zv\bin` on Windows. You're ready to go! If you installed via cargo, follow the steps above.
+> **Note:** The quick install script places the binary at `~/.local/share/zv/bin/zv` with a symlink at `~/.local/bin/zv` (Linux/macOS), or `%USERPROFILE%\.zv\bin\zv.exe` (Windows). After installing, run `zv setup` to configure your shell. If you installed via cargo, follow the steps above.
 
 ## Updating `zv` 
 
@@ -259,13 +255,18 @@ zv sync
 
 ## Usage
 
-All `zv` data lives in `ZV_DIR`, including Zig versions, downloads, cache files, and the `zv` binary itself.
+All `zv` data follows the XDG Base Directory Specification on Linux/macOS:
 
-**Default locations:**
-- Unix/Linux/macOS: `$HOME/.zv`
-- Windows: `%USERPROFILE%\.zv`
+**Default locations (Linux/macOS):**
+- Data (binaries, versions): `$HOME/.local/share/zv`
+- Config (`zv.toml`): `$HOME/.config/zv`
+- Cache (index, mirrors, downloads): `$HOME/.cache/zv`
+- Public bin (symlinks): `$HOME/.local/bin`
 
-You can customize this by setting the `ZV_DIR` environment variable.
+**Default locations (Windows):**
+- All data: `%USERPROFILE%\.zv`
+
+You can override the data directory by setting the `ZV_DIR` environment variable (falls back to pre-XDG self-contained layout).
 
 ## Use `zv` for project creation:
 
@@ -308,7 +309,7 @@ zv clean --except <version,*>          # Clean up every version except the versi
 zv rm master                           # Clean up the `master` branch toolchain.
 zv rm master --outdated                # Clean up any older master versions in the master folder that don't match latest `master`
 zv setup                               # Set up shell environment for zv with interactive prompts (use --no-interactive for automation)
-zv sync                                # Resync community mirrors list from [ziglang.org/download/community-mirrors.txt]; also force resync of index to fetch latest nightly builds. Replaces `ZV_DIR/bin/zv` if outdated against current invocation.
+zv sync                                # Resync community mirrors list from [ziglang.org/download/community-mirrors.txt]; also force resync of index to fetch latest nightly builds. Replaces the zv binary in data dir if outdated against current invocation.
 zv upgrade | update                    # Update zv to the latest release only if present in GH Releases: https://github.com/weezy20/zv/releases
 zv help                                # Detailed instructions for zv. Use `--help` for long help or `-h` for short help with a subcommand.
 zv uninstall                           # Uninstall zv completely by attempting to remove ZV_DIR.
@@ -329,7 +330,7 @@ I hope you enjoy using it! ♥
 | Variable                  | Description                                                                                                                | Default / Notes                                                                 |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | **`ZV_LOG`**              | Sets the log level (same as `RUST_LOG`). If set, logging follows the specified level.                                      | Inherits `RUST_LOG` behavior                                                    |
-| **`ZV_DIR`**              | Defines the home directory for `zv`.                                                                                       | Default `$HOME/.zv` for linux/macos or unix. For windows it usually will be `%USERPROFILE%/.zv`                                      |
+| **`ZV_DIR`**              | Overrides the data directory for `zv`. When set, all paths (data, config, cache) live under this directory.               | Linux/macOS: `$XDG_DATA_HOME/zv` (default `$HOME/.local/share/zv`). Windows: `%USERPROFILE%\.zv`                                      |
 | **`ZV_INDEX_TTL_DAYS`**   | Number of days between automatic [index](https://ziglang.org/download/index.json) syncs.                                   | **21 days** — Using `master` or `latest` in inline mode use a shorter cache duration of just 1 day unlike `use` which will always fetch `master` & `latest` from network, so practically, you never have to worry about setting this variable yourself. |
 | **`ZV_MIRRORS_TTL_DAYS`** | Number of days before refreshing the mirrors list. Broken mirrors degrade automatically. Use `zv sync` to force refresh. | **21 days** — mirrors and index can be resynced immediately with `zv sync`. `master` relies on latest builds & so does `latest` and some community mirrors may not have it available; `zv` will retry other mirrors in that case.      |
 | **`ZV_MAX_RETRIES`**      | Maximum number of retry attempts for downloads when a download fails.                                                      | **3 retries** — If a download fails, `zv` will retry up to this many times before giving up.                                                   |
@@ -339,6 +340,6 @@ I hope you enjoy using it! ♥
 ---
 
 ### Tips:
-- If you prefer some mirrors to others, you can put it as `rank = 1` on your preferred mirrors (Default is rank 1 for all mirros) or lower the rank of mirrors that you don't want. `rank` is a range from 1..255, lower is better and more preferred when doing random selection. The mirrors file is generated at `<ZV_DIR>/mirrors.toml`
+- If you prefer some mirrors to others, you can put it as `rank = 1` on your preferred mirrors (Default is rank 1 for all mirrors) or lower the rank of mirrors that you don't want. `rank` is a range from 1..255, lower is better and more preferred when doing random selection. The mirrors file is generated at `$XDG_CACHE_HOME/zv/mirrors.toml` (default `~/.cache/zv/mirrors.toml`)
 
 - Currently `zv use master` will only install the master as present in zig-index. This means that older master installations still remain under the masters folder and can be selected via `zv use master@<older master version>` which can be obtained via `zv ls`. Note, installing older master versions like this may work now (zv v0.6.0 onwards): `zv i <pre-release version>` or `zv use <pre-release version>` if some mirror has the build, it'll be fetched.
