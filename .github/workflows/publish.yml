@@ -8,6 +8,9 @@ on:
     workflows: ["Release"]
     types: [completed]
 
+permissions:
+  contents: write
+
 jobs:
   # ── Resolve tag from the triggering commit ──────────────────────────────────
   resolve-tag:
@@ -110,6 +113,6 @@ jobs:
       - name: Publish
         run: |
           cd npm
-          npm publish --access public
+          npm publish --access public --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
