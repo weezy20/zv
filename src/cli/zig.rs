@@ -78,12 +78,8 @@ pub async fn zig_main() -> crate::Result<()> {
 /// Find the Zig executable for a specific version
 async fn find_zig_for_version(zig_version: &ZigVersion) -> crate::Result<PathBuf> {
     // Get zv directory structure
-    let (zv_base_path, _) = tools::fetch_zv_dir()?;
-    let mut app = App::init(UserConfig {
-        zv_base_path,
-        shell: None,
-    })
-    .await?;
+    let paths = tools::ZvPaths::resolve()?;
+    let mut app = App::init(UserConfig { paths, shell: None }).await?;
     // Resolve ZigVersion to a validated ResolvedZigVersion
     // This already does all the validation and fetching we need
     let resolved_version = resolve_zig_version(&mut app, zig_version).await
@@ -139,12 +135,8 @@ async fn find_zig_for_version(zig_version: &ZigVersion) -> crate::Result<PathBuf
 /// Find the default Zig executable (zv-managed or system)
 async fn find_default_zig() -> crate::Result<PathBuf> {
     // Try to get zv-managed zig first
-    if let Ok((zv_base_path, _)) = tools::fetch_zv_dir()
-        && let Ok(app) = App::init(UserConfig {
-            zv_base_path,
-            shell: None,
-        })
-        .await
+    if let Ok(paths) = tools::ZvPaths::resolve()
+        && let Ok(app) = App::init(UserConfig { paths, shell: None }).await
         && let Some(zig_path) = app.zv_zig()
     {
         tracing::trace!(target: "zig", "Using zv-managed zig at {}", zig_path.display());

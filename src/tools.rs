@@ -11,6 +11,137 @@ use std::{
 };
 use yansi::Paint;
 
+/// Central struct for all zv path resolution.
+/// Provides a single source of truth for the directory layout, enabling XDG compliance
+/// on Linux/macOS while falling back to `~/.zv` on Windows.
+#[derive(Debug, Clone)]
+pub struct ZvPaths {
+    /// Primary data directory: `XDG_DATA_HOME/zv` (`~/.local/share/zv`) or `~/.zv` on Windows
+    pub data_dir: PathBuf,
+    /// Internal binary dir (`data_dir/bin`) — actual zv binary and shims
+    pub bin_dir: PathBuf,
+    /// Installed zig versions (`data_dir/versions`)
+    pub versions_dir: PathBuf,
+    /// Config directory: `XDG_CONFIG_HOME/zv` (`~/.config/zv`) or `data_dir` on Windows
+    pub config_dir: PathBuf,
+    /// Active config file (`config_dir/zv.toml`)
+    pub config_file: PathBuf,
+    /// Cache directory: `XDG_CACHE_HOME/zv` (`~/.cache/zv`) or `data_dir` on Windows
+    #[allow(dead_code)]
+    pub cache_dir: PathBuf,
+    /// Download cache (`cache_dir/downloads`)
+    pub downloads_dir: PathBuf,
+    /// Cached zig version index (`cache_dir/index.toml`)
+    pub index_file: PathBuf,
+    /// Cached mirrors list (`cache_dir/mirrors.toml`)
+    pub mirrors_file: PathBuf,
+    /// Cached master version string (`cache_dir/master`)
+    pub master_file: PathBuf,
+    /// Public bin dir for XDG symlinks (`~/.local/bin`). `None` on Windows.
+    pub public_bin_dir: Option<PathBuf>,
+    /// Whether `ZV_DIR` was set via environment variable
+    pub using_env_var: bool,
+}
+
+impl ZvPaths {
+    /// Resolve all zv paths applying XDG Base Directory conventions on Linux/macOS.
+    /// On Windows, all paths fall back to `~/.zv` (same as existing behaviour).
+    ///
+    /// When `ZV_DIR` is set via environment variable it overrides `data_dir` only;
+    /// `config_dir` and `cache_dir` still follow XDG (or fall back to `data_dir` on Windows).
+    pub fn resolve() -> Result<Self> {
+        let (data_dir, using_env_var) = fetch_zv_dir()?;
+
+        #[cfg(not(windows))]
+        let (config_dir, cache_dir, public_bin_dir) = {
+            let config = xdg_config_home()
+                .unwrap_or_else(|_| data_dir.clone())
+                .join("zv");
+            let cache = xdg_cache_home()
+                .unwrap_or_else(|_| data_dir.clone())
+                .join("zv");
+            let public_bin = xdg_bin_home().ok();
+            (config, cache, public_bin)
+        };
+
+        #[cfg(windows)]
+        let (config_dir, cache_dir, public_bin_dir) = {
+            // Windows: keep everything under data_dir, no public bin
+            (data_dir.clone(), data_dir.clone(), None)
+        };
+
+        Ok(Self {
+            bin_dir: data_dir.join("bin"),
+            versions_dir: data_dir.join("versions"),
+            config_file: config_dir.join("zv.toml"),
+            downloads_dir: cache_dir.join("downloads"),
+            index_file: cache_dir.join("index.toml"),
+            mirrors_file: cache_dir.join("mirrors.toml"),
+            master_file: cache_dir.join("master"),
+            public_bin_dir,
+            config_dir,
+            cache_dir,
+            data_dir,
+            using_env_var,
+        })
+    }
+
+    /// Default env file path (`data_dir/env`) when shell type is unknown.
+    pub fn env_file_default(&self) -> PathBuf {
+        self.data_dir.join("env")
+    }
+}
+
+// ── XDG helpers ──────────────────────────────────────────────────────────────
+
+/// `$XDG_DATA_HOME` → defaults to `$HOME/.local/share`
+fn xdg_data_home() -> Result<PathBuf> {
+    if let Ok(val) = std::env::var("XDG_DATA_HOME") {
+        if !val.is_empty() {
+            return Ok(PathBuf::from(val));
+        }
+    }
+    home_dir().map(|h| h.join(".local/share"))
+}
+
+/// `$XDG_CONFIG_HOME` → defaults to `$HOME/.config`
+fn xdg_config_home() -> Result<PathBuf> {
+    if let Ok(val) = std::env::var("XDG_CONFIG_HOME") {
+        if !val.is_empty() {
+            return Ok(PathBuf::from(val));
+        }
+    }
+    home_dir().map(|h| h.join(".config"))
+}
+
+/// `$XDG_CACHE_HOME` → defaults to `$HOME/.cache`
+fn xdg_cache_home() -> Result<PathBuf> {
+    if let Ok(val) = std::env::var("XDG_CACHE_HOME") {
+        if !val.is_empty() {
+            return Ok(PathBuf::from(val));
+        }
+    }
+    home_dir().map(|h| h.join(".cache"))
+}
+
+/// `$XDG_BIN_HOME` → defaults to `$HOME/.local/bin` (informal convention)
+fn xdg_bin_home() -> Result<PathBuf> {
+    if let Ok(val) = std::env::var("XDG_BIN_HOME") {
+        if !val.is_empty() {
+            return Ok(PathBuf::from(val));
+        }
+    }
+    home_dir().map(|h| h.join(".local/bin"))
+}
+
+/// Resolve the user's home directory via shell detection
+fn home_dir() -> Result<PathBuf> {
+    let shell = crate::shell::Shell::detect();
+    shell
+        .get_home_dir()
+        .ok_or_else(|| eyre!("Unable to locate home directory"))
+}
+
 /// Cross-platform canonicalize function that avoids UNC paths on Windows
 pub fn canonicalize<P: AsRef<Path>>(path: P) -> io::Result<PathBuf> {
     dunce::canonicalize(path)
@@ -147,18 +278,17 @@ pub(crate) fn fetch_zv_dir() -> Result<(PathBuf, bool)> {
     Ok((zv_dir, using_env))
 }
 
-/// Get the default ZV directory, handling emulated shells on Windows
+/// Get the default ZV data directory.
+/// On Linux/macOS: `$XDG_DATA_HOME/zv` (defaults to `~/.local/share/zv`).
+/// On Windows: `~/.zv` (unchanged).
 pub(crate) fn get_default_zv_dir() -> Result<PathBuf> {
-    // Use shell detection to determine appropriate home directory
-    let shell = crate::shell::Shell::detect();
-
-    if let Some(home_dir) = shell.get_home_dir() {
-        Ok(home_dir.join(".zv"))
-    } else {
-        Err(eyre!(
-            "Unable to locate home directory.\
-            Please set `ZV_DIR` to use zv. If you think this is a bug please open an issue at <https://github.com/weezy20/zv/issues>"
-        ))
+    #[cfg(not(windows))]
+    {
+        xdg_data_home().map(|d| d.join("zv"))
+    }
+    #[cfg(windows)]
+    {
+        home_dir().map(|h| h.join(".zv"))
     }
 }
 

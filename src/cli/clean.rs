@@ -151,7 +151,7 @@ async fn clean_specific_versions(app: &mut App, versions: Vec<ZigVersion>) -> cr
         Paint::cyan(&format!("Removing version(s): {}", versions_display)).bold()
     );
 
-    let installations = ToolchainManager::scan_installations(&app.versions_path)?;
+    let installations = ToolchainManager::scan_installations(app.versions_path())?;
     let active_install = app.toolchain_manager.get_active_install().cloned();
 
     let mut removed_count = 0;
@@ -313,7 +313,7 @@ async fn clean_except_versions(
         Paint::cyan(&format!("Removing all versions except: {}", except_display)).bold()
     );
 
-    let installations = ToolchainManager::scan_installations(&app.versions_path)?;
+    let installations = ToolchainManager::scan_installations(app.versions_path())?;
     let active_install = app.toolchain_manager.get_active_install().cloned();
     let mut removed_count = 0;
     let mut kept_count = 0;
@@ -448,7 +448,7 @@ async fn clean_outdated_master(app: &mut App) -> crate::Result<()> {
         Paint::cyan("Removing outdated master versions...").bold()
     );
 
-    let installations = ToolchainManager::scan_installations(&app.versions_path)?;
+    let installations = ToolchainManager::scan_installations(app.versions_path())?;
     let active_install = app.toolchain_manager.get_active_install().cloned();
     let mut master_installs: Vec<_> = installations
         .into_iter()
@@ -572,7 +572,7 @@ pub async fn clean_downloads(app: &mut App) -> crate::Result<()> {
 async fn handle_active_version_removal(app: &mut App) -> crate::Result<()> {
     println!();
 
-    let installations = ToolchainManager::scan_installations(&app.versions_path)?;
+    let installations = ToolchainManager::scan_installations(app.versions_path())?;
 
     if installations.is_empty() {
         println!(

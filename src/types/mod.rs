@@ -11,10 +11,10 @@ pub use zigversion::*;
 
 use color_eyre::eyre::eyre;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 /// Application configuration provided by frontend
 pub struct UserConfig {
-    pub zv_base_path: std::path::PathBuf,
+    pub paths: crate::tools::ZvPaths,
     pub shell: Option<crate::Shell>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

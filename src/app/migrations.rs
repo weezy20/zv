@@ -53,12 +53,12 @@ pub enum MigrationError {
 }
 
 /// Check if migration is needed and perform it if so
-pub async fn migrate(zv_root: &Path) -> Result<()> {
+pub async fn migrate(zv_root: &Path, config_file: &Path) -> Result<()> {
     let current_version = env!("CARGO_PKG_VERSION");
     let current_version_parsed =
         Version::parse(current_version).expect("CARGO_PKG_VERSION should be valid semver");
 
-    let zv_toml_path = zv_root.join("zv.toml");
+    let zv_toml_path = config_file;
 
     // Check if migration is needed
     let needs_migration = if !zv_toml_path.exists() {
@@ -345,10 +345,8 @@ async fn migrate_active_json(active_json_path: &Path) -> Result<ActiveZig> {
 
 /// Update the master file with the given version
 /// This should be called whenever fetch_master_version succeeds
-pub async fn update_master_file(zv_root: &Path, version: &str) {
-    let master_file_path = zv_root.join(ZV_MASTER_FILE);
-
-    match sync_fs::write(&master_file_path, version) {
+pub async fn update_master_file(master_file: &Path, version: &str) {
+    match sync_fs::write(master_file, version) {
         Ok(_) => {
             tracing::debug!("Updated master file with version: {}", version);
         }

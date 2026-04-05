@@ -266,7 +266,7 @@ pub async fn update_zv(app: &mut App, force: bool, include_prerelease: bool) -> 
     }
 
     // Run migrations after update
-    if let Err(e) = crate::app::migrations::migrate(app.path()).await {
+    if let Err(e) = crate::app::migrations::migrate(app.path(), &app.paths.config_file).await {
         eprintln!("  {} Warning: Migration failed: {}", "⚠".yellow(), e);
     }
 

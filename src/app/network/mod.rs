@@ -3,7 +3,7 @@ use crate::app::utils::{ProgressHandle, remove_files, verify_checksum, zv_agent}
 use crate::{NetErr, ZvError};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::Duration,
 };
 
@@ -48,9 +48,9 @@ pub struct ZvNetwork {
     pub mirror_manager: Option<MirrorManager>,
     /// Zig version index
     pub index_manager: IndexManager,
-    /// ZV_DIR
-    base_path: PathBuf,
-    /// Download cache path (ZV_DIR/downloads)
+    /// Path to mirrors.toml cache file
+    mirrors_file: PathBuf,
+    /// Download cache path
     download_cache: PathBuf,
     /// Network Client
     client: reqwest::Client,
@@ -58,21 +58,19 @@ pub struct ZvNetwork {
 
 // === Initialize ZvNetwork ===
 impl ZvNetwork {
-    /// Initialize ZvNetwork with given base path (ZV_DIR)
+    /// Initialize ZvNetwork with explicit paths for index, mirrors, and download cache.
     pub async fn new(
-        zv_base_path: impl AsRef<Path>,
-        download_cache: PathBuf,
+        index_file: PathBuf,
+        mirrors_file: PathBuf,
+        downloads_dir: PathBuf,
     ) -> Result<Self, ZvError> {
         let client = create_client()?;
 
         Ok(Self {
-            download_cache,
-            index_manager: IndexManager::new(
-                zv_base_path.as_ref().join("index.toml"),
-                client.clone(),
-            ),
+            download_cache: downloads_dir,
+            index_manager: IndexManager::new(index_file, client.clone()),
             client,
-            base_path: zv_base_path.as_ref().to_path_buf(),
+            mirrors_file,
             mirror_manager: None,
         })
     }
@@ -85,9 +83,8 @@ impl ZvNetwork {
                 .wrap_err("Creation of download cache directory failed")?;
         }
         if self.mirror_manager.is_none() {
-            let mirrors_path = self.base_path.join("mirrors.toml");
             let mirror_manager = MirrorManager::init_and_load(
-                mirrors_path,
+                self.mirrors_file.clone(),
                 CacheStrategy::RespectTtl,
             )
             .await
@@ -129,22 +126,6 @@ impl ZvNetwork {
         }
 
         Ok(0)
-    }
-    #[allow(unused)]
-    pub fn versions_path(&self) -> PathBuf {
-        self.base_path.join("versions")
-    }
-    #[allow(unused)]
-    pub fn index_path(&self) -> PathBuf {
-        self.base_path.join("index.toml")
-    }
-    #[allow(unused)]
-    pub fn mirrors_path(&self) -> PathBuf {
-        self.base_path.join("mirrors.toml")
-    }
-    #[allow(unused)]
-    pub fn download_cache_path(&self) -> PathBuf {
-        self.download_cache.clone()
     }
 }
 

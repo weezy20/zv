@@ -46,33 +46,27 @@ pub static MAX_RETRIES: LazyLock<u32> = LazyLock::new(|| {
 
 impl App {
     pub fn download_cache(&self) -> &Path {
-        &self.download_cache
+        &self.paths.downloads_dir
     }
 }
 
 /// Zv App State
 #[derive(Debug, Clone)]
 pub struct App {
-    /// <ZV_DIR> - Home for zv
-    zv_base_path: PathBuf,
-    /// <ZV_DIR>/bin - Binary symlink location
-    bin_path: PathBuf,
-    /// <ZV_DIR>/downloads -  Download cache path
-    download_cache: PathBuf,
+    /// All resolved zv paths (data, config, cache, public bin)
+    pub(crate) paths: crate::tools::ZvPaths,
+    /// Shell-specific env file path (data_dir/<shell_env_file_name>)
+    env_path: PathBuf,
     /// <ZV_DIR>/bin/zig - Zv managed zig executable if any
     zig: Option<PathBuf>,
     /// <ZV_DIR>/bin/zls - Zv managed zls executable if any
     #[allow(dead_code)]
     zls: Option<PathBuf>,
-    /// <ZV_DIR>/versions - Installed versions
-    pub(crate) versions_path: PathBuf,
-    /// <ZV_DIR>/env for *nix. For powershell/cmd prompt we rely on direct PATH variable manipulation.
-    env_path: PathBuf,
     /// Network client
     network: Option<network::ZvNetwork>,
     /// Toolchain manager
     pub(crate) toolchain_manager: ToolchainManager,
-    /// <ZV_DIR>/bin in $PATH? If not prompt user to run `setup` or add `source <ZV_DIR>/env to their shell profile`
+    /// public_bin_dir (or bin_dir) in $PATH?
     pub(crate) source_set: bool,
     /// Current detected shell
     pub(crate) shell: Option<crate::Shell>,
@@ -114,61 +108,70 @@ pub enum Either {
 impl App {
     /// Minimal App path initialization & directory creation
     pub async fn init(
-        UserConfig {
-            zv_base_path,
-            shell,
-        }: UserConfig,
+        UserConfig { paths, shell }: UserConfig,
     ) -> Result<Self, ZvError> {
-        /* path is canonicalized in tools::fetch_zv_dir() so we don't need to do that here */
-        let bin_path = zv_base_path.join("bin");
-        let download_cache = zv_base_path.as_path().join("downloads");
+        /* data_dir is canonicalized in ZvPaths::resolve() -> fetch_zv_dir() */
 
-        if !bin_path.try_exists().unwrap_or_default() {
-            std::fs::create_dir_all(&bin_path)
+        // Ensure internal bin dir exists
+        if !paths.bin_dir.try_exists().unwrap_or_default() {
+            std::fs::create_dir_all(&paths.bin_dir)
                 .map_err(ZvError::Io)
                 .wrap_err("Creation of bin directory failed")?;
         }
+
+        // Ensure config dir exists (may differ from data_dir in Phase 2)
+        if !paths.config_dir.try_exists().unwrap_or_default() {
+            std::fs::create_dir_all(&paths.config_dir)
+                .map_err(ZvError::Io)
+                .wrap_err("Creation of config directory failed")?;
+        }
+
         // Run migrations if needed
-        if let Err(e) = migrations::migrate(&zv_base_path).await {
+        if let Err(e) = migrations::migrate(&paths.data_dir, &paths.config_file).await {
             tracing::warn!("Migration failed: {}", e);
         }
 
-        let toolchain_manager = ToolchainManager::new(&zv_base_path).await?;
+        let toolchain_manager =
+            ToolchainManager::new(&paths.data_dir, &paths.config_file).await?;
+
         // Check for existing ZV zig/zls shims in bin directory
         let zig = toolchain_manager
             .get_active_install()
             .map(|zig_install| zig_install.path.join(Shim::Zig.executable_name()));
-        let zls = utils::detect_shim(&bin_path, Shim::Zls);
+        let zls = utils::detect_shim(&paths.bin_dir, Shim::Zls);
 
-        let versions_path = zv_base_path.join("versions");
-        if !versions_path.try_exists().unwrap_or(false) {
-            std::fs::create_dir_all(&versions_path)
+        // Ensure versions dir exists
+        if !paths.versions_dir.try_exists().unwrap_or(false) {
+            std::fs::create_dir_all(&paths.versions_dir)
                 .map_err(ZvError::Io)
                 .wrap_err("Creation of versions directory failed")?;
         }
 
+        // Shell-specific env file (data_dir/<shell_env_file_name>)
         let env_path = if let Some(ref shell_type) = shell {
-            zv_base_path.join(shell_type.env_file_name())
+            paths.data_dir.join(shell_type.env_file_name())
         } else {
-            // In non-shell mode, it doesn't really matter what the file is
-            zv_base_path.join("env")
+            paths.env_file_default()
+        };
+
+        // Check if the effective public path (public_bin_dir on XDG, bin_dir on Windows) is in PATH
+        let source_set = {
+            let check_path = paths.public_bin_dir.as_ref().unwrap_or(&paths.bin_dir);
+            if let Some(ref shell_type) = shell {
+                path_utils::check_dir_in_path_for_shell(shell_type, check_path)
+            } else {
+                path_utils::check_dir_in_path(check_path)
+            }
         };
 
         let app = App {
             network: None,
             zig,
             zls,
-            source_set: if let Some(ref shell_type) = shell {
-                path_utils::check_dir_in_path_for_shell(shell_type, &bin_path)
-            } else {
-                path_utils::check_dir_in_path(&bin_path)
-            },
-            bin_path,
-            download_cache,
+            source_set,
             env_path,
             toolchain_manager,
-            zv_base_path,
-            versions_path,
+            paths,
             shell,
             to_install: None,
         };
@@ -199,8 +202,12 @@ impl App {
     pub async fn ensure_network(&mut self) -> Result<(), ZvError> {
         if self.network.is_none() {
             self.network = Some(
-                network::ZvNetwork::new(self.zv_base_path.as_path(), self.download_cache.clone())
-                    .await?,
+                network::ZvNetwork::new(
+                    self.paths.index_file.clone(),
+                    self.paths.mirrors_file.clone(),
+                    self.paths.downloads_dir.clone(),
+                )
+                .await?,
             );
         }
         Ok(())
@@ -208,9 +215,12 @@ impl App {
     /// Initialize network client with mirror manager if not already done
     pub async fn ensure_network_with_mirrors(&mut self) -> Result<(), ZvError> {
         if self.network.is_none() {
-            let mut net =
-                network::ZvNetwork::new(self.zv_base_path.as_path(), self.download_cache.clone())
-                    .await?;
+            let mut net = network::ZvNetwork::new(
+                self.paths.index_file.clone(),
+                self.paths.mirrors_file.clone(),
+                self.paths.downloads_dir.clone(),
+            )
+            .await?;
             net.ensure_mirror_manager().await?;
             self.network = Some(net);
         } else if self.network.is_some() {
@@ -271,17 +281,27 @@ impl App {
         })
     }
 
-    /// Get the app's base path
+    /// Get the app's data directory (ZV_DIR)
     pub fn path(&self) -> &PathBuf {
-        &self.zv_base_path
+        &self.paths.data_dir
     }
 
-    /// Get the app's bin path
+    /// Get the internal bin directory (data_dir/bin)
     pub fn bin_path(&self) -> &PathBuf {
-        &self.bin_path
+        &self.paths.bin_dir
     }
 
-    /// Get the environment file path
+    /// Get the installed versions directory
+    pub fn versions_path(&self) -> &PathBuf {
+        &self.paths.versions_dir
+    }
+
+    /// Get the public bin directory for symlinks (~/.local/bin on XDG, None on Windows)
+    pub fn public_bin_path(&self) -> Option<&PathBuf> {
+        self.paths.public_bin_dir.as_ref()
+    }
+
+    /// Get the shell env file path
     pub fn env_path(&self) -> &PathBuf {
         &self.env_path
     }
@@ -300,7 +320,7 @@ impl App {
         current_dir: Option<&Path>,
     ) -> Result<Output, ZvError> {
         // No need for canonicalization here, just a quick check
-        let is_our_shim = zig_path.parent() == Some(self.bin_path.as_path());
+        let is_our_shim = zig_path.parent() == Some(self.paths.bin_dir.as_path());
 
         let new_count = if is_our_shim {
             let count = std::env::var("ZV_RECURSION_COUNT")
@@ -369,7 +389,7 @@ impl App {
 
         // Update master file with the fetched version
         let version_str = zig_release.resolved_version().version().to_string();
-        crate::app::migrations::update_master_file(&self.zv_base_path, &version_str).await;
+        crate::app::migrations::update_master_file(&self.paths.master_file, &version_str).await;
 
         Ok(zig_release)
     }

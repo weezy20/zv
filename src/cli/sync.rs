@@ -38,7 +38,7 @@ pub async fn sync(app: &mut crate::App) -> crate::Result<()> {
 
     // Run migrations only if binary was actually updated
     if binary_updated {
-        if let Err(e) = crate::app::migrations::migrate(app.path()).await {
+        if let Err(e) = crate::app::migrations::migrate(app.path(), &app.paths.config_file).await {
             eprintln!("  {} Warning: Migration failed: {}", "⚠".yellow(), e);
         }
     }
@@ -291,7 +291,7 @@ async fn copy_binary_and_regenerate_shims(
 ) -> crate::Result<()> {
     use color_eyre::eyre::Context;
 
-    // Ensure bin directory exists using app's canonical path
+    // Ensure internal bin directory exists
     tokio::fs::create_dir_all(app.bin_path())
         .await
         .with_context(|| format!("Failed to create directory {}", app.bin_path().display()))?;
@@ -311,6 +311,66 @@ async fn copy_binary_and_regenerate_shims(
             .deploy_shims(install, true, quiet)
             .await
             .with_context(|| "Failed to regenerate shims after updating zv binary")?;
+    }
+
+    // On XDG systems, keep public symlinks in ~/.local/bin up to date
+    if let Some(pub_bin) = app.public_bin_path() {
+        create_public_bin_symlinks(app.bin_path(), pub_bin)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to create public bin symlinks in {}",
+                    pub_bin.display()
+                )
+            })?;
+    }
+
+    Ok(())
+}
+
+/// Create (or refresh) symlinks in the public bin dir (`~/.local/bin`) pointing at
+/// the internal bin dir (`ZV_DIR/bin`).  Only called on XDG-capable systems.
+///
+/// Layout produced:
+/// ```text
+/// ~/.local/bin/zv  → ZV_DIR/bin/zv
+/// ~/.local/bin/zig → ZV_DIR/bin/zig   (only if shim exists)
+/// ```
+async fn create_public_bin_symlinks(internal_bin: &Path, public_bin: &Path) -> crate::Result<()> {
+    use color_eyre::eyre::Context;
+    use crate::Shim;
+
+    tokio::fs::create_dir_all(public_bin)
+        .await
+        .with_context(|| format!("Failed to create public bin dir {}", public_bin.display()))?;
+
+    // Helper: create / replace a symlink link → target
+    async fn place_symlink(target: &Path, link: &Path) -> crate::Result<()> {
+        if link.exists() || link.is_symlink() {
+            tokio::fs::remove_file(link).await?;
+        }
+        tokio::fs::symlink(target, link).await?;
+        Ok(())
+    }
+
+    let zv_name = Shim::Zv.executable_name();
+    let zv_src = internal_bin.join(zv_name);
+    let zv_dst = public_bin.join(zv_name);
+    if zv_src.exists() {
+        place_symlink(&zv_src, &zv_dst)
+            .await
+            .with_context(|| format!("Failed to symlink zv in {}", public_bin.display()))?;
+        tracing::debug!("Linked {} → {}", zv_dst.display(), zv_src.display());
+    }
+
+    let zig_name = Shim::Zig.executable_name();
+    let zig_src = internal_bin.join(zig_name);
+    let zig_dst = public_bin.join(zig_name);
+    if zig_src.exists() {
+        place_symlink(&zig_src, &zig_dst)
+            .await
+            .with_context(|| format!("Failed to symlink zig in {}", public_bin.display()))?;
+        tracing::debug!("Linked {} → {}", zig_dst.display(), zig_src.display());
     }
 
     Ok(())

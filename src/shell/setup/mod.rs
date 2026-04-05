@@ -33,10 +33,15 @@ pub async fn pre_setup_checks(context: &SetupContext) -> crate::Result<SetupRequ
     ))
 }
 
-/// Check if zv bin directory is already in PATH
+/// Check if the effective public bin directory is already in PATH.
+/// On XDG systems this is `~/.local/bin`; on Windows it is `ZV_DIR/bin`.
 pub fn check_bin_path_in_path(context: &SetupContext) -> bool {
     use crate::shell::path_utils::check_dir_in_path_for_shell;
-    check_dir_in_path_for_shell(&context.shell, context.app.bin_path())
+    let check_path = context
+        .app
+        .public_bin_path()
+        .unwrap_or_else(|| context.app.bin_path());
+    check_dir_in_path_for_shell(&context.shell, check_path)
 }
 
 /// Determine what action is needed for ZV_DIR environment variable
@@ -114,19 +119,27 @@ fn will_use_interactive_mode(context: &SetupContext) -> bool {
     crate::tools::supports_interactive_prompts()
 }
 
-/// Determine what action is needed for PATH configuration
+/// Determine what action is needed for PATH configuration.
+///
+/// On XDG systems the path added to `PATH` is `public_bin_dir` (`~/.local/bin`).
+/// On Windows it is `ZV_DIR/bin` via the registry.
 pub fn determine_path_action(context: &SetupContext, bin_path_in_path: bool) -> PathAction {
     if bin_path_in_path {
         return PathAction::AlreadyConfigured;
     }
 
-    let bin_path = context.app.bin_path().clone();
-
     if context.shell.is_windows_shell() && !context.shell.is_powershell_in_unix() {
-        // Windows native shells use registry
-        PathAction::AddToRegistry { bin_path }
+        // Windows: add internal bin_dir to registry
+        PathAction::AddToRegistry {
+            bin_path: context.app.bin_path().clone(),
+        }
     } else {
-        // Unix shells (including Unix shells on Windows) use env files
+        // Unix shells: generate env file pointing at public_bin_dir (XDG) or bin_dir (fallback)
+        let bin_path = context
+            .app
+            .public_bin_path()
+            .cloned()
+            .unwrap_or_else(|| context.app.bin_path().clone());
         let env_file_path = context.app.env_path().clone();
         let rc_file = unix::select_rc_file(&context.shell);
 

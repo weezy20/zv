@@ -6,6 +6,116 @@ use crate::shell::setup::{
 use color_eyre::eyre::Context as _;
 use yansi::Paint;
 
+/// Print the XDG directory layout table and, if any directories are missing,
+/// prompt the user to create them. Returns `false` if the user declined creation.
+fn print_dir_table_and_ensure(app: &App) -> crate::Result<bool> {
+    use crate::shell::path_utils::check_dir_in_path;
+    use std::io::{self, Write};
+
+    let paths = &app.paths;
+
+    // Build table rows: (role, path, status)
+    struct Row {
+        role: &'static str,
+        path: std::path::PathBuf,
+    }
+
+    let rows = vec![
+        Row { role: "Data  ", path: paths.data_dir.clone() },
+        Row { role: "Config", path: paths.config_dir.clone() },
+        Row { role: "Cache ", path: paths.cache_dir.clone() },
+    ];
+    let pub_bin = paths.public_bin_dir.clone();
+
+    // Compute column width for the path column
+    let path_width = rows
+        .iter()
+        .map(|r| r.path.display().to_string().len())
+        .chain(pub_bin.iter().map(|p| p.display().to_string().len()))
+        .max()
+        .unwrap_or(30)
+        .max(30);
+
+    let sep = "─".repeat(8 + path_width + 14);
+    println!();
+    println!("{}", Paint::cyan("zv directory layout (XDG Base Directory Specification)").bold());
+    println!("{sep}");
+    println!("  {:<8}  {:<path_width$}  Status", "Role", "Directory");
+    println!("{sep}");
+
+    let mut dirs_to_create: Vec<std::path::PathBuf> = Vec::new();
+
+    for row in &rows {
+        let status = if row.path.is_dir() {
+            Paint::green("✓ exists").to_string()
+        } else {
+            dirs_to_create.push(row.path.clone());
+            Paint::yellow("[will create]").to_string()
+        };
+        println!(
+            "  {:<8}  {:<path_width$}  {}",
+            row.role,
+            row.path.display(),
+            status
+        );
+    }
+
+    // Public bin row (XDG only)
+    if let Some(ref pub_bin_path) = pub_bin {
+        let in_path = check_dir_in_path(pub_bin_path);
+        let status = if !pub_bin_path.is_dir() {
+            dirs_to_create.push(pub_bin_path.clone());
+            Paint::yellow("[will create]").to_string()
+        } else if in_path {
+            Paint::green("✓ in PATH").to_string()
+        } else {
+            Paint::yellow("exists, not in PATH").to_string()
+        };
+        println!(
+            "  {:<8}  {:<path_width$}  {}",
+            "Pub bin",
+            pub_bin_path.display(),
+            status
+        );
+    }
+
+    println!("{sep}");
+    println!();
+
+    // Prompt for directory creation if needed
+    if !dirs_to_create.is_empty() {
+        println!("{}", Paint::yellow("Directories to create:"));
+        for dir in &dirs_to_create {
+            println!("  • {}", Paint::cyan(&dir.display().to_string()));
+        }
+        println!();
+
+        if !crate::tools::supports_interactive_prompts() {
+            // Non-interactive: create without asking
+            for dir in &dirs_to_create {
+                std::fs::create_dir_all(dir)?;
+            }
+        } else {
+            print!("Create these directories? [Y/n] ");
+            io::stdout().flush().ok();
+            let mut input = String::new();
+            io::stdin().read_line(&mut input).ok();
+            let trimmed = input.trim().to_lowercase();
+            if trimmed == "n" || trimmed == "no" {
+                println!("{}", Paint::red("Aborted."));
+                return Ok(false);
+            }
+            for dir in &dirs_to_create {
+                std::fs::create_dir_all(dir)?;
+                println!("  {} Created {}", Paint::green("✓"), dir.display());
+            }
+        }
+        println!();
+    }
+
+    Ok(true)
+}
+
 /// Main setup_shell function that orchestrates the three-phase setup process
 /// This is the public interface that maintains backward compatibility and supports interactive mode
 
@@ -15,6 +125,14 @@ pub async fn setup_shell(
     dry_run: bool,
     no_interactive: bool,
 ) -> crate::Result<()> {
+    // Always show the directory layout table so the user knows where things live
+    if !dry_run {
+        let proceed = print_dir_table_and_ensure(app)?;
+        if !proceed {
+            return Ok(());
+        }
+    }
+
     // Check if shell environment is already set up
     if app.source_set {
         println!(

@@ -52,12 +52,13 @@ fn parse_clean_target(s: &str) -> Result<CleanTarget, String> {
 
 pub async fn zv_main() -> super::Result<()> {
     let zv_cli = <ZvCli as clap::Parser>::parse();
-    let (zv_base_path, using_env) = tools::fetch_zv_dir()?;
-    if using_env {
-        tracing::debug!("Using ZV_DIR from environment: {}", zv_base_path.display());
+    let paths = tools::ZvPaths::resolve()?;
+    if paths.using_env_var {
+        tracing::debug!("Using ZV_DIR from environment: {}", paths.data_dir.display());
     }
+    let using_env = paths.using_env_var;
     let app = App::init(UserConfig {
-        zv_base_path,
+        paths,
         shell: Some(Shell::detect()),
     })
     .await?;
@@ -356,13 +357,81 @@ fn zv_line_with_color(line: &str, color: yansi::Color) -> String {
     Paint::new(line).fg(color).to_string()
 }
 
+/// Build a contextual status string for the welcome message.
+/// Distinguishes between "ready", "symlinks missing", "not in PATH", and "first run".
+fn zv_status_line(app: &App) -> String {
+    use crate::shell::path_utils::check_dir_in_path;
+
+    if app.source_set {
+        return Paint::green("✔ Ready to Use").to_string();
+    }
+
+    // Is the zv binary already placed in the internal bin dir?
+    let binary_installed = app
+        .bin_path()
+        .join(crate::Shim::Zv.executable_name())
+        .exists();
+
+    // Are public symlinks in place (XDG only)?
+    let symlinks_present = app
+        .public_bin_path()
+        .map(|p| p.join(crate::Shim::Zv.executable_name()).exists())
+        .unwrap_or(true); // On Windows there are no public symlinks, so treat as present
+
+    // Is the currently running binary coming from a PATH directory
+    // (e.g. ~/.cargo/bin after `cargo install`)?
+    let invoked_from_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .map(|dir| check_dir_in_path(&dir))
+        .unwrap_or(false);
+
+    if !binary_installed {
+        // First time — binary hasn't been self-installed yet
+        format!(
+            "{} Run {} to install.",
+            Paint::yellow("Setup incomplete."),
+            Paint::blue("zv sync")
+        )
+    } else if !symlinks_present {
+        // Binary installed but public symlinks not yet created
+        let pub_bin = app
+            .public_bin_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "~/.local/bin".into());
+        format!(
+            "{} Run {} to publish to {}.",
+            Paint::yellow("Public links missing."),
+            Paint::blue("zv sync"),
+            Paint::cyan(&pub_bin)
+        )
+    } else if invoked_from_path {
+        // Running from cargo install (or another PATH location) but
+        // public_bin_dir / ZV_DIR/bin is not yet in PATH
+        let target = app
+            .public_bin_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| app.bin_path().display().to_string());
+        format!(
+            "{} not in PATH. Run {}.",
+            Paint::cyan(&target),
+            Paint::blue("zv setup")
+        )
+    } else {
+        format!(
+            "{} Run {}.",
+            Paint::red("Not in PATH."),
+            Paint::blue("zv setup")
+        )
+    }
+}
+
 fn print_welcome_message(app: App) {
     use target_lexicon::HOST;
     let (color1, color2) = get_random_color_scheme();
 
     // Parse the target triplet (format: arch-platform-os)
     let architecture = HOST.architecture;
-    let source_set = app.source_set;
     let os = HOST.operating_system;
     let zv_version = env!("CARGO_PKG_VERSION");
 
@@ -372,20 +441,7 @@ fn print_welcome_message(app: App) {
         let info_lines = vec![
             format!("Architecture: {architecture}"),
             format!("OS: {os}"),
-            format!(
-                "ZV status: {}",
-                if source_set {
-                    Paint::green("✔ Ready to Use").to_string()
-                } else {
-                    format!(
-                        "{} {}",
-                        Paint::red("Not in PATH."),
-                        "Run ".to_string()
-                            + &Paint::blue("zv setup").to_string()
-                            + " to set ZV in PATH & install a default Zig version"
-                    )
-                }
-            ),
+            format!("ZV status: {}", zv_status_line(&app)),
             format!("ZV directory: {}", app.path().display().yellow()),
             format!("ZV Version: {}", zv_version.yellow()),
             format!(
@@ -428,14 +484,7 @@ fn print_welcome_message(app: App) {
         println!("zv - Zig Version Manager");
         println!("Architecture: {architecture}");
         println!("OS: {os}");
-        println!(
-            "ZV Setup: {}",
-            if source_set {
-                "Ready to Use"
-            } else {
-                "Not in PATH"
-            }
-        );
+        println!("ZV Setup: {}", zv_status_line(&app));
         println!("ZV directory: {}", app.path().display());
         println!(
             "Shell: {}",

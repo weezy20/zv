@@ -38,14 +38,10 @@ pub async fn zls_main() -> crate::Result<()> {
 /// Find a compatible ZLS executable for the current Zig version
 async fn find_compatible_zls() -> crate::Result<PathBuf> {
     // Initialize app to access zv directory structure
-    let (zv_base_path, _) = tools::fetch_zv_dir()?;
-
-    let mut app = App::init(UserConfig {
-        zv_base_path,
-        shell: None,
-    })
-    .await
-    .map_err(|e| eyre!("Failed to initialize app: {}", e))?;
+    let paths = tools::ZvPaths::resolve()?;
+    let mut app = App::init(UserConfig { paths, shell: None })
+        .await
+        .map_err(|e| eyre!("Failed to initialize app: {}", e))?;
 
     // Get the currently active Zig version
     let zig_version = get_current_zig_version(&app)?;

@@ -28,11 +28,14 @@ pub struct ToolchainManager {
 }
 
 impl ToolchainManager {
-    pub async fn new(zv_root: impl AsRef<Path>) -> Result<Self, ZvError> {
+    pub async fn new(
+        zv_root: impl AsRef<Path>,
+        config_file: impl AsRef<Path>,
+    ) -> Result<Self, ZvError> {
         let zv_root = zv_root.as_ref().to_path_buf();
         let versions_path = zv_root.join("versions");
         let bin_path = zv_root.join("bin");
-        let zv_config_file = zv_root.join("zv.toml");
+        let zv_config_file = config_file.as_ref().to_path_buf();
 
         // discover what is on disk
         let installations =
