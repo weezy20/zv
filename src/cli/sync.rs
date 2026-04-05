@@ -16,14 +16,33 @@ use std::path::Path;
 pub async fn sync(app: &mut crate::App) -> crate::Result<()> {
     use yansi::Paint;
 
-    println!("{}", "Syncing Zig indices...".cyan());
+    println!("{}", "Syncing zv...".cyan());
 
-    // Force refresh of Zig index from network
+    // Ensure data/config/cache directories exist
+    ensure_directories(app).await?;
+
+    // Check and update zv binary (self-install to internal bin)
+    println!("  {} Checking zv binary...", "→".blue());
+    let binary_updated = check_and_update_zv_binary(app, false).await?;
+
+    // Create public bin symlinks (belt-and-suspenders)
+    if let Some(pub_bin) = app.public_bin_path() {
+        create_public_bin_symlinks(app.bin_path(), pub_bin).await?;
+    }
+
+    // Run migrations if binary was actually updated
+    if binary_updated
+        && let Err(e) = crate::app::migrations::migrate(app.path(), &app.paths.config_file).await
+    {
+        eprintln!("  {} Warning: Migration failed: {}", "⚠".yellow(), e);
+    }
+
+    // Fetch zig index
     println!("  {} Refreshing Zig index...", "→".blue());
     app.sync_zig_index().await?;
     println!("  {} Zig index synced successfully", "✓".green());
 
-    // Force refresh of mirrors list
+    // Fetch mirrors list
     println!("  {} Refreshing community mirrors...", "→".blue());
     let mirror_count = app.sync_mirrors().await?;
     println!(
@@ -32,18 +51,68 @@ pub async fn sync(app: &mut crate::App) -> crate::Result<()> {
         mirror_count
     );
 
-    // Check and update zv binary if needed
-    println!("  {} Checking zv binary...", "→".blue());
-    let binary_updated = check_and_update_zv_binary(app, false).await?;
+    println!("{}", "Sync completed successfully!".green().bold());
 
-    // Run migrations only if binary was actually updated
-    if binary_updated {
-        if let Err(e) = crate::app::migrations::migrate(app.path(), &app.paths.config_file).await {
-            eprintln!("  {} Warning: Migration failed: {}", "⚠".yellow(), e);
+    // On Tier 2/3 (macOS Library or ZV_DIR), warn if PATH not configured
+    if !app.source_set {
+        #[cfg(target_os = "linux")]
+        {
+            // Linux Tier 1: should never happen since ~/.local/bin is in PATH
+            let target = app
+                .public_bin_path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| app.bin_path().display().to_string());
+            println!(
+                "{} {} is not in your PATH. This is unusual on Linux.",
+                "⚠".yellow(),
+                Paint::cyan(&target)
+            );
+        }
+        #[cfg(target_os = "macos")]
+        {
+            if app.paths.tier == 2 {
+                println!(
+                    "{} PATH not configured. Run {} to add zv to your PATH.",
+                    "⚠".yellow(),
+                    Paint::blue("zv setup")
+                );
+            }
+        }
+        #[cfg(windows)]
+        {
+            println!(
+                "{} PATH not configured. Run {} to add zv to your PATH.",
+                "⚠".yellow(),
+                Paint::blue("zv setup")
+            );
         }
     }
 
-    println!("{}", "Sync completed successfully!".green().bold());
+    Ok(())
+}
+
+async fn ensure_directories(app: &crate::App) -> crate::Result<()> {
+    use std::path::Path;
+
+    async fn ensure(dir: &Path) -> crate::Result<()> {
+        if !dir.try_exists().unwrap_or(false)
+            && let Some(parent) = dir.parent()
+            && parent.exists()
+        {
+            tokio::fs::create_dir_all(dir).await?;
+        }
+        Ok(())
+    }
+
+    ensure(&app.paths.data_dir).await?;
+    ensure(&app.paths.config_dir).await?;
+    ensure(&app.paths.cache_dir).await?;
+    ensure(app.bin_path()).await?;
+
+    if let Some(ref pub_dir) = app.paths.public_bin_dir {
+        ensure(pub_dir).await?;
+    }
+
     Ok(())
 }
 

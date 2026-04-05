@@ -392,6 +392,7 @@ impl Shell {
             .replace("{zv_path_separator}", &path_separator.to_string())
     }
 
+    #[cfg(not(target_os = "linux"))]
     /// Generate shell-specific setup instructions using templates
     pub fn generate_setup_instructions(&self, env_file_path: &str) -> String {
         let template = match self.shell_type {

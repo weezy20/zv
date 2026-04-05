@@ -25,12 +25,14 @@ pub struct ToolchainManager {
     active_install: Option<ZigInstall>,
     bin_path: PathBuf,
     zv_config_file: PathBuf,
+    public_bin_dir: Option<PathBuf>,
 }
 
 impl ToolchainManager {
     pub async fn new(
         zv_root: impl AsRef<Path>,
         config_file: impl AsRef<Path>,
+        public_bin_dir: Option<PathBuf>,
     ) -> Result<Self, ZvError> {
         let zv_root = zv_root.as_ref().to_path_buf();
         let versions_path = zv_root.join("versions");
@@ -162,6 +164,7 @@ impl ToolchainManager {
             active_install,
             bin_path,
             zv_config_file,
+            public_bin_dir,
         };
 
         Ok(toolchain_manager)
@@ -627,6 +630,11 @@ impl ToolchainManager {
         self.create_shim(&zv_path, Shim::Zig).await?;
         // TODO: ZLS support is unimplemented
         // self.create_shim(&zv_path, Shim::Zls).await?;
+
+        if let Some(ref pub_dir) = self.public_bin_dir {
+            self.create_public_shims(&zv_path, pub_dir).await?;
+        }
+
         if !quiet {
             tracing::info!(target: TARGET, "Successfully deployed zig version {}", install.version);
         }
@@ -685,6 +693,76 @@ impl ToolchainManager {
             }
         }
 
+        Ok(())
+    }
+
+    async fn create_public_shims(&self, zv_path: &Path, pub_dir: &Path) -> crate::Result<()> {
+        tokio::fs::create_dir_all(pub_dir).await?;
+
+        let zv_pub = pub_dir.join(Shim::Zv.executable_name());
+        self.ensure_public_symlink(zv_path, &zv_pub).await?;
+
+        let zig_internal = self.bin_path.join(Shim::Zig.executable_name());
+        if zig_internal.exists() {
+            let zig_pub = pub_dir.join(Shim::Zig.executable_name());
+            self.ensure_public_symlink(zv_path, &zig_pub).await?;
+        }
+        Ok(())
+    }
+
+    async fn ensure_public_symlink(&self, target: &Path, link: &Path) -> crate::Result<()> {
+        use same_file::Handle;
+        if let Ok(link_handle) = Handle::from_path(link)
+            && let Ok(target_handle) = Handle::from_path(target)
+            && link_handle == target_handle
+        {
+            return Ok(());
+        }
+        if link.is_symlink()
+            && let Ok(existing_target) = std::fs::read_link(link)
+        {
+            let resolved = if existing_target.is_absolute() {
+                existing_target
+            } else {
+                link.parent().unwrap_or(link).join(&existing_target)
+            };
+            if let Ok(resolved_handle) = Handle::from_path(&resolved)
+                && let Ok(target_handle) = Handle::from_path(target)
+                && resolved_handle == target_handle
+            {
+                return Ok(());
+            }
+        }
+
+        if link.exists() || link.is_symlink() {
+            tokio::fs::remove_file(link).await?;
+        }
+
+        #[cfg(unix)]
+        tokio::fs::symlink(target, link).await?;
+
+        #[cfg(windows)]
+        {
+            match tokio::fs::symlink_file(target, link).await {
+                Ok(()) => {}
+                Err(_) => {
+                    std::fs::hard_link(target, link).wrap_err_with(|| {
+                        format!(
+                            "Failed to create hard link from {} to {}",
+                            target.display(),
+                            link.display()
+                        )
+                    })?;
+                }
+            }
+        }
+
+        tracing::debug!(
+            target: TARGET,
+            "Public symlink {} -> {}",
+            link.display(),
+            target.display()
+        );
         Ok(())
     }
 

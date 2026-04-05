@@ -1,11 +1,14 @@
 use crate::App;
+#[cfg(not(target_os = "linux"))]
 use crate::shell::setup::{
     InteractiveSetup, SetupContext, apply_user_choices, execute_setup, handle_interactive_error,
     is_recoverable_interactive_error, post_setup_actions, pre_setup_checks,
 };
+#[cfg(not(target_os = "linux"))]
 use color_eyre::eyre::Context as _;
 use yansi::Paint;
 
+#[cfg(not(target_os = "linux"))]
 /// Print the XDG directory layout table and, if any directories are missing,
 /// prompt the user to create them. Returns `false` if the user declined creation.
 fn print_dir_table_and_ensure(app: &App) -> crate::Result<bool> {
@@ -120,12 +123,35 @@ fn print_dir_table_and_ensure(app: &App) -> crate::Result<bool> {
 /// This is the public interface that maintains backward compatibility and supports interactive mode
 
 pub async fn setup_shell(
-    app: &mut App,
-    using_env_var: bool,
-    dry_run: bool,
-    no_interactive: bool,
+    #[allow(unused_variables)] app: &mut App,
+    #[allow(unused_variables)] using_env_var: bool,
+    #[allow(unused_variables)] dry_run: bool,
+    #[allow(unused_variables)] no_interactive: bool,
 ) -> crate::Result<()> {
-    // Always show the directory layout table so the user knows where things live
+    // On Linux, zv setup is a no-op — XDG dirs handle everything
+    #[cfg(target_os = "linux")]
+    {
+        println!(
+            "{} No setup needed. Your system uses XDG directories. Run {} to initialize.",
+            Paint::green("✓"),
+            Paint::blue("zv sync")
+        );
+        return Ok(());
+    }
+
+    // On macOS Tier 1 (XDG dirs exist), same as Linux
+    #[cfg(target_os = "macos")]
+    if app.paths.tier == 1 && !using_env_var {
+        println!(
+            "{} No setup needed. Your system uses XDG directories. Run {} to initialize.",
+            Paint::green("✓"),
+            Paint::blue("zv sync")
+        );
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
     if !dry_run {
         let proceed = print_dir_table_and_ensure(app)?;
         if !proceed {
@@ -238,8 +264,10 @@ pub async fn setup_shell(
         );
     }
     Ok(())
+    }
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Determine if interactive mode should be used based on context and environment
 ///
 /// Interactive mode is automatically disabled when:

@@ -132,7 +132,8 @@ impl App {
         }
 
         let toolchain_manager =
-            ToolchainManager::new(&paths.data_dir, &paths.config_file).await?;
+            ToolchainManager::new(&paths.data_dir, &paths.config_file, paths.public_bin_dir.clone())
+                .await?;
 
         // Check for existing ZV zig/zls shims in bin directory
         let zig = toolchain_manager
@@ -289,6 +290,11 @@ impl App {
     /// Get the internal bin directory (data_dir/bin)
     pub fn bin_path(&self) -> &PathBuf {
         &self.paths.bin_dir
+    }
+
+    /// Check if zv has been initialized (self-installed binary exists in bin_dir)
+    pub fn is_initialized(&self) -> bool {
+        self.bin_path().join(Shim::Zv.executable_name()).exists()
     }
 
     /// Get the installed versions directory

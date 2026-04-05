@@ -4,6 +4,7 @@ use color_eyre::eyre::eyre;
 use std::path::Path;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 
+#[cfg(not(target_os = "linux"))]
 /// Write shell file content with proper line endings for cross-platform compatibility
 pub async fn write_shell_file_with_line_endings(
     file_path: &Path,
@@ -46,6 +47,7 @@ pub async fn write_shell_file_with_line_endings(
 }
 
 impl Shell {
+    #[cfg(not(target_os = "linux"))]
     /// Returns the env file path and content without writing to disk
     pub fn export_without_dump<'a>(&self, app: &'a App, using_env_var: bool) -> (&'a Path, String) {
         let (zv_dir_str, zv_bin_path_str) = get_path_strings(self, app, using_env_var);
@@ -54,6 +56,7 @@ impl Shell {
         (app.env_path().as_path(), env_content)
     }
 
+    #[cfg(not(target_os = "linux"))]
     /// Dumps shell specific environment variables to the env file - Skips for windows shell
     pub async fn export_unix(&self, app: &App, using_env_var: bool) -> Result<(), ZvError> {
         // Skip file operations for Windows shells that use direct system variable edits
@@ -66,6 +69,7 @@ impl Shell {
         write_env_file_if_needed(env_file, &content).await
     }
     /// Check if shell uses direct system variable edits (no file writing needed)
+    #[cfg(not(target_os = "linux"))]
     #[inline]
     fn windows_shell(&self) -> bool {
         use super::ShellType;
@@ -73,6 +77,7 @@ impl Shell {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Write environment file only if content is different or file doesn't exist
 async fn write_env_file_if_needed(env_file: &Path, content: &str) -> Result<(), ZvError> {
     let should_write = if env_file.exists() {
@@ -100,16 +105,19 @@ async fn write_env_file_if_needed(env_file: &Path, content: &str) -> Result<(), 
 }
 
 /// Normalize line endings for content comparison (convert all to LF)
+#[cfg(not(target_os = "linux"))]
 fn normalize_line_endings_for_comparison(content: &str) -> String {
     content.replace("\r\n", "\n")
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Write content to environment file with proper line endings
 async fn write_env_file(env_file: &Path, content: &str) -> Result<(), ZvError> {
     write_shell_file_with_line_endings(env_file, content).await
 }
 
 /// Normalize line endings based on the target file type
+#[cfg(not(target_os = "linux"))]
 fn normalize_line_endings_for_file(env_file: &Path, content: &str) -> String {
     if should_use_unix_line_endings(env_file) {
         // Convert any CRLF to LF for Unix-style files
@@ -121,6 +129,7 @@ fn normalize_line_endings_for_file(env_file: &Path, content: &str) -> String {
 }
 
 /// Determine if a file should use Unix line endings (LF) based on its extension
+#[cfg(not(target_os = "linux"))]
 fn should_use_unix_line_endings(env_file: &Path) -> bool {
     match env_file.extension().and_then(|ext| ext.to_str()) {
         // Windows-specific file types should use CRLF

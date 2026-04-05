@@ -281,6 +281,10 @@ impl Commands {
                 zig,
                 package: zon,
             } => {
+                if !app.is_initialized() {
+                    error("zv is not initialized. Run 'zv sync' first to set up directories and the zv binary.");
+                    std::process::exit(1);
+                }
                 use crate::{Template, TemplateType};
                 if zig {
                     init::init_project(
@@ -310,17 +314,29 @@ impl Commands {
             Commands::Use {
                 version,
                 force_ziglang,
-            } => match version {
-                Some(version) => r#use::use_version(version, &mut app, force_ziglang).await,
-                None => {
-                    error("Version must be specified. e.g., `zv use latest` or `zv use 0.15.1`");
-                    std::process::exit(2);
+            } => {
+                if !app.is_initialized() {
+                    error("zv is not initialized. Run 'zv sync' first to set up directories and the zv binary.");
+                    std::process::exit(1);
                 }
-            },
+                match version {
+                    Some(version) => r#use::use_version(version, &mut app, force_ziglang).await,
+                    None => {
+                        error("Version must be specified. e.g., `zv use latest` or `zv use 0.15.1`");
+                        std::process::exit(2);
+                    }
+                }
+            }
             Commands::Install {
                 versions,
                 force_ziglang,
-            } => install::install_versions(versions, &mut app, force_ziglang).await,
+            } => {
+                if !app.is_initialized() {
+                    error("zv is not initialized. Run 'zv sync' first to set up directories and the zv binary.");
+                    std::process::exit(1);
+                }
+                install::install_versions(versions, &mut app, force_ziglang).await
+            }
             Commands::List {
                 all,
                 mirrors,

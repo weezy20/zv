@@ -41,6 +41,9 @@ pub struct ZvPaths {
     pub public_bin_dir: Option<PathBuf>,
     /// Whether `ZV_DIR` was set via environment variable
     pub using_env_var: bool,
+    /// Deployment tier: 1 = XDG (no setup needed), 2 = macOS Library (PATH injection), 3 = ~/.zv fallback
+    #[cfg(target_os = "macos")]
+    pub tier: u8,
 }
 
 impl ZvPaths {
@@ -58,20 +61,49 @@ impl ZvPaths {
         let (config_dir, cache_dir, public_bin_dir) = if using_env_var {
             (data_dir.clone(), data_dir.clone(), None)
         } else {
-            let config = xdg_config_home()
-                .unwrap_or_else(|_| data_dir.clone())
-                .join("zv");
-            let cache = xdg_cache_home()
-                .unwrap_or_else(|_| data_dir.clone())
-                .join("zv");
-            let public_bin = xdg_bin_home().ok();
-            (config, cache, public_bin)
+            #[cfg(not(target_os = "macos"))]
+            {
+                let config = xdg_config_home()
+                    .unwrap_or_else(|_| data_dir.clone())
+                    .join("zv");
+                let cache = xdg_cache_home()
+                    .unwrap_or_else(|_| data_dir.clone())
+                    .join("zv");
+                let public_bin = xdg_bin_home().ok();
+                (config, cache, public_bin)
+            }
+            #[cfg(target_os = "macos")]
+            if xdg_dirs_exist() {
+                let config = xdg_config_home()
+                    .unwrap_or_else(|_| data_dir.clone())
+                    .join("zv");
+                let cache = xdg_cache_home()
+                    .unwrap_or_else(|_| data_dir.clone())
+                    .join("zv");
+                let public_bin = xdg_bin_home().ok();
+                (config, cache, public_bin)
+            } else {
+                let home = home_dir()?;
+                let base = home.join("Library/Application Support/zv");
+                let cache = home.join("Library/Caches/zv");
+                let public_bin = Some(base.join("bin"));
+                (base.clone(), cache, public_bin)
+            }
         };
 
         #[cfg(windows)]
         let (config_dir, cache_dir, public_bin_dir) = {
             // Windows: keep everything under data_dir, no public bin
             (data_dir.clone(), data_dir.clone(), None)
+        };
+
+        #[cfg(target_os = "macos")]
+        let tier = if using_env_var {
+            3
+        } else if xdg_dirs_exist() {
+            1
+        } else {
+            2
         };
 
         Ok(Self {
@@ -87,6 +119,8 @@ impl ZvPaths {
             cache_dir,
             data_dir,
             using_env_var,
+            #[cfg(target_os = "macos")]
+            tier,
         })
     }
 
@@ -97,6 +131,13 @@ impl ZvPaths {
 }
 
 // ── XDG helpers ──────────────────────────────────────────────────────────────
+
+#[cfg(target_os = "macos")]
+fn xdg_dirs_exist() -> bool {
+    home_dir()
+        .map(|h| h.join(".local/share").is_dir() && h.join(".local/bin").is_dir())
+        .unwrap_or(false)
+}
 
 /// `$XDG_DATA_HOME` → defaults to `$HOME/.local/share`
 fn xdg_data_home() -> Result<PathBuf> {

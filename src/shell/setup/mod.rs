@@ -6,6 +6,7 @@ pub mod context;
 pub mod instructions;
 pub mod interactive;
 pub mod requirements;
+#[cfg(not(target_os = "linux"))]
 pub mod unix;
 pub mod windows;
 
@@ -15,6 +16,7 @@ pub use instructions::*;
 pub use interactive::*;
 pub use requirements::*;
 
+#[cfg(not(target_os = "linux"))]
 /// Pre-setup checks phase - analyze current system state and determine required actions
 pub async fn pre_setup_checks(context: &SetupContext) -> crate::Result<SetupRequirements> {
     let bin_path_in_path = check_bin_path_in_path(context);
@@ -44,6 +46,7 @@ pub fn check_bin_path_in_path(context: &SetupContext) -> bool {
     check_dir_in_path_for_shell(&context.shell, check_path)
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Determine what action is needed for ZV_DIR environment variable
 pub async fn determine_zv_dir_action(context: &SetupContext) -> crate::Result<ZvDirAction> {
     if !context.using_env_var {
@@ -119,6 +122,7 @@ fn will_use_interactive_mode(context: &SetupContext) -> bool {
     crate::tools::supports_interactive_prompts()
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Determine what action is needed for PATH configuration.
 ///
 /// On XDG systems the path added to `PATH` is `public_bin_dir` (`~/.local/bin`).
@@ -151,6 +155,7 @@ pub fn determine_path_action(context: &SetupContext, bin_path_in_path: bool) -> 
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Ask user for confirmation to make ZV_DIR permanent
 fn ask_user_zv_dir_confirmation(zv_dir: &std::path::Path) -> crate::Result<bool> {
     use std::io::{self, Write};
@@ -225,6 +230,7 @@ fn ask_user_zv_dir_confirmation(zv_dir: &std::path::Path) -> crate::Result<bool>
     Ok(should_set_permanent)
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Execute ZV_DIR setup based on the determined action
 pub async fn execute_zv_dir_setup(
     context: &SetupContext,
@@ -269,6 +275,7 @@ pub async fn execute_zv_dir_setup(
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Execute PATH setup based on the determined action
 pub async fn execute_path_setup(context: &SetupContext, action: &PathAction) -> crate::Result<()> {
     match action {
@@ -321,6 +328,7 @@ pub async fn execute_path_setup(context: &SetupContext, action: &PathAction) -> 
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Execute setup phase - coordinate ZV_DIR and PATH actions
 pub async fn execute_setup(
     context: &SetupContext,
@@ -354,6 +362,7 @@ pub async fn execute_setup(
     Ok(())
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Post-setup actions phase - handle binary management and shim regeneration
 pub async fn post_setup_actions(context: &SetupContext) -> crate::Result<()> {
     use yansi::Paint;

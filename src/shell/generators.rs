@@ -34,6 +34,7 @@ pub fn generate_cmd_content(zv_dir: &str, zv_bin_path: &str) -> String {
     shell.generate_env_content(zv_dir, zv_bin_path, true)
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Generate Fish shell setup script
 /// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_fish_content(zv_dir: &str, zv_bin_path: &str) -> String {
@@ -53,6 +54,7 @@ pub fn generate_fish_content(zv_dir: &str, zv_bin_path: &str) -> String {
     shell.generate_env_content(zv_dir, zv_bin_path, true)
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Generate Nushell setup script
 /// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_nu_content(zv_dir: &str, zv_bin_path: &str) -> String {
@@ -72,6 +74,7 @@ pub fn generate_nu_content(zv_dir: &str, zv_bin_path: &str) -> String {
     shell.generate_env_content(zv_dir, zv_bin_path, true)
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Generate tcsh/csh setup script
 /// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_tcsh_content(zv_dir: &str, zv_bin_path: &str) -> String {
@@ -91,6 +94,7 @@ pub fn generate_tcsh_content(zv_dir: &str, zv_bin_path: &str) -> String {
     shell.generate_env_content(zv_dir, zv_bin_path, true)
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Generate POSIX-compliant shell setup script (bash, zsh, sh)
 /// This function is now a wrapper around the Shell::generate_env_content method
 pub fn generate_posix_content(zv_dir: &str, zv_bin_path: &str) -> String {
@@ -110,6 +114,7 @@ pub fn generate_posix_content(zv_dir: &str, zv_bin_path: &str) -> String {
     shell.generate_env_content(zv_dir, zv_bin_path, true)
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Generate shell-specific uninstall/cleanup script
 /// This function is now a wrapper around the Shell::generate_cleanup_content method
 pub fn generate_cleanup_content(shell: &Shell, zv_dir: &str, zv_bin_path: &str) -> String {
@@ -147,6 +152,7 @@ fn generate_cmd_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
     shell.generate_cleanup_content(zv_dir, zv_bin_path, true)
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Generate Fish cleanup script
 fn generate_fish_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
     let shell = Shell {
@@ -164,6 +170,7 @@ fn generate_fish_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
     shell.generate_cleanup_content(zv_dir, zv_bin_path, true)
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Generate Nushell cleanup script
 fn generate_nu_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
     let shell = Shell {
@@ -181,6 +188,7 @@ fn generate_nu_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
     shell.generate_cleanup_content(zv_dir, zv_bin_path, true)
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Generate tcsh cleanup script
 fn generate_tcsh_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
     let shell = Shell {
@@ -198,6 +206,7 @@ fn generate_tcsh_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
     shell.generate_cleanup_content(zv_dir, zv_bin_path, true)
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Generate POSIX cleanup script
 fn generate_posix_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
     let shell = Shell {
@@ -215,6 +224,7 @@ fn generate_posix_cleanup(zv_dir: &str, zv_bin_path: &str) -> String {
     shell.generate_cleanup_content(zv_dir, zv_bin_path, true)
 }
 
+#[cfg(not(target_os = "linux"))]
 /// Generate shell-specific instructions for manual setup
 /// This function is now a wrapper around the Shell::generate_setup_instructions method
 pub fn generate_setup_instructions(shell: &Shell, env_file_path: &str) -> String {
@@ -234,6 +244,7 @@ mod tests {
         assert!(content.contains("C:\\zv\\bin"));
     }
 
+    #[cfg(not(target_os = "linux"))]
     #[test]
     fn test_generate_fish_content() {
         let content = generate_fish_content("/home/user/.zv", "/home/user/.zv/bin");
@@ -242,6 +253,7 @@ mod tests {
         assert!(content.contains("/home/user/.zv"));
     }
 
+    #[cfg(not(target_os = "linux"))]
     #[test]
     fn test_generate_posix_content() {
         let content = generate_posix_content("/home/user/.zv", "/home/user/.zv/bin");
@@ -251,6 +263,7 @@ mod tests {
         assert!(content.contains("/home/user/.zv"));
     }
 
+    #[cfg(not(target_os = "linux"))]
     #[test]
     fn test_generate_cleanup_content() {
         let shell = Shell {
@@ -266,6 +279,7 @@ mod tests {
         assert!(cleanup.contains("contains -i"));
     }
 
+    #[cfg(not(target_os = "linux"))]
     #[test]
     fn test_generate_setup_instructions() {
         let shell = Shell {
