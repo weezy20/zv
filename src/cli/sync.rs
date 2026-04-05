@@ -26,6 +26,7 @@ pub async fn sync(app: &mut crate::App) -> crate::Result<()> {
     let binary_updated = check_and_update_zv_binary(app, false).await?;
 
     // Create public bin symlinks (belt-and-suspenders)
+    #[cfg(unix)]
     if let Some(pub_bin) = app.public_bin_path() {
         create_public_bin_symlinks(app.bin_path(), pub_bin).await?;
     }
@@ -390,6 +391,7 @@ async fn copy_binary_and_regenerate_shims(
     }
 
     // On XDG systems, keep public symlinks in ~/.local/bin up to date
+    #[cfg(unix)]
     if let Some(pub_bin) = app.public_bin_path() {
         create_public_bin_symlinks(app.bin_path(), pub_bin)
             .await
@@ -412,6 +414,7 @@ async fn copy_binary_and_regenerate_shims(
 /// ~/.local/bin/zv  → ZV_DIR/bin/zv
 /// ~/.local/bin/zig → ZV_DIR/bin/zig   (only if shim exists)
 /// ```
+#[cfg(unix)]
 async fn create_public_bin_symlinks(internal_bin: &Path, public_bin: &Path) -> crate::Result<()> {
     use color_eyre::eyre::Context;
     use crate::Shim;
