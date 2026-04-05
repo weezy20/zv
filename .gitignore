@@ -8,3 +8,4 @@ zig
 zls
 zls.exe
 build.ps1
+justfile
