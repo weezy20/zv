@@ -1,19 +1,49 @@
-# Runs after cargo-dist creates a GitHub Release.
+# Runs after the Release workflow (cargo-dist) completes successfully.
 # Handles everything cargo-dist doesn't own: install scripts, Homebrew, npm.
 
 name: Publish
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
 
 jobs:
+  # ── Resolve tag from the triggering commit ──────────────────────────────────
+  resolve-tag:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Get tag at commit
+        id: tag
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha }}"
+          TAG=$(git tag --points-at "$SHA" | head -1)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # prerelease if tag contains a hyphen (e.g. v0.10.0-rc.1)
+          if [[ "$TAG" == *"-"* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # ── Attach install scripts ──────────────────────────────────────────────────
   install-scripts:
+    needs: resolve-tag
+    if: ${{ needs.resolve-tag.outputs.tag != '' }}
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      TAG: ${{ github.event.release.tag_name }}
+      TAG: ${{ needs.resolve-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,15 +52,16 @@ jobs:
         run: |
           gh release upload "${TAG}" scripts/install.sh scripts/install.ps1 --clobber
 
-  # ── Publish Homebrew formula ────────────────────────────────────────────────
+  # ── Publish Homebrew formula (stable only) ──────────────────────────────────
   publish-homebrew:
-    if: ${{ !github.event.release.prerelease }}
+    needs: resolve-tag
+    if: ${{ needs.resolve-tag.outputs.tag != '' && needs.resolve-tag.outputs.prerelease == 'false' }}
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GITHUB_USER: "zv bot"
       GITHUB_EMAIL: "bot@zv.dev"
-      TAG: ${{ github.event.release.tag_name }}
+      TAG: ${{ needs.resolve-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,20 +85,21 @@ jobs:
           git commit -m "zv ${VERSION}"
           git push
 
-  # ── Publish npm package ─────────────────────────────────────────────────────
+  # ── Publish npm package (stable only) ──────────────────────────────────────
   publish-npm:
-    if: ${{ !github.event.release.prerelease }}
+    needs: resolve-tag
+    if: ${{ needs.resolve-tag.outputs.tag != '' && needs.resolve-tag.outputs.prerelease == 'false' }}
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      TAG: ${{ github.event.release.tag_name }}
+      TAG: ${{ needs.resolve-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - name: Prepare npm package
         env:
-          ZV_VERSION: ${{ github.event.release.tag_name }}
+          ZV_VERSION: ${{ needs.resolve-tag.outputs.tag }}
         run: |
           cd npm
           bash prepack.sh
