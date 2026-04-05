@@ -1,0 +1,81 @@
+# Runs after cargo-dist creates a GitHub Release.
+# Handles everything cargo-dist doesn't own: install scripts, Homebrew, npm.
+
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  # ── Attach install scripts ──────────────────────────────────────────────────
+  install-scripts:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Upload install scripts
+        run: |
+          gh release upload "${TAG}" scripts/install.sh scripts/install.ps1 --clobber
+
+  # ── Publish Homebrew formula ────────────────────────────────────────────────
+  publish-homebrew:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_USER: "zv bot"
+      GITHUB_EMAIL: "bot@zv.dev"
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          repository: "weezy20/homebrew-tap"
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      - name: Generate formula
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/weezy20/zv/${TAG}/scripts/generate-formula.sh" -o generate-formula.sh
+          chmod +x generate-formula.sh
+          bash generate-formula.sh "${TAG}" > Formula/zv.rb
+      - name: Commit formula
+        run: |
+          VERSION="${TAG#v}"
+          git config --global user.name "${GITHUB_USER}"
+          git config --global user.email "${GITHUB_EMAIL}"
+          export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
+          brew update
+          brew style --except-cops FormulaAudit/Homepage,FormulaAudit/Desc,FormulaAuditStrict --fix "Formula/zv.rb" || true
+          git add "Formula/zv.rb"
+          git commit -m "zv ${VERSION}"
+          git push
+
+  # ── Publish npm package ─────────────────────────────────────────────────────
+  publish-npm:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare npm package
+        env:
+          ZV_VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          cd npm
+          bash prepack.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Publish
+        run: |
+          cd npm
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
