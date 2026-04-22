@@ -368,9 +368,9 @@ async fn copy_binary_and_regenerate_shims(
 
     // Remove the target first to avoid ETXTBSY on Linux when the binary is running
     if target.exists() {
-        tokio::fs::remove_file(target).await.with_context(|| {
-            format!("Failed to remove existing binary at {}", target.display())
-        })?;
+        tokio::fs::remove_file(target)
+            .await
+            .with_context(|| format!("Failed to remove existing binary at {}", target.display()))?;
     }
 
     tokio::fs::copy(source, target).await.with_context(|| {
@@ -416,8 +416,8 @@ async fn copy_binary_and_regenerate_shims(
 /// ```
 #[cfg(unix)]
 async fn create_public_bin_symlinks(internal_bin: &Path, public_bin: &Path) -> crate::Result<()> {
-    use color_eyre::eyre::Context;
     use crate::Shim;
+    use color_eyre::eyre::Context;
 
     tokio::fs::create_dir_all(public_bin)
         .await
