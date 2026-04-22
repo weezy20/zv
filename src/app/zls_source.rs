@@ -97,7 +97,7 @@ fn checkout_ref(cache_src: &Path, zls_version: &str) -> Result<(), ZvError> {
 pub async fn build_zls_from_source(
     zls_version: &str,
     active_zig_exe: &Path,
-    cache_dir: &Path,
+    cache_src: &Path,
     dest_dir: &Path,
 ) -> Result<PathBuf, ZvError> {
     if !dest_dir.exists() {
@@ -106,9 +106,8 @@ pub async fn build_zls_from_source(
             .map_err(ZvError::Io)?;
     }
 
-    let cache_src = cache_dir.join("zls-src");
-    ensure_zls_clone(&cache_src).await?;
-    checkout_ref(&cache_src, zls_version)?;
+    ensure_zls_clone(cache_src).await?;
+    checkout_ref(cache_src, zls_version)?;
 
     let recursion_count = std::env::var("ZV_RECURSION_COUNT")
         .ok()
@@ -118,7 +117,7 @@ pub async fn build_zls_from_source(
     let status = Command::new(active_zig_exe)
         .arg("build")
         .arg("-Doptimize=ReleaseSafe")
-        .current_dir(&cache_src)
+        .current_dir(cache_src)
         .env("ZV_RECURSION_COUNT", (recursion_count + 1).to_string())
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())

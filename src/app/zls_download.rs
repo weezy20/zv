@@ -57,7 +57,12 @@ async fn extract_zls_binary(
                 let mut file = archive
                     .by_index(idx)
                     .map_err(|e| ZvError::General(eyre!("Failed to read ZLS zip entry: {e}")))?;
-                let output = temp_dir.join(file.name());
+                let output = temp_dir.join(file.enclosed_name().ok_or_else(|| {
+                    ZvError::General(eyre!(
+                        "Refusing to extract unsafe ZLS zip entry '{}'",
+                        file.name()
+                    ))
+                })?);
                 if file.is_dir() {
                     tokio::fs::create_dir_all(&output)
                         .await
@@ -162,4 +167,56 @@ pub async fn download_zls_prebuilt(
     let binary_path = extract_zls_binary(&download.tarball_path, archive_ext, dest_dir).await?;
     remove_files(&[download.tarball_path, download.minisig_path]).await;
     Ok(binary_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_zls_binary;
+    use crate::{ArchiveExt, Shim};
+    use std::io::Write;
+    use std::path::Path;
+    use zip::write::SimpleFileOptions;
+
+    fn write_zip_entry(archive_path: &Path, name: &str, contents: &[u8]) {
+        let file = std::fs::File::create(archive_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file(name, SimpleFileOptions::default()).unwrap();
+        zip.write_all(contents).unwrap();
+        zip.finish().unwrap();
+    }
+
+    #[tokio::test]
+    async fn rejects_unsafe_zip_entry_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive_path = temp.path().join("zls.zip");
+        write_zip_entry(&archive_path, "../../../zls", b"bad");
+
+        let dest_dir = temp.path().join("dest");
+        let err = extract_zls_binary(&archive_path, ArchiveExt::Zip, &dest_dir)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("unsafe ZLS zip entry"));
+        assert!(!temp.path().join("zls").exists());
+    }
+
+    #[tokio::test]
+    async fn extracts_safe_zip_entry_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive_path = temp.path().join("zls.zip");
+        let binary_name = Shim::Zls.executable_name();
+        write_zip_entry(
+            &archive_path,
+            &format!("zls/bin/{binary_name}"),
+            b"zls-binary",
+        );
+
+        let dest_dir = temp.path().join("dest");
+        let binary_path = extract_zls_binary(&archive_path, ArchiveExt::Zip, &dest_dir)
+            .await
+            .unwrap();
+
+        assert_eq!(binary_path, dest_dir.join(binary_name));
+        assert_eq!(std::fs::read(binary_path).unwrap(), b"zls-binary");
+    }
 }

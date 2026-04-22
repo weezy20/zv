@@ -95,8 +95,8 @@ pub(crate) async fn provision_zls_for(
     let zls_binary = if download {
         download_zls_prebuilt(app, &release, &host_target, &zls_dest_dir).await?
     } else {
-        let cache_dir = app.paths.cache_dir.clone();
-        build_zls_from_source(&release.version, zig_exe, &cache_dir, &zls_dest_dir).await?
+        let zls_src_dir = app.paths.zls_src_dir();
+        build_zls_from_source(&release.version, zig_exe, &zls_src_dir, &zls_dest_dir).await?
     };
 
     app.record_zls_mapping(zig_version, &release.version)?;

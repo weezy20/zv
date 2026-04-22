@@ -566,11 +566,7 @@ async fn backfill_zls_mappings(app: &crate::App) {
     if added > 0
         && let Err(e) = save_zv_config(&app.paths.config_file, &config)
     {
-        println!(
-            "  {} Failed to persist ZLS mappings: {}",
-            "⚠".yellow(),
-            e
-        );
+        println!("  {} Failed to persist ZLS mappings: {}", "⚠".yellow(), e);
         return;
     }
 

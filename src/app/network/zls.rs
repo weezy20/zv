@@ -81,15 +81,24 @@ pub async fn select_version(zig_version: &str) -> Result<ZlsRelease, ZvError> {
 
     let mut per_target = HashMap::new();
     for (key, value) in body.targets {
-        if let Ok(artifact) = serde_json::from_value::<ArtifactDto>(value) {
-            per_target.insert(
-                key,
-                ZlsArtifact {
-                    tarball: artifact.tarball,
-                    shasum: artifact.shasum,
-                    size: artifact.size,
-                },
-            );
+        match serde_json::from_value::<ArtifactDto>(value) {
+            Ok(artifact) => {
+                per_target.insert(
+                    key,
+                    ZlsArtifact {
+                        tarball: artifact.tarball,
+                        shasum: artifact.shasum,
+                        size: artifact.size,
+                    },
+                );
+            }
+            Err(err) => {
+                tracing::warn!(
+                    target: "zv::network::zls",
+                    artifact_target = %key,
+                    "Skipping malformed ZLS artifact in select-version response: {err}"
+                );
+            }
         }
     }
 
