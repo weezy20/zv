@@ -3,6 +3,8 @@ use color_eyre::eyre::eyre;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+const ZLS_GIT_URL: &str = "https://github.com/zigtools/zls";
+
 fn run_git(args: &[&str], cwd: Option<&Path>) -> Result<(), ZvError> {
     let mut cmd = Command::new("git");
     cmd.args(args);
@@ -44,43 +46,69 @@ fn resolve_checkout_ref(zls_version: &str) -> Result<String, ZvError> {
     )))
 }
 
-pub async fn build_zls_from_source(
-    zls_version: &str,
-    active_zig_exe: &Path,
-    dest_dir: &Path,
-) -> Result<PathBuf, ZvError> {
-    let source_dir = dest_dir.join(".source");
-    if source_dir.exists() {
-        tokio::fs::remove_dir_all(&source_dir)
+/// Ensure the shared ZLS git checkout exists at `cache_src` and is up to date.
+/// Performs a one-time full clone, then `git fetch` on subsequent calls.
+async fn ensure_zls_clone(cache_src: &Path) -> Result<(), ZvError> {
+    if let Some(parent) = cache_src.parent() {
+        tokio::fs::create_dir_all(parent)
             .await
             .map_err(ZvError::Io)?;
     }
 
+    if cache_src.join(".git").is_dir() {
+        run_git(&["fetch", "--tags", "--prune", "origin"], Some(cache_src))?;
+    } else {
+        if cache_src.exists() {
+            tokio::fs::remove_dir_all(cache_src)
+                .await
+                .map_err(ZvError::Io)?;
+        }
+        run_git(
+            &["clone", ZLS_GIT_URL, cache_src.to_string_lossy().as_ref()],
+            None,
+        )?;
+    }
+    Ok(())
+}
+
+/// Reset the shared checkout to a clean state on the requested ref so every
+/// build starts from a working tree that exactly matches upstream — no user
+/// mutations, no leftover artifacts from a prior build. Gitignored paths
+/// (`.zig-cache/`, `zig-out/`) are preserved so repeat builds stay fast.
+fn checkout_ref(cache_src: &Path, zls_version: &str) -> Result<(), ZvError> {
+    let checkout_ref = resolve_checkout_ref(zls_version)?;
+
+    let _ = run_git(&["reset", "--hard", "HEAD"], Some(cache_src));
+
+    let checkout_result = run_git(&["checkout", &checkout_ref], Some(cache_src));
+    if checkout_result.is_err() && extract_commit_hash(zls_version).is_some() {
+        // Specific commit not in our refs (rare — force-push or detached). Pull it directly.
+        run_git(&["fetch", "origin", &checkout_ref], Some(cache_src))?;
+        run_git(&["checkout", &checkout_ref], Some(cache_src))?;
+    } else {
+        checkout_result?;
+    }
+
+    run_git(&["clean", "-fd"], Some(cache_src))?;
+
+    Ok(())
+}
+
+pub async fn build_zls_from_source(
+    zls_version: &str,
+    active_zig_exe: &Path,
+    cache_dir: &Path,
+    dest_dir: &Path,
+) -> Result<PathBuf, ZvError> {
     if !dest_dir.exists() {
         tokio::fs::create_dir_all(dest_dir)
             .await
             .map_err(ZvError::Io)?;
     }
 
-    run_git(
-        &[
-            "clone",
-            "--depth",
-            "50",
-            "https://github.com/zigtools/zls",
-            source_dir.to_string_lossy().as_ref(),
-        ],
-        None,
-    )?;
-
-    let checkout_ref = resolve_checkout_ref(zls_version)?;
-    let checkout_result = run_git(&["checkout", &checkout_ref], Some(&source_dir));
-    if checkout_result.is_err() && extract_commit_hash(zls_version).is_some() {
-        run_git(&["fetch", "--unshallow"], Some(&source_dir))?;
-        run_git(&["checkout", &checkout_ref], Some(&source_dir))?;
-    } else {
-        checkout_result?;
-    }
+    let cache_src = cache_dir.join("zls-src");
+    ensure_zls_clone(&cache_src).await?;
+    checkout_ref(&cache_src, zls_version)?;
 
     let recursion_count = std::env::var("ZV_RECURSION_COUNT")
         .ok()
@@ -90,7 +118,7 @@ pub async fn build_zls_from_source(
     let status = Command::new(active_zig_exe)
         .arg("build")
         .arg("-Doptimize=ReleaseSafe")
-        .current_dir(&source_dir)
+        .current_dir(&cache_src)
         .env("ZV_RECURSION_COUNT", (recursion_count + 1).to_string())
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
@@ -105,7 +133,7 @@ pub async fn build_zls_from_source(
         )));
     }
 
-    let built_binary = source_dir
+    let built_binary = cache_src
         .join("zig-out")
         .join("bin")
         .join(Shim::Zls.executable_name());
