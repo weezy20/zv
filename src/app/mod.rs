@@ -3,6 +3,8 @@ pub(crate) mod migrations;
 pub(crate) mod network;
 pub(crate) mod toolchain;
 pub(crate) mod utils;
+pub(crate) mod zls_download;
+pub(crate) mod zls_source;
 use crate::app::network::{ZigDownload, ZigRelease};
 use crate::app::utils::{remove_files, zig_tarball};
 use crate::types::*;
@@ -10,6 +12,7 @@ mod minisign;
 use crate::path_utils;
 use color_eyre::eyre::{Context as _, eyre};
 pub use network::CacheStrategy;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::LazyLock;
@@ -107,9 +110,7 @@ pub enum Either {
 
 impl App {
     /// Minimal App path initialization & directory creation
-    pub async fn init(
-        UserConfig { paths, shell }: UserConfig,
-    ) -> Result<Self, ZvError> {
+    pub async fn init(UserConfig { paths, shell }: UserConfig) -> Result<Self, ZvError> {
         /* data_dir is canonicalized in ZvPaths::resolve() -> fetch_zv_dir() */
 
         // Ensure internal bin dir exists
@@ -131,9 +132,12 @@ impl App {
             tracing::warn!("Migration failed: {}", e);
         }
 
-        let toolchain_manager =
-            ToolchainManager::new(&paths.data_dir, &paths.config_file, paths.public_bin_dir.clone())
-                .await?;
+        let toolchain_manager = ToolchainManager::new(
+            &paths.data_dir,
+            &paths.config_file,
+            paths.public_bin_dir.clone(),
+        )
+        .await?;
 
         // Check for existing ZV zig/zls shims in bin directory
         let zig = toolchain_manager
@@ -282,6 +286,63 @@ impl App {
         })
     }
 
+    fn zls_mapping_key(zig_version: &ZigVersion) -> Option<String> {
+        zig_version.version().map(|v| v.to_string())
+    }
+
+    pub fn get_zls_for_zig(&self, zig_version: &ZigVersion) -> Option<(String, PathBuf)> {
+        let key = Self::zls_mapping_key(zig_version)?;
+        let config = crate::app::migrations::load_zv_config(&self.paths.config_file).ok()?;
+        let zls_version = config.zls?.mappings.get(&key)?.clone();
+        let zls_path = self
+            .paths
+            .zls_dir()
+            .join(&zls_version)
+            .join(Shim::Zls.executable_name());
+        if zls_path.is_file() {
+            Some((zls_version, zls_path))
+        } else {
+            None
+        }
+    }
+
+    pub fn record_zls_mapping(
+        &mut self,
+        zig_version: &ZigVersion,
+        zls_version: &str,
+    ) -> Result<(), ZvError> {
+        let key = Self::zls_mapping_key(zig_version).ok_or_else(|| {
+            ZvError::General(eyre!(
+                "Cannot persist ZLS mapping for unresolved Zig version '{}'",
+                zig_version
+            ))
+        })?;
+
+        let mut config = crate::app::migrations::load_zv_config(&self.paths.config_file).unwrap_or(
+            crate::app::migrations::ZvConfig {
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                active_zig: None,
+                local_master_zig: None,
+                zls: None,
+            },
+        );
+        config.version = env!("CARGO_PKG_VERSION").to_string();
+
+        let mut zls_config = config
+            .zls
+            .take()
+            .unwrap_or(crate::app::migrations::ZlsConfig {
+                mappings: HashMap::new(),
+            });
+        zls_config
+            .mappings
+            .insert(key.to_string(), zls_version.to_string());
+        config.zls = Some(zls_config);
+
+        crate::app::migrations::save_zv_config(&self.paths.config_file, &config)
+            .map_err(|e| ZvError::General(eyre!("Failed to save zls mapping: {e}")))
+    }
+
     /// Get the app's data directory (ZV_DIR)
     pub fn path(&self) -> &PathBuf {
         &self.paths.data_dir
@@ -378,9 +439,27 @@ impl App {
     /// This is a placeholder implementation that will be expanded with proper compatibility logic
     pub fn fetch_compatible_zls(&mut self, zig_version: &ZigVersion) -> Result<PathBuf, ZvError> {
         tracing::info!("Fetching compatible ZLS for Zig version: {:?}", zig_version);
+        if let Some((_, path)) = self.get_zls_for_zig(zig_version) {
+            return Ok(path);
+        }
 
-        // Determine compatible ZLS version
-        todo!()
+        let key = Self::zls_mapping_key(zig_version).unwrap_or_else(|| zig_version.to_string());
+        let config = crate::app::migrations::load_zv_config(&self.paths.config_file).ok();
+        let has_mapping = config
+            .and_then(|c| c.zls)
+            .is_some_and(|zls| zls.mappings.contains_key(&key));
+
+        if has_mapping {
+            Err(ZvError::General(eyre!(
+                "Found ZLS mapping for Zig '{}' but cached binary is missing. Re-run `zv zls`.",
+                key
+            )))
+        } else {
+            Err(ZvError::General(eyre!(
+                "No compatible ZLS provisioned for Zig '{}'. Run `zv zls`.",
+                key
+            )))
+        }
     }
 
     /// Fetch latest master and returns a [ZigRelease]
@@ -520,6 +599,7 @@ impl App {
                     &ziglang_org_tarball,
                     &ziglang_org_minisig,
                     &zig_tarball,
+                    crate::app::constants::ZIG_MINSIGN_PUBKEY,
                     None, // No expected shasum
                     None, // No expected size
                 )
@@ -635,6 +715,7 @@ impl App {
                     &download_artifact.ziglang_org_tarball,
                     &format!("{}.minisig", &download_artifact.ziglang_org_tarball),
                     &zig_tarball,
+                    crate::app::constants::ZIG_MINSIGN_PUBKEY,
                     Some(&download_artifact.shasum),
                     Some(download_artifact.size),
                 )

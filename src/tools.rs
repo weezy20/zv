@@ -128,6 +128,11 @@ impl ZvPaths {
     pub fn env_file_default(&self) -> PathBuf {
         self.data_dir.join("env")
     }
+
+    /// Directory where cached ZLS binaries are stored.
+    pub fn zls_dir(&self) -> PathBuf {
+        self.data_dir.join("zls")
+    }
 }
 
 // ── XDG helpers ──────────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@ use crate::app::constants::ZV_MASTER_FILE;
 use color_eyre::eyre::{Context, Result};
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs as sync_fs;
 use std::path::Path;
 use tokio::fs;
@@ -26,6 +27,15 @@ pub struct ZvConfig {
     /// Tracked master version (local-master-zig)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_master_zig: Option<String>,
+    /// Zig -> ZLS compatibility mappings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zls: Option<ZlsConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZlsConfig {
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub mappings: HashMap<String, String>,
 }
 
 /// Active Zig installation information (migrated from active.json)
@@ -121,6 +131,7 @@ pub async fn migrate(zv_root: &Path, config_file: &Path) -> Result<()> {
             version: current_version.to_string(),
             active_zig: migrated_active_zig,
             local_master_zig,
+            zls: None,
         };
 
         save_zv_config(&zv_toml_path, &config)?;
