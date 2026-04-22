@@ -66,7 +66,10 @@ impl ToolchainManager {
             if let Some(ref zi) = fallback {
                 // Try to load existing config to preserve local_master_zig
                 let existing_config = crate::app::migrations::load_zv_config(&zv_config_file).ok();
-                let local_master = existing_config.and_then(|c| c.local_master_zig);
+                let local_master = existing_config
+                    .as_ref()
+                    .and_then(|c| c.local_master_zig.clone());
+                let zls = existing_config.and_then(|c| c.zls);
 
                 // Write fallback to zv.toml
                 let config = ZvConfig {
@@ -77,6 +80,7 @@ impl ToolchainManager {
                         is_master: zi.is_master,
                     }),
                     local_master_zig: local_master,
+                    zls,
                 };
 
                 if let Err(e) = crate::app::migrations::save_zv_config(&zv_config_file, &config) {
@@ -465,6 +469,7 @@ impl ToolchainManager {
                     version: env!("CARGO_PKG_VERSION").to_string(),
                     active_zig: None,
                     local_master_zig: Some(version.to_string()),
+                    zls: None,
                 };
                 if let Err(e) =
                     crate::app::migrations::save_zv_config(&self.zv_config_file, &config)
@@ -505,6 +510,7 @@ impl ToolchainManager {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 active_zig: None,
                 local_master_zig: None,
+                zls: None,
             });
 
         config.version = env!("CARGO_PKG_VERSION").to_string();
@@ -548,6 +554,7 @@ impl ToolchainManager {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 active_zig: None,
                 local_master_zig: None,
+                zls: None,
             });
 
         config.version = env!("CARGO_PKG_VERSION").to_string();
@@ -628,8 +635,7 @@ impl ToolchainManager {
         tracing::debug!(target: TARGET, install_path = %install.path.display(), "Deploying shims for installation");
 
         self.create_shim(&zv_path, Shim::Zig).await?;
-        // TODO: ZLS support is unimplemented
-        // self.create_shim(&zv_path, Shim::Zls).await?;
+        self.create_shim(&zv_path, Shim::Zls).await?;
 
         if let Some(ref pub_dir) = self.public_bin_dir {
             self.create_public_shims(&zv_path, pub_dir).await?;
@@ -706,6 +712,12 @@ impl ToolchainManager {
         if zig_internal.exists() {
             let zig_pub = pub_dir.join(Shim::Zig.executable_name());
             self.ensure_public_symlink(zv_path, &zig_pub).await?;
+        }
+
+        let zls_internal = self.bin_path.join(Shim::Zls.executable_name());
+        if zls_internal.exists() {
+            let zls_pub = pub_dir.join(Shim::Zls.executable_name());
+            self.ensure_public_symlink(zv_path, &zls_pub).await?;
         }
         Ok(())
     }
@@ -835,6 +847,7 @@ impl ToolchainManager {
                 version: config.version,
                 active_zig: None,
                 local_master_zig: config.local_master_zig,
+                zls: config.zls,
             };
 
             if let Err(e) =
@@ -851,6 +864,7 @@ impl ToolchainManager {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 active_zig: None,
                 local_master_zig: None,
+                zls: None,
             };
 
             if let Err(e) = crate::app::migrations::save_zv_config(&self.zv_config_file, &config) {

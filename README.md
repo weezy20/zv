@@ -14,108 +14,17 @@ zig +master build
 ```
 Caching is built-in, so you never have to wait any longer than strictly necessary.
 
-You can also specify a version number, e.g., `zig +0.15.1`. With `zv`, you also have the option of pinning per-project Zig versions using a `.zigversion` file, which takes the same format as `+` would for inline Zig commands. You can have a project with these contents:
+You can also specify a version number, e.g., `zig +0.16.0`. With `zv`, you also have the option of pinning per-project Zig versions using a `.zigversion` file, which takes the same format as `+` would for inline Zig commands. You can have a project with these contents:
 
 ```py
 # file .zigversion
-0.15.2
+0.16.0
 ```
-which will always use version `0.15.1` when you run any `zig` command inside it. How cool is that?
+which will always use version `0.16.0` when you run any `zig` command inside it. How cool is that?
 
 It also doubles as a project template starter, providing multiple variants of a Zig project, from a barebones template with a very trimmed-down `build.zig` and `main.zig` file, or the standard Zig project template. Find out more with `zv init --help`.
 
 `zv` uses randomized ranked community mirrors for downloads (can be overridden to use ziglang.org with -f), as that's the official recommendation, with `minisign` and `shasum` verification done before any toolchain is installed. Future versions should bring in an optimization to rank the mirrors based on speed so that faster mirrors are selected more often without user intervention.
-
-## Upgrading from v0.9.x — Breaking Changes (Linux / macOS)
-
-> **Windows users**: nothing changes for you. Skip this section.
-
-This release adopts the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html) on Linux and macOS. Files are now split across purpose-appropriate directories instead of living under a single `~/.zv` root:
-
-| Role | Old path | New path |
-|------|----------|----------|
-| Data (binaries, versions) | `~/.zv/` | `~/.local/share/zv/` |
-| Config (`zv.toml`) | `~/.zv/zv.toml` | `~/.config/zv/zv.toml` |
-| Cache (index, mirrors, downloads) | `~/.zv/` | `~/.cache/zv/` |
-| Public bin (symlinks) | `~/.zv/bin/` in PATH | `~/.local/bin/` (usually already in PATH) |
-
-### Who is affected
-
-Any Linux or macOS user who:
-- installed zv **before this release**, **and**
-- does **not** have `ZV_DIR` set in their environment.
-
-**If you have `ZV_DIR` set, you are not affected.** `ZV_DIR` still acts as a self-contained root for all paths — identical to the old behaviour.
-
-### What breaks if you do nothing
-
-- zv no longer sees your installed Zig versions — they are still at `~/.zv/versions/` but zv now looks in `~/.local/share/zv/versions/`.
-- Your active Zig selection (`~/.zv/zv.toml`) is invisible to the new config path.
-- The welcome message says **"Setup incomplete. Run `zv sync`"** even though your old install works fine.
-- `zv sync` / `zv use` / `zv install` operate on the new empty state, not your old one.
-- Your shell RC still sources `~/.zv/env`, keeping the old `~/.zv/bin` in `PATH` — so `zig` keeps working via the old shim, but zv commands increasingly diverge from it.
-- Running `zv setup` creates a second installation alongside the old one.
-
-### Option A — Migrate to XDG (recommended)
-
-Run the following once after upgrading:
-
-```sh
-# 1. Create new XDG directories
-mkdir -p ~/.local/share/zv ~/.config/zv ~/.cache/zv
-
-# 2. Move installed Zig versions (the bulk of the data)
-mv ~/.zv/versions ~/.local/share/zv/versions
-
-# 3. Copy config
-cp ~/.zv/zv.toml ~/.config/zv/zv.toml 2>/dev/null || true
-
-# 4. Copy cache files (zv will re-fetch these if missing, but saves a sync)
-cp ~/.zv/index.toml   ~/.cache/zv/index.toml   2>/dev/null || true
-cp ~/.zv/mirrors.toml ~/.cache/zv/mirrors.toml 2>/dev/null || true
-cp ~/.zv/master       ~/.cache/zv/master        2>/dev/null || true
-
-# 5. Re-run zv sync to place the binary and create ~/.local/bin symlinks
-zv sync
-
-# 6. Remove the old source line from your shell RC
-#    Look for:  source ~/.zv/env   or   . ~/.zv/env
-#    Delete or comment it out, then open a new shell.
-
-# 7. Verify everything looks right
-zv          # should show "✔ Ready to Use"
-zv list     # should show your previously installed versions
-
-# 8. (Optional) Remove the old directory once satisfied
-rm -rf ~/.zv
-```
-
-### Option B — Keep the old layout (zero disruption)
-
-Add `ZV_DIR` to your shell profile to restore the pre-XDG behaviour:
-
-```sh
-# Add to ~/.bashrc, ~/.zshenv, ~/.zprofile, or equivalent
-export ZV_DIR="$HOME/.zv"
-```
-
-When `ZV_DIR` is set, zv uses it as a self-contained root for **all** paths (data, config, cache) and does not apply XDG splitting. Everything works exactly as before — no files need to move.
-
-### Why no automatic migration?
-
-Silently moving files and re-patching shell configs without user consent is worse than doing nothing. `ZV_DIR` is a zero-effort escape hatch for users who don't want to migrate right now. Automatic migration will be added in a follow-up release once the XDG layout has stabilised.
-
-### Symptom reference
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| "Setup incomplete. Run `zv sync`" on startup | `~/.local/share/zv/bin/zv` does not exist yet | Run Option A or set `ZV_DIR` |
-| `zig` works but `zv list` shows nothing | Old `~/.zv/bin` is still in `PATH`; new state is empty | Same |
-| `zv setup` creates a second empty installation | New paths don't see `~/.zv` | Same |
-| `zv` shows "not in PATH" despite `zig` working | `source_set` now checks `~/.local/bin`, not `~/.zv/bin` | Run `zv setup` after migration, or set `ZV_DIR` |
-| `~/.zv` still on disk after upgrading | No automatic cleanup | Safe to delete once migrated |
-
----
 
 ## Installation
 
@@ -254,13 +163,13 @@ zv init -p | --zon | --package  <?name>      # Create a zig project in current d
 # Version selection - basic usage
 # pass in -f or --force-ziglang to download using `ziglang.org` instead of community mirrors (default & recommended)
 zv use <version | master | stable | latest> # Select a Zig version to use. Can be a semver, master (branch)
-zv use 0.13.0                               # Use a specific semantic version
-zv use 0.14 -f                              # Use a version (auto-completes to 0.14.0) & downloads from `ziglang.org` due to -f
+zv use 0.15.0                               # Use a specific semantic version
+zv use 0.15 -f                              # Use a version (auto-completes to 0.15.0) & downloads from `ziglang.org` due to -f
 zv use master                               # Use master branch build (queries network to find the latest master build)
 zv use stable                               # Use latest stable release (refers to cached index)
 zv use latest                               # Use latest stable release (queries network to fetch the latest stable)
 zv install <version,*> [-f ]                # Install one or more Zig versions without switching to it. Use -f to download from ziglang.org instead of community mirrors.
-zv i 0.15.1,0.14.0,master                   # Install multiple versions at once using a comma-separated list
+zv i 0.16.0,0.15.0,master                   # Install multiple versions at once using a comma-separated list
 
 # Per-project Zig config
 zig +<version> [...zig args]            # Run Zig using a specific <version> (fetches and downloads version if not present locally)
@@ -270,9 +179,9 @@ zig [...zig args]                       # Uses current configured Zig or prefers
 # Management commands
 zv list  | ls                          # List installed Zig versions
 zv clean | rm                          # Remove Zig versions interactively. Additionally cleans up downloads cache, temporary download artifacts.
-zv clean | rm <version | all>          # Clean up all zv-managed installations using `all` or just a single one (e.g., zv clean 0.14).
-zv clean 0.14,0.14.0                   # Clean up multiple Zig installations using a comma-separated list.
-zv clean --except <version,*>          # Clean up every version except the version mentioned as argument to --except <version> where <version> maybe a comma separated list of ZigVersions. E.g. (zv clean --except 0.14.1,master@0.16.0-dev.565+f50c64797,stable@0.15.1)
+zv clean | rm <version | all>          # Clean up all zv-managed installations using `all` or just a single one (e.g., zv clean 0.15).
+zv clean 0.15,0.15.0                   # Clean up multiple Zig installations using a comma-separated list.
+zv clean --except <version,*>          # Clean up every version except the version mentioned as argument to --except <version> where <version> maybe a comma separated list of ZigVersions. E.g. (zv clean --except 0.15.1,master@0.17.0-dev.565+f50c64797,stable@0.16.0)
 zv rm master                           # Clean up the `master` branch toolchain.
 zv rm master --outdated                # Clean up any older master versions in the master folder that don't match latest `master`
 zv setup                               # Set up shell environment for zv with interactive prompts (use --no-interactive for automation)
@@ -280,6 +189,26 @@ zv sync                                # Resync community mirrors list from [zig
 zv upgrade | update                    # Update zv to the latest release only if present in GH Releases: https://github.com/weezy20/zv/releases
 zv help                                # Detailed instructions for zv. Use `--help` for long help or `-h` for short help with a subcommand.
 zv uninstall                           # Uninstall zv completely by attempting to remove ZV_DIR.
+```
+
+## ZLS (Zig Language Server) provisioning
+
+`zv` can automatically provision a ZLS build compatible with your active Zig version.
+
+```sh
+zv zls                                # Provision ZLS for the active Zig version (builds from source by default)
+zv zls -d | --download                # Download a prebuilt ZLS binary instead of building from source
+zv zls --force                        # Re-provision even if a compatible ZLS is already installed
+zv zls --update                       # Re-provision and refresh compatibility resolution
+```
+
+You can also provision ZLS inline when installing or switching Zig versions:
+
+```sh
+zv use 0.16.0 --zls                   # Switch to 0.16.0 and provision matching ZLS (builds from source)
+zv use 0.16.0 --zls -d                # Same, but downloads a prebuilt ZLS binary
+zv install 0.16.0,0.15.0 --zls        # Install versions and provision ZLS for each
+zv install 0.16.0 --zls -d            # Install and download prebuilt ZLS
 ```
 
 `minisign` verification is done using [jedisct1/rust-minisign-verify](https://github.com/jedisct1/rust-minisign-verify) — a small minisign library in pure Rust.
@@ -292,7 +221,7 @@ I hope you enjoy using it! ♥
 ---
 ### Customizing ZV behaviour:
 
-### 🔧 Environment Variables for customizing zv
+### Environment Variables for customizing zv
 
 | Variable                  | Description                                                                                                                | Default / Notes                                                                 |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -310,3 +239,7 @@ I hope you enjoy using it! ♥
 - If you prefer some mirrors to others, you can put it as `rank = 1` on your preferred mirrors (Default is rank 1 for all mirrors) or lower the rank of mirrors that you don't want. `rank` is a range from 1..255, lower is better and more preferred when doing random selection. The mirrors file is generated at `$XDG_CACHE_HOME/zv/mirrors.toml` (default `~/.cache/zv/mirrors.toml`)
 
 - Currently `zv use master` will only install the master as present in zig-index. This means that older master installations still remain under the masters folder and can be selected via `zv use master@<older master version>` which can be obtained via `zv ls`. Note, installing older master versions like this may work now (zv v0.6.0 onwards): `zv i <pre-release version>` or `zv use <pre-release version>` if some mirror has the build, it'll be fetched.
+
+---
+
+> **Upgrading from v0.9.x?** See [docs/migrating-to-xdg.md](docs/migrating-to-xdg.md) for breaking changes and migration instructions.

@@ -1,7 +1,6 @@
 use std::io::Read;
 
 use crate::ZvError;
-use crate::app::constants::ZIG_MINSIGN_PUBKEY;
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
 use minisign_verify::{PublicKey, Signature};
@@ -22,11 +21,12 @@ fn extract_filename_from_trusted_comment(trusted_comment: &str) -> Result<String
 }
 
 pub fn verify_minisign_signature(
+    pubkey_base64: &str,
     expected_filename: &str,
     tarball: &std::path::Path,
     signature: &std::path::Path,
 ) -> Result<(), ZvError> {
-    let pubkey = PublicKey::from_base64(ZIG_MINSIGN_PUBKEY).map_err(|e| {
+    let pubkey = PublicKey::from_base64(pubkey_base64).map_err(|e| {
         ZvError::MinisignError(eyre!("Failed to parse public key from base64: {e}"))
     })?;
     let sig = Signature::from_file(signature)

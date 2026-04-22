@@ -52,6 +52,20 @@ pub async fn sync(app: &mut crate::App) -> crate::Result<()> {
         mirror_count
     );
 
+    // Backfill ZLS mappings for any locally installed Zig versions we haven't seen yet.
+    // Network-only: no binaries are downloaded or built here. Failures per-version are
+    // logged and skipped so one API hiccup can't fail the whole sync.
+    backfill_zls_mappings(app).await;
+
+    // Re-assert shims (zig + zls) for the active install. Idempotent — covers the case
+    // where the zv binary was already up to date so `copy_binary_and_regenerate_shims`
+    // did not run deploy_shims itself.
+    if let Some(install) = app.toolchain_manager.get_active_install() {
+        app.toolchain_manager
+            .deploy_shims(install, true, true)
+            .await?;
+    }
+
     println!("{}", "Sync completed successfully!".green().bold());
 
     // On Tier 2/3 (macOS Library or ZV_DIR), warn if PATH not configured
@@ -368,9 +382,9 @@ async fn copy_binary_and_regenerate_shims(
 
     // Remove the target first to avoid ETXTBSY on Linux when the binary is running
     if target.exists() {
-        tokio::fs::remove_file(target).await.with_context(|| {
-            format!("Failed to remove existing binary at {}", target.display())
-        })?;
+        tokio::fs::remove_file(target)
+            .await
+            .with_context(|| format!("Failed to remove existing binary at {}", target.display()))?;
     }
 
     tokio::fs::copy(source, target).await.with_context(|| {
@@ -416,8 +430,8 @@ async fn copy_binary_and_regenerate_shims(
 /// ```
 #[cfg(unix)]
 async fn create_public_bin_symlinks(internal_bin: &Path, public_bin: &Path) -> crate::Result<()> {
-    use color_eyre::eyre::Context;
     use crate::Shim;
+    use color_eyre::eyre::Context;
 
     tokio::fs::create_dir_all(public_bin)
         .await
@@ -452,5 +466,126 @@ async fn create_public_bin_symlinks(internal_bin: &Path, public_bin: &Path) -> c
         tracing::debug!("Linked {} → {}", zig_dst.display(), zig_src.display());
     }
 
+    let zls_name = Shim::Zls.executable_name();
+    let zls_src = internal_bin.join(zls_name);
+    let zls_dst = public_bin.join(zls_name);
+    if zls_src.exists() {
+        place_symlink(&zls_src, &zls_dst)
+            .await
+            .with_context(|| format!("Failed to symlink zls in {}", public_bin.display()))?;
+        tracing::debug!("Linked {} → {}", zls_dst.display(), zls_src.display());
+    }
+
     Ok(())
+}
+
+/// Query the ZLS release-worker for every locally installed Zig version that does
+/// not yet have a cached Zig→ZLS mapping, and persist the results to `zv.toml`.
+///
+/// This is a cache primer: no ZLS binaries are downloaded or built. When the user
+/// later runs `zv zls`, the provisioning path can use the cached mapping without
+/// another API round-trip.
+async fn backfill_zls_mappings(app: &crate::App) {
+    use crate::app::migrations::{ZlsConfig, ZvConfig, load_zv_config, save_zv_config};
+    use futures::stream::{self, StreamExt};
+    use std::collections::{HashMap, HashSet};
+    use yansi::Paint;
+
+    let installations = app.toolchain_manager.list_installations();
+    if installations.is_empty() {
+        return;
+    }
+
+    let existing_config = load_zv_config(&app.paths.config_file).ok();
+    let existing_keys: HashSet<String> = existing_config
+        .as_ref()
+        .and_then(|c| c.zls.as_ref())
+        .map(|z| z.mappings.keys().cloned().collect())
+        .unwrap_or_default();
+
+    let missing: Vec<String> = installations
+        .iter()
+        .map(|(v, _, _)| v.to_string())
+        .filter(|k| !existing_keys.contains(k))
+        .collect();
+
+    if missing.is_empty() {
+        println!("  {} ZLS mappings up to date", "✓".green());
+        return;
+    }
+
+    println!(
+        "  {} Resolving ZLS for {} Zig version(s)...",
+        "→".blue(),
+        missing.len()
+    );
+
+    const CONCURRENCY: usize = 4;
+    let results: Vec<(String, Result<String, crate::ZvError>)> = stream::iter(missing)
+        .map(|zig_ver| async move {
+            let result = crate::app::network::zls::select_version(&zig_ver)
+                .await
+                .map(|r| r.version);
+            (zig_ver, result)
+        })
+        .buffer_unordered(CONCURRENCY)
+        .collect()
+        .await;
+
+    let mut config = existing_config.unwrap_or(ZvConfig {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        active_zig: None,
+        local_master_zig: None,
+        zls: None,
+    });
+    config.version = env!("CARGO_PKG_VERSION").to_string();
+    let zls_config = config.zls.get_or_insert(ZlsConfig {
+        mappings: HashMap::new(),
+    });
+
+    let mut added = 0usize;
+    let mut failed = 0usize;
+    for (zig_ver, result) in results {
+        match result {
+            Ok(zls_ver) => {
+                zls_config.mappings.insert(zig_ver, zls_ver);
+                added += 1;
+            }
+            Err(e) => {
+                tracing::debug!(
+                    target: "zv::cli::sync",
+                    "Failed to resolve compatible ZLS for Zig {}: {}",
+                    zig_ver,
+                    e
+                );
+                failed += 1;
+            }
+        }
+    }
+
+    if added > 0
+        && let Err(e) = save_zv_config(&app.paths.config_file, &config)
+    {
+        println!("  {} Failed to persist ZLS mappings: {}", "⚠".yellow(), e);
+        return;
+    }
+
+    match (added, failed) {
+        (a, 0) => println!(
+            "  {} ZLS mappings: {} cached",
+            "✓".green(),
+            Paint::green(&a.to_string())
+        ),
+        (0, f) => println!(
+            "  {} ZLS mapping lookup failed for {} version(s) (see ZV_LOG)",
+            "⚠".yellow(),
+            Paint::yellow(&f.to_string())
+        ),
+        (a, f) => println!(
+            "  {} ZLS mappings: {} cached, {} failed",
+            "✓".green(),
+            Paint::green(&a.to_string()),
+            Paint::yellow(&f.to_string())
+        ),
+    }
 }

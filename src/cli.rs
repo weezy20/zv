@@ -17,6 +17,7 @@ mod update;
 mod r#use;
 mod zig;
 mod zls;
+mod zls_cmd;
 
 pub use zig::zig_main;
 pub use zls::zls_main;
@@ -54,7 +55,10 @@ pub async fn zv_main() -> super::Result<()> {
     let zv_cli = <ZvCli as clap::Parser>::parse();
     let paths = tools::ZvPaths::resolve()?;
     if paths.using_env_var {
-        tracing::debug!("Using ZV_DIR from environment: {}", paths.data_dir.display());
+        tracing::debug!(
+            "Using ZV_DIR from environment: {}",
+            paths.data_dir.display()
+        );
     }
     let using_env = paths.using_env_var;
     let app = App::init(UserConfig {
@@ -126,6 +130,12 @@ pub enum Commands {
             long_help = "Force using ziglang.org as a download source. Default is to use community mirrors."
         )]
         force_ziglang: bool,
+        /// Also provision matching ZLS for each installed Zig version
+        #[arg(long)]
+        zls: bool,
+        /// With --zls, download prebuilt ZLS instead of building from source
+        #[arg(long, short = 'd', requires = "zls")]
+        download: bool,
         /// Version(s) of Zig to install (comma-separated for multiple versions)
         #[arg(
             value_delimiter = ',',
@@ -151,6 +161,12 @@ pub enum Commands {
             long_help = "Force using ziglang.org as a download source. Default is to use community mirrors."
         )]
         force_ziglang: bool,
+        /// Also provision matching ZLS for the selected Zig version
+        #[arg(long)]
+        zls: bool,
+        /// With --zls, download prebuilt ZLS instead of building from source
+        #[arg(long, short = 'd', requires = "zls")]
+        download: bool,
         /// Version of Zig to use
         #[arg(
             value_parser = clap::value_parser!(ZigVersion),
@@ -271,6 +287,19 @@ pub enum Commands {
 
     /// Uninstall zv and remove all installed Zig versions
     Uninstall,
+
+    /// Provision a ZLS build compatible with the active Zig version
+    Zls {
+        /// Download prebuilt ZLS artifact instead of building from source
+        #[arg(long, short = 'd')]
+        download: bool,
+        /// Re-provision even if mapping and cache already exist
+        #[arg(long)]
+        force: bool,
+        /// Alias of --force that always refreshes compatibility resolution
+        #[arg(long)]
+        update: bool,
+    },
 }
 
 impl Commands {
@@ -282,7 +311,9 @@ impl Commands {
                 package: zon,
             } => {
                 if !app.is_initialized() {
-                    error("zv is not initialized. Run 'zv sync' first to set up directories and the zv binary.");
+                    error(
+                        "zv is not initialized. Run 'zv sync' first to set up directories and the zv binary.",
+                    );
                     std::process::exit(1);
                 }
                 use crate::{Template, TemplateType};
@@ -314,15 +345,23 @@ impl Commands {
             Commands::Use {
                 version,
                 force_ziglang,
+                zls,
+                download,
             } => {
                 if !app.is_initialized() {
-                    error("zv is not initialized. Run 'zv sync' first to set up directories and the zv binary.");
+                    error(
+                        "zv is not initialized. Run 'zv sync' first to set up directories and the zv binary.",
+                    );
                     std::process::exit(1);
                 }
                 match version {
-                    Some(version) => r#use::use_version(version, &mut app, force_ziglang).await,
+                    Some(version) => {
+                        r#use::use_version(version, &mut app, force_ziglang, zls, download).await
+                    }
                     None => {
-                        error("Version must be specified. e.g., `zv use latest` or `zv use 0.15.1`");
+                        error(
+                            "Version must be specified. e.g., `zv use latest` or `zv use 0.15.1`",
+                        );
                         std::process::exit(2);
                     }
                 }
@@ -330,12 +369,16 @@ impl Commands {
             Commands::Install {
                 versions,
                 force_ziglang,
+                zls,
+                download,
             } => {
                 if !app.is_initialized() {
-                    error("zv is not initialized. Run 'zv sync' first to set up directories and the zv binary.");
+                    error(
+                        "zv is not initialized. Run 'zv sync' first to set up directories and the zv binary.",
+                    );
                     std::process::exit(1);
                 }
-                install::install_versions(versions, &mut app, force_ziglang).await
+                install::install_versions(versions, &mut app, force_ziglang, zls, download).await
             }
             Commands::List {
                 all,
@@ -354,6 +397,11 @@ impl Commands {
             Commands::Sync => sync::sync(&mut app).await,
             Commands::Uninstall => uninstall::uninstall(&mut app).await,
             Commands::Update { force, rc } => update::update_zv(&mut app, force, rc).await,
+            Commands::Zls {
+                download,
+                force,
+                update,
+            } => zls_cmd::provision_zls(&mut app, download, force, update).await,
         }
     }
 }
@@ -573,6 +621,7 @@ fn print_welcome_message(app: App) {
         "sync",
         "Synchronize index, mirrors list and metadata for zv",
     );
+    print_command("zls", "Provision ZLS for the currently active Zig version");
     print_command(
         "uninstall",
         "Uninstall zv and remove all installed Zig versions",

@@ -12,6 +12,8 @@ pub(crate) async fn use_version(
     zig_version: ZigVersion,
     app: &mut App,
     force_ziglang: bool,
+    provision_zls: bool,
+    zls_download: bool,
 ) -> Result<()> {
     // Resolve ZigVersion to a validated ResolvedZigVersion
     // This already does all the validation and fetching we need
@@ -55,6 +57,29 @@ pub(crate) async fn use_version(
         "✅ Active zig version set: {}",
         Paint::blue(&resolved_version.version().to_string())
     );
+
+    if provision_zls {
+        let active_zig = app
+            .get_active_version()
+            .ok_or_else(|| eyre!("No active Zig version after `zv use` completed"))?;
+        let active_zig_exe = app
+            .toolchain_manager
+            .get_active_install()
+            .map(|zi| zi.path.join(crate::Shim::Zig.executable_name()))
+            .ok_or_else(|| eyre!("No active Zig installation path found after `zv use`"))?;
+
+        crate::cli::zls_cmd::provision_zls_for(
+            app,
+            &active_zig,
+            &active_zig_exe,
+            zls_download,
+            false,
+            false,
+            true,
+        )
+        .await?;
+    }
+
     Ok(())
 }
 

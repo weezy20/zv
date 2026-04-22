@@ -2,16 +2,14 @@ use crate::app::constants::ZIG_DOWNLOAD_INDEX_JSON;
 use crate::app::utils::{ProgressHandle, remove_files, verify_checksum, zv_agent};
 use crate::{NetErr, ZvError};
 use color_eyre::eyre::{Result, WrapErr, eyre};
-use std::{
-    path::PathBuf,
-    time::Duration,
-};
+use std::{path::PathBuf, time::Duration};
 
 use crate::types::{ResolvedZigVersion, TargetTriple};
 use std::collections::HashMap;
 pub mod mirror;
 use mirror::*;
 mod zig_index;
+pub mod zls;
 pub use zig_index::*;
 mod download;
 use download::{move_to_final_location, stream_download_file};
@@ -592,6 +590,7 @@ impl ZvNetwork {
         tarball_url: &str,
         minisig_url: &str,
         zig_tarball: &str,
+        minisign_pubkey: &str,
         expected_shasum: Option<&str>,
         expected_size: Option<u64>,
     ) -> Result<ZigDownload, ZvError> {
@@ -675,6 +674,7 @@ impl ZvNetwork {
         }
 
         crate::app::minisign::verify_minisign_signature(
+            minisign_pubkey,
             &zig_tarball,
             &final_tarball_path,
             &final_minisig_path,

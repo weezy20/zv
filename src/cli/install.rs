@@ -13,6 +13,8 @@ pub(crate) async fn install_versions(
     zig_versions: Vec<ZigVersion>,
     app: &mut App,
     force_ziglang: bool,
+    provision_zls: bool,
+    zls_download: bool,
 ) -> Result<()> {
     if zig_versions.is_empty() {
         return Err(eyre!(
@@ -103,6 +105,8 @@ pub(crate) async fn install_versions(
             app,
             force_ziglang,
             should_set_active,
+            provision_zls,
+            zls_download,
         )
         .await
         {
@@ -161,12 +165,30 @@ async fn install_resolved_version(
     app: &mut App,
     force_ziglang: bool,
     set_active: bool,
+    provision_zls: bool,
+    zls_download: bool,
 ) -> Result<()> {
     // Check if already installed
     if let Some(p) = app.check_installed(resolved_version) {
         if set_active {
-            app.set_active_version(resolved_version, Some(p)).await?;
+            app.set_active_version(resolved_version, Some(p.clone()))
+                .await?;
         }
+
+        if provision_zls {
+            let zig_version = ZigVersion::Semver(resolved_version.version().clone());
+            crate::cli::zls_cmd::provision_zls_for(
+                app,
+                &zig_version,
+                &p,
+                zls_download,
+                false,
+                false,
+                set_active,
+            )
+            .await?;
+        }
+
         // Version already installed, just return success
         return Ok(());
     }
@@ -196,6 +218,24 @@ async fn install_resolved_version(
     // Set as active if this is the special case (single version, no prior installations)
     if set_active {
         app.set_active_version(resolved_version, None).await?;
+    }
+
+    if provision_zls {
+        let zig_exe = app
+            .check_installed(resolved_version)
+            .ok_or_else(|| eyre!("Installed Zig binary not found for {}", resolved_version))?;
+
+        let zig_version = ZigVersion::Semver(resolved_version.version().clone());
+        crate::cli::zls_cmd::provision_zls_for(
+            app,
+            &zig_version,
+            &zig_exe,
+            zls_download,
+            false,
+            false,
+            set_active,
+        )
+        .await?;
     }
 
     Ok(())
