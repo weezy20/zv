@@ -26,6 +26,85 @@ It also doubles as a project template starter, providing multiple variants of a 
 
 `zv` uses randomized ranked community mirrors for downloads (can be overridden to use ziglang.org with -f), as that's the official recommendation, with `minisign` and `shasum` verification done before any toolchain is installed. Future versions should bring in an optimization to rank the mirrors based on speed so that faster mirrors are selected more often without user intervention.
 
+## Usage
+
+## Use `zv` for project creation:
+
+```sh
+zv init [project_name]                 # Create a new Zig project with a name
+zv init                                # Create a new Zig project in the current working directory
+zv init --zig | -z                     # Create a new Zig project using the standard template provided by `zig init`
+# Create a zig project with build.zig.zon:
+zv init -p | --zon | --package  <?name>      # Create a zig project in current directory with build.zig.zon or with name if provided
+# Note: this requires an active zig version >= 0.12.0 where build.zig.zon support was introduced
+
+```
+>Note: `zv init` will use the `build.zig` that's present in [templates/build.zig](templates/lean_build.zig) which is checked to work against minimum zig version specified in [templates/.zigversion](templates/.zigversion). If you want to use a different zig version, set it as active zig and use `zv init -z` or `zig init` directly.
+
+## Use `zv` as your Zig compiler toolchain manager:
+
+```sh
+# Version selection - basic usage
+# pass in -f or --force-ziglang to download using `ziglang.org` instead of community mirrors (default & recommended)
+zv use <version | master | stable | latest> # Select a Zig version to use. Can be a semver, master (branch)
+zv use 0.15.0                               # Use a specific semantic version
+zv use 0.15 -f                              # Use a version (auto-completes to 0.15.0) & downloads from `ziglang.org` due to -f
+zv use master                               # Use master branch build (queries network to find the latest master build)
+zv use stable                               # Use latest stable release (refers to cached index)
+zv use latest                               # Use latest stable release (queries network to fetch the latest stable)
+zv install <version,*> [-f ]                # Install one or more Zig versions without switching to it. Use -f to download from ziglang.org instead of community mirrors.
+zv i 0.16.0,0.15.0,master                   # Install multiple versions at once using a comma-separated list
+
+# Per-project Zig config
+zig +<version> [...zig args]            # Run Zig using a specific <version> (fetches and downloads version if not present locally)
+zig +master [...zig args]               # Run Zig using master build. (If already cached, no download, but a network request is made to verify version)
+zig [...zig args]                       # Uses current configured Zig or prefers version from `.zigversion` file in the repository adjacent to `build.zig`.
+
+# Management commands
+zv list  | ls                          # List installed Zig versions
+zv clean | rm                          # Remove Zig versions interactively. Additionally cleans up downloads cache, temporary download artifacts.
+zv clean | rm <version | all>          # Clean up all zv-managed installations using `all` or just a single one (e.g., zv clean 0.15).
+zv clean 0.15,0.15.0                   # Clean up multiple Zig installations using a comma-separated list.
+zv clean --except <version,*>          # Clean up every version except the version mentioned as argument to --except <version> where <version> maybe a comma separated list of ZigVersions. E.g. (zv clean --except 0.15.1,master@0.17.0-dev.565+f50c64797,stable@0.16.0)
+zv rm master                           # Clean up the `master` branch toolchain.
+zv rm master --outdated                # Clean up any older master versions in the master folder that don't match latest `master`
+zv setup                               # Set up shell environment for zv with interactive prompts (use --no-interactive for automation)
+zv sync                                # Resync community mirrors list from [ziglang.org/download/community-mirrors.txt]; also force resync of index to fetch latest nightly builds. Replaces the zv binary in data dir if outdated against current invocation.
+zv upgrade | update                    # Update zv to the latest release only if present in GH Releases: https://github.com/weezy20/zv/releases
+zv stats                               # Bird's-eye view of disk usage: data/config/cache dirs, active Zig/ZLS, download staleness, $PATH diagnostics
+zv stats --verbose | -v                # Also list individual tarballs in downloads/
+zv stats --json                        # Machine-readable JSON
+zv stats --no-color                    # Disable ANSI colors (for piping)
+zv help                                # Detailed instructions for zv. Use `--help` for long help or `-h` for short help with a subcommand.
+zv uninstall                           # Uninstall zv completely by attempting to remove ZV_DIR.
+```
+
+## ZLS (Zig Language Server) provisioning
+
+`zv` can automatically provision a ZLS build compatible with your active Zig version.
+
+```sh
+zv zls                                # Provision ZLS for the active Zig version (builds from source by default)
+zv zls -d | --download                # Download a prebuilt ZLS binary instead of building from source
+zv zls --force                        # Re-provision even if a compatible ZLS is already installed
+zv zls --update                       # Re-provision and refresh compatibility resolution
+```
+
+You can also provision ZLS inline when installing or switching Zig versions:
+
+```sh
+zv use 0.16.0 --zls                   # Switch to 0.16.0 and provision matching ZLS (builds from source)
+zv use 0.16.0 --zls -d                # Same, but downloads a prebuilt ZLS binary
+zv install 0.16.0,0.15.0 --zls        # Install versions and provision ZLS for each
+zv install 0.16.0 --zls -d            # Install and download prebuilt ZLS
+```
+
+`minisign` verification is done using [jedisct1/rust-minisign-verify](https://github.com/jedisct1/rust-minisign-verify) — a small minisign library in pure Rust.
+
+It also supports `NO_COLOR` for non-TTY environments.
+
+I hope you enjoy using it! ♥
+
 ## Installation
 
 There are two primary paths: fetch a prebuilt binary or build from source. Either way, finish with `zv sync` — that's all you need. `zv setup` is a legacy fallback covered at the end.
@@ -95,6 +174,19 @@ To preview these changes without applying them:
 zv setup --dry-run
 ```
 
+All `zv` data follows the XDG Base Directory Specification on Linux/macOS:
+
+**Default locations (Linux/macOS):**
+- Data (binaries, versions): `$HOME/.local/share/zv`
+- Config (`zv.toml`): `$HOME/.config/zv`
+- Cache (index, mirrors, downloads): `$HOME/.cache/zv`
+- Public bin (symlinks): `$HOME/.local/bin`
+
+**Default locations (Windows):**
+- All data: `%USERPROFILE%\.zv`
+
+You can override the data directory by setting the `ZV_DIR` environment variable (falls back to pre-XDG self-contained layout).
+
 ## Updating `zv` 
 
 **Simple update (Recommended):**
@@ -129,96 +221,8 @@ zv sync
 ```
 </details>
 
-## Usage
-
-All `zv` data follows the XDG Base Directory Specification on Linux/macOS:
-
-**Default locations (Linux/macOS):**
-- Data (binaries, versions): `$HOME/.local/share/zv`
-- Config (`zv.toml`): `$HOME/.config/zv`
-- Cache (index, mirrors, downloads): `$HOME/.cache/zv`
-- Public bin (symlinks): `$HOME/.local/bin`
-
-**Default locations (Windows):**
-- All data: `%USERPROFILE%\.zv`
-
-You can override the data directory by setting the `ZV_DIR` environment variable (falls back to pre-XDG self-contained layout).
-
-## Use `zv` for project creation:
-
-```sh
-zv init [project_name]                 # Create a new Zig project with a name
-zv init                                # Create a new Zig project in the current working directory
-zv init --zig | -z                     # Create a new Zig project using the standard template provided by `zig init`
-# Create a zig project with build.zig.zon:
-zv init -p | --zon | --package  <?name>      # Create a zig project in current directory with build.zig.zon or with name if provided
-# Note: this requires an active zig version >= 0.12.0 where build.zig.zon support was introduced
-
-```
->Note: `zv init` will use the `build.zig` that's present in [templates/build.zig](templates/lean_build.zig) which is checked to work against minimum zig version specified in [templates/.zigversion](templates/.zigversion). If you want to use a different zig version, set it as active zig and use `zv init -z` or `zig init` directly.
-
-## Use `zv` as your Zig compiler toolchain manager:
-
-```sh
-# Version selection - basic usage
-# pass in -f or --force-ziglang to download using `ziglang.org` instead of community mirrors (default & recommended)
-zv use <version | master | stable | latest> # Select a Zig version to use. Can be a semver, master (branch)
-zv use 0.15.0                               # Use a specific semantic version
-zv use 0.15 -f                              # Use a version (auto-completes to 0.15.0) & downloads from `ziglang.org` due to -f
-zv use master                               # Use master branch build (queries network to find the latest master build)
-zv use stable                               # Use latest stable release (refers to cached index)
-zv use latest                               # Use latest stable release (queries network to fetch the latest stable)
-zv install <version,*> [-f ]                # Install one or more Zig versions without switching to it. Use -f to download from ziglang.org instead of community mirrors.
-zv i 0.16.0,0.15.0,master                   # Install multiple versions at once using a comma-separated list
-
-# Per-project Zig config
-zig +<version> [...zig args]            # Run Zig using a specific <version> (fetches and downloads version if not present locally)
-zig +master [...zig args]               # Run Zig using master build. (If already cached, no download, but a network request is made to verify version)
-zig [...zig args]                       # Uses current configured Zig or prefers version from `.zigversion` file in the repository adjacent to `build.zig`.
-
-# Management commands
-zv list  | ls                          # List installed Zig versions
-zv clean | rm                          # Remove Zig versions interactively. Additionally cleans up downloads cache, temporary download artifacts.
-zv clean | rm <version | all>          # Clean up all zv-managed installations using `all` or just a single one (e.g., zv clean 0.15).
-zv clean 0.15,0.15.0                   # Clean up multiple Zig installations using a comma-separated list.
-zv clean --except <version,*>          # Clean up every version except the version mentioned as argument to --except <version> where <version> maybe a comma separated list of ZigVersions. E.g. (zv clean --except 0.15.1,master@0.17.0-dev.565+f50c64797,stable@0.16.0)
-zv rm master                           # Clean up the `master` branch toolchain.
-zv rm master --outdated                # Clean up any older master versions in the master folder that don't match latest `master`
-zv setup                               # Set up shell environment for zv with interactive prompts (use --no-interactive for automation)
-zv sync                                # Resync community mirrors list from [ziglang.org/download/community-mirrors.txt]; also force resync of index to fetch latest nightly builds. Replaces the zv binary in data dir if outdated against current invocation.
-zv upgrade | update                    # Update zv to the latest release only if present in GH Releases: https://github.com/weezy20/zv/releases
-zv help                                # Detailed instructions for zv. Use `--help` for long help or `-h` for short help with a subcommand.
-zv uninstall                           # Uninstall zv completely by attempting to remove ZV_DIR.
-```
-
-## ZLS (Zig Language Server) provisioning
-
-`zv` can automatically provision a ZLS build compatible with your active Zig version.
-
-```sh
-zv zls                                # Provision ZLS for the active Zig version (builds from source by default)
-zv zls -d | --download                # Download a prebuilt ZLS binary instead of building from source
-zv zls --force                        # Re-provision even if a compatible ZLS is already installed
-zv zls --update                       # Re-provision and refresh compatibility resolution
-```
-
-You can also provision ZLS inline when installing or switching Zig versions:
-
-```sh
-zv use 0.16.0 --zls                   # Switch to 0.16.0 and provision matching ZLS (builds from source)
-zv use 0.16.0 --zls -d                # Same, but downloads a prebuilt ZLS binary
-zv install 0.16.0,0.15.0 --zls        # Install versions and provision ZLS for each
-zv install 0.16.0 --zls -d            # Install and download prebuilt ZLS
-```
-
-`minisign` verification is done using [jedisct1/rust-minisign-verify](https://github.com/jedisct1/rust-minisign-verify) — a small minisign library in pure Rust.
-
-It also supports `NO_COLOR` for non-TTY environments.
-
-I hope you enjoy using it! ♥
-
-
 ---
+
 ### Customizing ZV behaviour:
 
 ### Environment Variables for customizing zv

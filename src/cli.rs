@@ -11,6 +11,7 @@ mod init;
 mod install;
 mod list;
 mod setup;
+mod stats;
 pub mod sync; // Make sync public so other modules can use check_and_update_zv_binary
 mod uninstall;
 mod update;
@@ -285,6 +286,19 @@ pub enum Commands {
     /// Synchronize index, mirrors list and metadata for zv. Also replaces `ZV_DIR/bin/zv` if outdated against current invocation.
     Sync,
 
+    /// Show files, folders and disk usage managed by zv on this system
+    Stats {
+        /// Include file-level details under the downloads/ and zls-src/ caches
+        #[arg(long, short = 'v')]
+        verbose: bool,
+        /// Emit machine-readable JSON instead of the colorized tree
+        #[arg(long)]
+        json: bool,
+        /// Disable ANSI colors even when stdout is a TTY
+        #[arg(long)]
+        no_color: bool,
+    },
+
     /// Uninstall zv and remove all installed Zig versions
     Uninstall,
 
@@ -394,6 +408,9 @@ impl Commands {
                 dry_run,
                 no_interactive,
             } => setup::setup_shell(&mut app, using_env, dry_run, no_interactive).await,
+            Commands::Stats { verbose, json, no_color } => {
+                stats::run(&app, verbose, json, no_color).await
+            }
             Commands::Sync => sync::sync(&mut app).await,
             Commands::Uninstall => uninstall::uninstall(&mut app).await,
             Commands::Update { force, rc } => update::update_zv(&mut app, force, rc).await,
@@ -622,6 +639,10 @@ fn print_welcome_message(app: App) {
         "Synchronize index, mirrors list and metadata for zv",
     );
     print_command("zls", "Provision ZLS for the currently active Zig version");
+    print_command(
+        "stats",
+        "Show files, folders and disk usage managed by zv on this system",
+    );
     print_command(
         "uninstall",
         "Uninstall zv and remove all installed Zig versions",
