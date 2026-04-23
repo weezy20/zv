@@ -203,10 +203,7 @@ zv upgrade         # Alias for update
 zv update --rc     # Update to latest pre-release (release candidate) version
 ```
 
-
-
-<details>
-<summary>Alternative update methods:</summary>
+**Update from source code:** 
 
 If you have the repo cloned or are using a cargo-installed binary:
 ```sh
@@ -219,8 +216,6 @@ zv sync
 # or if you already have ZV_DIR/bin in path
 ~/.cargo/bin/zv sync # $CARGO_HOME/bin/zv sync
 ```
-</details>
-
 ---
 
 ### Customizing ZV behaviour:
