@@ -1,4 +1,4 @@
-use crate::app::migrations;
+use crate::app::config;
 use crate::shell::path_utils::check_dir_in_path_for_shell;
 use crate::tools::{ZvPaths, canonicalize};
 use crate::{App, ResolvedZigVersion, Result, Shell};
@@ -106,7 +106,7 @@ fn collect(app: &App, verbose: bool) -> StatsReport {
     let layout = detect_layout(paths);
     let fold_config = paths.config_dir == paths.data_dir;
     let fold_cache = paths.cache_dir == paths.data_dir;
-    let zls_cfg = migrations::load_zv_config(&paths.config_file).ok();
+    let zls_cfg = config::load_zv_config(&paths.config_file).ok();
 
     let mut groups = Vec::new();
     groups.push(collect_data(app, fold_config, fold_cache, &zls_cfg, verbose));
@@ -148,7 +148,7 @@ fn collect_data(
     app: &App,
     fold_config: bool,
     fold_cache: bool,
-    zls_cfg: &Option<migrations::ZvConfig>,
+    zls_cfg: &Option<config::ZvConfig>,
     verbose: bool,
 ) -> Group {
     let paths = &app.paths;
@@ -225,7 +225,7 @@ fn collect_data(
     Group { title: "Data", root: paths.data_dir.clone(), root_exists: paths.data_dir.is_dir(), size, entries }
 }
 
-fn collect_config(paths: &ZvPaths, zls_cfg: &Option<migrations::ZvConfig>) -> Group {
+fn collect_config(paths: &ZvPaths, zls_cfg: &Option<config::ZvConfig>) -> Group {
     let entry = toml_entry(&paths.config_file, zls_cfg);
     let size = entry.size;
     Group {
@@ -237,7 +237,7 @@ fn collect_config(paths: &ZvPaths, zls_cfg: &Option<migrations::ZvConfig>) -> Gr
     }
 }
 
-fn toml_entry(config_file: &Path, zls_cfg: &Option<migrations::ZvConfig>) -> Entry {
+fn toml_entry(config_file: &Path, zls_cfg: &Option<config::ZvConfig>) -> Entry {
     let size = std::fs::metadata(config_file).map(|m| m.len()).unwrap_or(0);
     let annotation = zls_cfg.as_ref().map(|c| {
         let active = c.active_zig.as_ref().map(|a| a.version.as_str()).unwrap_or("none");
@@ -444,7 +444,7 @@ fn version_entries(app: &App) -> (Vec<Entry>, u64) {
     (entries, total)
 }
 
-fn zls_build_entries(zls_dir: &Path, zls_cfg: &Option<migrations::ZvConfig>) -> (Vec<Entry>, u64) {
+fn zls_build_entries(zls_dir: &Path, zls_cfg: &Option<config::ZvConfig>) -> (Vec<Entry>, u64) {
     if !zls_dir.is_dir() {
         return (vec![], 0);
     }

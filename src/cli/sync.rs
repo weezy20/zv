@@ -486,7 +486,7 @@ async fn create_public_bin_symlinks(internal_bin: &Path, public_bin: &Path) -> c
 /// later runs `zv zls`, the provisioning path can use the cached mapping without
 /// another API round-trip.
 async fn backfill_zls_mappings(app: &crate::App) {
-    use crate::app::migrations::{ZlsConfig, ZvConfig, load_zv_config, save_zv_config};
+    use crate::app::config::{ZlsConfig, ZvConfig, load_zv_config, save_zv_config};
     use futures::stream::{self, StreamExt};
     use std::collections::{HashMap, HashSet};
     use yansi::Paint;

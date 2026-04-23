@@ -1,110 +1,68 @@
-//! Migration system for zv
+//! On-disk layout migrations for zv.
 //!
-//! Handles data migrations between different versions of zv.
-//! For 0.9.0 onwards we have to following migrations:
+//! Handles one-shot data migrations between different versions of zv.
+//! For 0.9.0 onwards we have the following migrations:
 //! - Flattening versions/master/* → versions/*
 //! - Migrating active.json → zv.toml
 //! - Text file for tracking master version (cache)
 
+use crate::app::config::{ActiveZig, ZvConfig, load_zv_config, save_zv_config};
 use crate::app::constants::ZV_MASTER_FILE;
 use color_eyre::eyre::{Context, Result};
 use semver::Version;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use serde::Deserialize;
 use std::fs as sync_fs;
 use std::path::Path;
 use tokio::fs;
 use yansi::Paint;
-
-/// zv configuration stored in zv.toml
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ZvConfig {
-    /// Current zv version
-    pub version: String,
-    /// Active Zig installation (migrated from active.json)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_zig: Option<ActiveZig>,
-    /// Tracked master version (local-master-zig)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub local_master_zig: Option<String>,
-    /// Zig -> ZLS compatibility mappings.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub zls: Option<ZlsConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ZlsConfig {
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub mappings: HashMap<String, String>,
-}
-
-/// Active Zig installation information (migrated from active.json)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActiveZig {
-    /// Version of active Zig installation
-    pub version: String,
-    /// Path to active Zig installation
-    pub path: String,
-    /// Whether this installation is from master
-    pub is_master: bool,
-}
-
-/// Migration errors
-#[derive(Debug, thiserror::Error)]
-pub enum MigrationError {
-    #[error("Failed to read zv.toml: {0}")]
-    ReadConfig(#[source] std::io::Error),
-
-    #[error("Failed to write zv.toml: {0}")]
-    WriteConfig(#[source] std::io::Error),
-
-    #[error("Failed to parse zv.toml: {0}")]
-    ParseConfig(#[source] toml::de::Error),
-}
 
 /// Check if migration is needed and perform it if so
 pub async fn migrate(zv_root: &Path, config_file: &Path) -> Result<()> {
     let current_version = env!("CARGO_PKG_VERSION");
     let current_version_parsed =
         Version::parse(current_version).expect("CARGO_PKG_VERSION should be valid semver");
+    let legacy_migration_version = Version::new(0, 9, 0);
 
     let zv_toml_path = config_file;
 
-    // Check if migration is needed
-    let needs_migration = if !zv_toml_path.exists() {
-        // This is true for v0.9.0 onwards where zv.toml is introduced
-        tracing::debug!("zv.toml not found, migration needed");
-        true
+    let existing_config = if !zv_toml_path.exists() {
+        tracing::debug!("zv.toml not found, legacy migration needed");
+        None
     } else {
         match load_zv_config(&zv_toml_path) {
-            Ok(config) => {
-                let config_version =
-                    Version::parse(&config.version).unwrap_or_else(|_| Version::new(0, 8, 0));
-
-                if config_version < current_version_parsed {
-                    tracing::debug!(
-                        "Config version {} < current version {}, migration needed",
-                        config_version,
-                        current_version
-                    );
-                    true
-                } else {
-                    tracing::debug!(
-                        "Config version {} >= current version {}, no migration needed",
-                        config_version,
-                        current_version
-                    );
-                    false
-                }
-            }
+            Ok(config) => Some(config),
             Err(e) => {
                 tracing::warn!("Failed to load zv.toml, will recreate: {}", e);
-                true
+                None
             }
         }
     };
 
-    if needs_migration {
+    // The only historical layout migration is the v0.8.x -> v0.9.0 move to zv.toml.
+    let needs_legacy_migration = match existing_config.as_ref() {
+        None => true,
+        Some(config) => {
+            let config_version =
+                Version::parse(&config.version).unwrap_or_else(|_| Version::new(0, 8, 0));
+
+            if config_version < legacy_migration_version {
+                tracing::debug!(
+                    "Config version {} < legacy migration version {}, migration needed",
+                    config_version,
+                    legacy_migration_version
+                );
+                true
+            } else {
+                tracing::debug!(
+                    "Config version {} already has v0.9+ layout, no legacy migration needed",
+                    config_version
+                );
+                false
+            }
+        }
+    };
+
+    if needs_legacy_migration {
         println!(
             "Performing zv  -> {} migrations",
             Paint::green(current_version)
@@ -113,71 +71,56 @@ pub async fn migrate(zv_root: &Path, config_file: &Path) -> Result<()> {
         // Perform 0.8.0 -> 0.9.0 migration
         let migrated_active_zig = migrate_0_8_0_to_0_9_0(zv_root).await?;
 
-        // Check for existing master installation to migrate local_master_zig
-        let mut local_master_zig = None;
-        let master_file = zv_root.join(ZV_MASTER_FILE);
-        if master_file.exists() {
-            if let Ok(version) = std::fs::read_to_string(&master_file) {
-                let version = version.trim().to_string();
-                if !version.is_empty() {
-                    tracing::debug!("Migrating local_master_zig to {}", version);
-                    local_master_zig = Some(version);
-                }
-            }
-        }
-
         // Save updated config with migrated active zig (if any)
         let config = ZvConfig {
             version: current_version.to_string(),
             active_zig: migrated_active_zig,
-            local_master_zig,
+            local_master_zig: read_local_master_zig(zv_root),
             zls: None,
         };
 
         save_zv_config(&zv_toml_path, &config)?;
-    } else {
-        // Run migration for existing zv.toml if needed (e.g. adding local_master_zig to 0.9.0)
-        if let Ok(mut config) = load_zv_config(&zv_toml_path) {
-            if config.local_master_zig.is_none() {
-                let master_file = zv_root.join(ZV_MASTER_FILE);
-                if master_file.exists() {
-                    if let Ok(version) = std::fs::read_to_string(&master_file) {
-                        let version = version.trim().to_string();
-                        if !version.is_empty() {
-                            tracing::debug!("Migrating local_master_zig to {}", version);
-                            config.local_master_zig = Some(version);
-                            if let Err(e) = save_zv_config(&zv_toml_path, &config) {
-                                tracing::error!("Failed to save migrated config: {}", e);
-                            }
-                        }
-                    }
-                }
+    } else if let Some(mut config) = existing_config {
+        let mut changed = false;
+
+        if let Ok(config_version) = Version::parse(&config.version) {
+            if config_version < current_version_parsed {
+                tracing::debug!(
+                    "Updating config version {} -> {}",
+                    config_version,
+                    current_version
+                );
+                config.version = current_version.to_string();
+                changed = true;
             }
+        }
+
+        if config.local_master_zig.is_none()
+            && let Some(version) = read_local_master_zig(zv_root)
+        {
+            tracing::debug!("Migrating local_master_zig to {}", version);
+            config.local_master_zig = Some(version);
+            changed = true;
+        }
+
+        if changed && let Err(e) = save_zv_config(&zv_toml_path, &config) {
+            tracing::error!("Failed to save migrated config: {}", e);
         }
     }
 
     Ok(())
 }
 
-/// Load zv configuration from zv.toml
-pub fn load_zv_config(path: &Path) -> Result<ZvConfig, MigrationError> {
-    let contents = sync_fs::read_to_string(path).map_err(MigrationError::ReadConfig)?;
+fn read_local_master_zig(zv_root: &Path) -> Option<String> {
+    let master_file = zv_root.join(ZV_MASTER_FILE);
+    if !master_file.exists() {
+        return None;
+    }
 
-    toml::from_str(&contents).map_err(MigrationError::ParseConfig)
-}
-
-/// Save zv configuration to zv.toml
-pub fn save_zv_config(path: &Path, config: &ZvConfig) -> Result<(), MigrationError> {
-    let contents = toml::to_string_pretty(config).map_err(|e| {
-        MigrationError::WriteConfig(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Failed to serialize config: {}", e),
-        ))
-    })?;
-
-    sync_fs::write(path, contents).map_err(MigrationError::WriteConfig)?;
-
-    Ok(())
+    sync_fs::read_to_string(&master_file)
+        .ok()
+        .map(|version| version.trim().to_string())
+        .filter(|version| !version.is_empty())
 }
 
 /// Migration from 0.8.0 to 0.9.0
@@ -364,5 +307,53 @@ pub async fn update_master_file(master_file: &Path, version: &str) {
         Err(e) => {
             tracing::error!("Failed to update master file: {}", e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::config::ZlsConfig;
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn preserves_v09_plus_config_when_bumping_config_version() {
+        let temp = tempfile::tempdir().unwrap();
+        let zv_root = temp.path();
+        let config_file = zv_root.join("zv.toml");
+
+        sync_fs::write(zv_root.join(ZV_MASTER_FILE), "0.15.1-dev\n").unwrap();
+
+        let mut mappings = HashMap::new();
+        mappings.insert("0.14.0".to_string(), "0.14.0-zls".to_string());
+
+        save_zv_config(
+            &config_file,
+            &ZvConfig {
+                version: "0.11.0".to_string(),
+                active_zig: Some(ActiveZig {
+                    version: "0.14.0".to_string(),
+                    path: "/tmp/zv/versions/0.14.0".to_string(),
+                    is_master: false,
+                }),
+                local_master_zig: None,
+                zls: Some(ZlsConfig { mappings }),
+            },
+        )
+        .unwrap();
+
+        migrate(zv_root, &config_file).await.unwrap();
+
+        let config = load_zv_config(&config_file).unwrap();
+        assert_eq!(config.version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(config.local_master_zig.as_deref(), Some("0.15.1-dev"));
+
+        let active_zig = config.active_zig.unwrap();
+        assert_eq!(active_zig.version, "0.14.0");
+        assert_eq!(active_zig.path, "/tmp/zv/versions/0.14.0");
+        assert!(!active_zig.is_master);
+
+        let zls = config.zls.unwrap();
+        assert_eq!(zls.mappings.get("0.14.0").unwrap(), "0.14.0-zls");
     }
 }

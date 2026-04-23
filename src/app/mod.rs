@@ -1,4 +1,5 @@
 pub mod constants;
+pub(crate) mod config;
 pub(crate) mod migrations;
 pub(crate) mod network;
 pub(crate) mod toolchain;
@@ -292,7 +293,7 @@ impl App {
 
     pub fn get_zls_for_zig(&self, zig_version: &ZigVersion) -> Option<(String, PathBuf)> {
         let key = Self::zls_mapping_key(zig_version)?;
-        let config = crate::app::migrations::load_zv_config(&self.paths.config_file).ok()?;
+        let config = crate::app::config::load_zv_config(&self.paths.config_file).ok()?;
         let zls_version = config.zls?.mappings.get(&key)?.clone();
         let zls_path = self
             .paths
@@ -318,8 +319,8 @@ impl App {
             ))
         })?;
 
-        let mut config = crate::app::migrations::load_zv_config(&self.paths.config_file).unwrap_or(
-            crate::app::migrations::ZvConfig {
+        let mut config = crate::app::config::load_zv_config(&self.paths.config_file).unwrap_or(
+            crate::app::config::ZvConfig {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 active_zig: None,
                 local_master_zig: None,
@@ -331,7 +332,7 @@ impl App {
         let mut zls_config = config
             .zls
             .take()
-            .unwrap_or(crate::app::migrations::ZlsConfig {
+            .unwrap_or(crate::app::config::ZlsConfig {
                 mappings: HashMap::new(),
             });
         zls_config
@@ -339,7 +340,7 @@ impl App {
             .insert(key.to_string(), zls_version.to_string());
         config.zls = Some(zls_config);
 
-        crate::app::migrations::save_zv_config(&self.paths.config_file, &config)
+        crate::app::config::save_zv_config(&self.paths.config_file, &config)
             .map_err(|e| ZvError::General(eyre!("Failed to save zls mapping: {e}")))
     }
 
@@ -444,7 +445,7 @@ impl App {
         }
 
         let key = Self::zls_mapping_key(zig_version).unwrap_or_else(|| zig_version.to_string());
-        let config = crate::app::migrations::load_zv_config(&self.paths.config_file).ok();
+        let config = crate::app::config::load_zv_config(&self.paths.config_file).ok();
         let has_mapping = config
             .and_then(|c| c.zls)
             .is_some_and(|zls| zls.mappings.contains_key(&key));

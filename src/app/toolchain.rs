@@ -1,5 +1,5 @@
 use crate::app::constants::ZV_MASTER_FILE;
-use crate::app::migrations::ZvConfig;
+use crate::app::config::ZvConfig;
 use crate::{ArchiveExt, ResolvedZigVersion, Result, Shim, ZvError, app::utils::ProgressHandle};
 use color_eyre::eyre::{Context, eyre};
 use serde::{Deserialize, Serialize};
@@ -65,7 +65,7 @@ impl ToolchainManager {
 
             if let Some(ref zi) = fallback {
                 // Try to load existing config to preserve local_master_zig
-                let existing_config = crate::app::migrations::load_zv_config(&zv_config_file).ok();
+                let existing_config = crate::app::config::load_zv_config(&zv_config_file).ok();
                 let local_master = existing_config
                     .as_ref()
                     .and_then(|c| c.local_master_zig.clone());
@@ -74,7 +74,7 @@ impl ToolchainManager {
                 // Write fallback to zv.toml
                 let config = ZvConfig {
                     version: env!("CARGO_PKG_VERSION").to_string(),
-                    active_zig: Some(crate::app::migrations::ActiveZig {
+                    active_zig: Some(crate::app::config::ActiveZig {
                         version: zi.version.to_string(),
                         path: zi.path.to_string_lossy().to_string(),
                         is_master: zi.is_master,
@@ -83,7 +83,7 @@ impl ToolchainManager {
                     zls,
                 };
 
-                if let Err(e) = crate::app::migrations::save_zv_config(&zv_config_file, &config) {
+                if let Err(e) = crate::app::config::save_zv_config(&zv_config_file, &config) {
                     tracing::error!(target: TARGET, "Failed to write fallback active install to file: {}", e);
                 }
             }
@@ -93,7 +93,7 @@ impl ToolchainManager {
 
         // load last active install from zv.toml
         let active_install = if zv_config_file.is_file() {
-            match crate::app::migrations::load_zv_config(&zv_config_file) {
+            match crate::app::config::load_zv_config(&zv_config_file) {
                 Ok(config) => {
                     if let Some(ref active_zig) = config.active_zig {
                         // Parse version string
@@ -121,7 +121,7 @@ impl ToolchainManager {
                                         if let Some(ref mut az) = new_config.active_zig {
                                             az.is_master = install.is_master;
                                         }
-                                        if let Err(e) = crate::app::migrations::save_zv_config(
+                                        if let Err(e) = crate::app::config::save_zv_config(
                                             &zv_config_file,
                                             &new_config,
                                         ) {
@@ -187,7 +187,7 @@ impl ToolchainManager {
         let zv_config_path = zv_root.join("zv.toml");
 
         let local_master_version =
-            if let Ok(config) = crate::app::migrations::load_zv_config(&zv_config_path) {
+            if let Ok(config) = crate::app::config::load_zv_config(&zv_config_path) {
                 config.local_master_zig
             } else {
                 None
@@ -456,10 +456,10 @@ impl ToolchainManager {
 
         // Update local_master_zig if this is a master version
         if is_master {
-            if let Ok(mut config) = crate::app::migrations::load_zv_config(&self.zv_config_file) {
+            if let Ok(mut config) = crate::app::config::load_zv_config(&self.zv_config_file) {
                 config.local_master_zig = Some(version.to_string());
                 if let Err(e) =
-                    crate::app::migrations::save_zv_config(&self.zv_config_file, &config)
+                    crate::app::config::save_zv_config(&self.zv_config_file, &config)
                 {
                     tracing::error!(target: TARGET, "Failed to update local_master_zig: {}", e);
                 }
@@ -472,7 +472,7 @@ impl ToolchainManager {
                     zls: None,
                 };
                 if let Err(e) =
-                    crate::app::migrations::save_zv_config(&self.zv_config_file, &config)
+                    crate::app::config::save_zv_config(&self.zv_config_file, &config)
                 {
                     tracing::error!(target: TARGET, "Failed to create config with local_master_zig: {}", e);
                 }
@@ -506,7 +506,7 @@ impl ToolchainManager {
 
         // Write to zv.toml - preserve local_master_zig
         let mut config =
-            crate::app::migrations::load_zv_config(&self.zv_config_file).unwrap_or(ZvConfig {
+            crate::app::config::load_zv_config(&self.zv_config_file).unwrap_or(ZvConfig {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 active_zig: None,
                 local_master_zig: None,
@@ -514,13 +514,13 @@ impl ToolchainManager {
             });
 
         config.version = env!("CARGO_PKG_VERSION").to_string();
-        config.active_zig = Some(crate::app::migrations::ActiveZig {
+        config.active_zig = Some(crate::app::config::ActiveZig {
             version: install.version.to_string(),
             path: install.path.to_string_lossy().to_string(),
             is_master: install.is_master,
         });
 
-        crate::app::migrations::save_zv_config(&self.zv_config_file, &config)?;
+        crate::app::config::save_zv_config(&self.zv_config_file, &config)?;
         self.active_install = Some(install.clone());
 
         tracing::trace!(target: TARGET, %version, "Set active Zig version");
@@ -550,7 +550,7 @@ impl ToolchainManager {
 
         // Write to zv.toml - preserve local_master_zig
         let mut config =
-            crate::app::migrations::load_zv_config(&self.zv_config_file).unwrap_or(ZvConfig {
+            crate::app::config::load_zv_config(&self.zv_config_file).unwrap_or(ZvConfig {
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 active_zig: None,
                 local_master_zig: None,
@@ -558,13 +558,13 @@ impl ToolchainManager {
             });
 
         config.version = env!("CARGO_PKG_VERSION").to_string();
-        config.active_zig = Some(crate::app::migrations::ActiveZig {
+        config.active_zig = Some(crate::app::config::ActiveZig {
             version: zig_install.version.to_string(),
             path: zig_install.path.to_string_lossy().to_string(),
             is_master: zig_install.is_master,
         });
 
-        crate::app::migrations::save_zv_config(&self.zv_config_file, &config)?;
+        crate::app::config::save_zv_config(&self.zv_config_file, &config)?;
         self.active_install = Some(zig_install.clone());
         tracing::trace!(target: TARGET, version = ?rzv.version().to_string(), "Set active Zig completed");
         Ok(())
@@ -842,7 +842,7 @@ impl ToolchainManager {
     /// Clear the active version without setting a new one
     pub fn clear_active_version(&mut self) -> Result<()> {
         // Update config to remove active zig
-        if let Ok(config) = crate::app::migrations::load_zv_config(&self.zv_config_file) {
+        if let Ok(config) = crate::app::config::load_zv_config(&self.zv_config_file) {
             let updated_config = ZvConfig {
                 version: config.version,
                 active_zig: None,
@@ -851,7 +851,7 @@ impl ToolchainManager {
             };
 
             if let Err(e) =
-                crate::app::migrations::save_zv_config(&self.zv_config_file, &updated_config)
+                crate::app::config::save_zv_config(&self.zv_config_file, &updated_config)
             {
                 tracing::warn!(target: TARGET, "Failed to clear active zig from config: {}", e);
                 return Err(eyre!(e)
@@ -867,7 +867,7 @@ impl ToolchainManager {
                 zls: None,
             };
 
-            if let Err(e) = crate::app::migrations::save_zv_config(&self.zv_config_file, &config) {
+            if let Err(e) = crate::app::config::save_zv_config(&self.zv_config_file, &config) {
                 tracing::warn!(target: TARGET, "Failed to create config file: {}", e);
                 return Err(eyre!(e).wrap_err("Failed to create config file").into());
             }
@@ -946,16 +946,16 @@ impl ToolchainManager {
 
     /// Get the locally tracked master version string from config
     pub fn get_local_master_version(&self) -> Option<String> {
-        crate::app::migrations::load_zv_config(&self.zv_config_file)
+        crate::app::config::load_zv_config(&self.zv_config_file)
             .ok()
             .and_then(|c| c.local_master_zig)
     }
 
     /// Clear the locally tracked master version in config
     pub fn clear_local_master_version(&self) -> Result<()> {
-        if let Ok(mut config) = crate::app::migrations::load_zv_config(&self.zv_config_file) {
+        if let Ok(mut config) = crate::app::config::load_zv_config(&self.zv_config_file) {
             config.local_master_zig = None;
-            crate::app::migrations::save_zv_config(&self.zv_config_file, &config)
+            crate::app::config::save_zv_config(&self.zv_config_file, &config)
                 .map_err(|e| eyre!(e).into())
         } else {
             Ok(())
