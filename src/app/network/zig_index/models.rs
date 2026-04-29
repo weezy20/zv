@@ -124,6 +124,8 @@ pub struct CacheZigIndex {
     pub releases: Vec<CacheZigRelease>,
     /// Timestamp of when this index was last synced
     pub last_synced: Option<DateTime<Utc>>,
+    /// Timestamp of when master was last fetched from network
+    pub master_last_fetched: Option<DateTime<Utc>>,
 }
 
 /// Simplified TOML representation of a Zig release
@@ -259,6 +261,8 @@ pub struct ZigIndex {
     releases: BTreeMap<ResolvedZigVersion, ZigRelease>,
     /// Timestamp of when this index was last synced
     last_synced: Option<DateTime<Utc>>,
+    /// Timestamp of last successful network fetch for master
+    master_last_fetched: Option<DateTime<Utc>>,
 }
 
 impl ZigIndex {
@@ -267,6 +271,7 @@ impl ZigIndex {
         Self {
             releases: BTreeMap::new(),
             last_synced: None,
+            master_last_fetched: None,
         }
     }
 
@@ -274,10 +279,12 @@ impl ZigIndex {
     pub fn with_releases(
         releases: BTreeMap<ResolvedZigVersion, ZigRelease>,
         last_synced: Option<DateTime<Utc>>,
+        master_last_fetched: Option<DateTime<Utc>>,
     ) -> Self {
         Self {
             releases,
             last_synced,
+            master_last_fetched,
         }
     }
 
@@ -289,6 +296,38 @@ impl ZigIndex {
     /// Get the last sync timestamp
     pub fn last_synced(&self) -> Option<DateTime<Utc>> {
         self.last_synced
+    }
+
+    /// Get the master last-fetched timestamp
+    pub fn master_last_fetched(&self) -> Option<DateTime<Utc>> {
+        self.master_last_fetched
+    }
+
+    /// Check whether cached master metadata is still fresh for the given TTL (hours).
+    /// A future-dated stamp (clock skew, restored backup) is treated as stale so we re-probe.
+    pub fn is_master_fresh(&self, ttl_hours: i64) -> bool {
+        self.master_last_fetched()
+            .map(|ts| {
+                let elapsed = (Utc::now() - ts).num_hours();
+                elapsed >= 0 && elapsed < ttl_hours
+            })
+            .unwrap_or(false)
+    }
+
+    /// Record a successful network fetch for master
+    pub fn mark_master_fetched_now(&mut self) {
+        self.master_last_fetched = Some(Utc::now());
+    }
+
+    /// Overwrite the master-last-fetched stamp (used to preserve stamps across refreshes)
+    pub fn set_master_last_fetched(&mut self, ts: Option<DateTime<Utc>>) {
+        self.master_last_fetched = ts;
+    }
+
+    /// Upsert the master release payload in the index
+    pub fn upsert_master_release(&mut self, release: ZigRelease) {
+        self.releases
+            .insert(release.resolved_version().clone(), release);
     }
 
     /// Get the latest stable version
@@ -439,7 +478,9 @@ impl From<NetworkZigIndex> for ZigIndex {
             releases.insert(resolved_version, runtime_release);
         }
 
-        ZigIndex::with_releases(releases, Some(chrono::Utc::now()))
+        // master_last_fetched is intentionally None here; refresh_from_network sets it
+        // only when the master version actually changes vs. the previous in-memory state.
+        ZigIndex::with_releases(releases, Some(chrono::Utc::now()), None)
     }
 }
 
@@ -484,6 +525,7 @@ impl From<&ZigIndex> for CacheZigIndex {
         CacheZigIndex {
             releases: cache_releases,
             last_synced: runtime_index.last_synced,
+            master_last_fetched: runtime_index.master_last_fetched,
         }
     }
 }
@@ -549,6 +591,10 @@ impl From<CacheZigIndex> for ZigIndex {
             releases.insert(resolved_version, runtime_release);
         }
 
-        ZigIndex::with_releases(releases, cache_index.last_synced)
+        ZigIndex::with_releases(
+            releases,
+            cache_index.last_synced,
+            cache_index.master_last_fetched,
+        )
     }
 }

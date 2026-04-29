@@ -1,5 +1,5 @@
-pub mod constants;
 pub(crate) mod config;
+pub mod constants;
 pub(crate) mod migrations;
 pub(crate) mod network;
 pub(crate) mod toolchain;
@@ -39,6 +39,13 @@ pub static FETCH_TIMEOUT_SECS: LazyLock<u64> = LazyLock::new(|| {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(4)
+});
+/// 22 hours default TTL for master-version network probes
+pub static MASTER_CACHE_TTL_HOURS: LazyLock<i64> = LazyLock::new(|| {
+    std::env::var("ZV_MASTER_TTL_HOURS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(22)
 });
 /// Maximum number of retry attempts for downloads
 pub static MAX_RETRIES: LazyLock<u32> = LazyLock::new(|| {
@@ -329,12 +336,9 @@ impl App {
         );
         config.version = env!("CARGO_PKG_VERSION").to_string();
 
-        let mut zls_config = config
-            .zls
-            .take()
-            .unwrap_or(crate::app::config::ZlsConfig {
-                mappings: HashMap::new(),
-            });
+        let mut zls_config = config.zls.take().unwrap_or(crate::app::config::ZlsConfig {
+            mappings: HashMap::new(),
+        });
         zls_config
             .mappings
             .insert(key.to_string(), zls_version.to_string());

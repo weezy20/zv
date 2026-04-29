@@ -1,3 +1,4 @@
+use crate::app::MASTER_CACHE_TTL_HOURS;
 use crate::app::constants::ZIG_DOWNLOAD_INDEX_JSON;
 use crate::app::utils::{ProgressHandle, remove_files, verify_checksum, zv_agent};
 use crate::{NetErr, ZvError};
@@ -56,6 +57,19 @@ pub struct ZvNetwork {
 
 // === Initialize ZvNetwork ===
 impl ZvNetwork {
+    async fn persist_master_fetched_metadata(&mut self, master_release: Option<ZigRelease>) {
+        if let Err(e) = self
+            .index_manager
+            .stamp_master_fetched(master_release)
+            .await
+        {
+            tracing::debug!(
+                target: "zv::network::fetch_master_version",
+                "Failed to persist master fetch metadata: {e}"
+            );
+        }
+    }
+
     /// Initialize ZvNetwork with explicit paths for index, mirrors, and download cache.
     pub async fn new(
         index_file: PathBuf,
@@ -439,6 +453,34 @@ impl ZvNetwork {
         }
     }
     pub async fn fetch_master_version(&mut self) -> Result<ZigRelease, ZvError> {
+        // First try cache, skipping all network probes when master is still within TTL.
+        // Use PreferCache so master_last_fetched is the sole freshness gate — RespectTtl
+        // would also require the general index to be within its TTL, coupling two independent concerns.
+        if let Ok(index) = self
+            .index_manager
+            .ensure_loaded(CacheStrategy::PreferCache)
+            .await
+            && index.is_master_fresh(*MASTER_CACHE_TTL_HOURS)
+            && let Some(cached_master) = index.get_master_version().cloned()
+        {
+            tracing::debug!(
+                target: "zv::network::fetch_master_version",
+                "Using cached master release within {}h TTL",
+                *MASTER_CACHE_TTL_HOURS
+            );
+            return Ok(cached_master);
+        }
+
+        // Snapshot the previously-cached master version (if any) so we can tell whether
+        // a network probe genuinely returns a *new* master. Only a new master should
+        // refresh the TTL stamp; same-version probes leave the stamp untouched so that
+        // every subsequent invocation continues to probe until something new lands.
+        let prev_master_version = self
+            .index_manager
+            .loaded_index()
+            .and_then(|i| i.get_master_version())
+            .map(|r| r.resolved_version().clone());
+
         // Try enhanced partial fetch first
         match try_partial_fetch_master(&self.client).await {
             Ok(PartialFetchResult::Complete(complete_release)) => {
@@ -446,6 +488,12 @@ impl ZvNetwork {
                     target: "zv::network::fetch_master_version",
                     "Got complete master ZigRelease from partial fetch"
                 );
+                let is_new = prev_master_version.as_ref()
+                    != Some(complete_release.resolved_version());
+                if is_new {
+                    self.persist_master_fetched_metadata(Some(complete_release.clone()))
+                        .await;
+                }
                 return Ok(complete_release);
             }
             Ok(PartialFetchResult::VersionOnly(partial_master_version)) => {
@@ -454,10 +502,12 @@ impl ZvNetwork {
                     "Got version from partial fetch: {partial_master_version}, checking against cache"
                 );
 
-                // Check if we have this version in cache
+                // Check if we have this version in cache. OnlyCache here so an expired
+                // index TTL doesn't trigger a redundant full network refresh — we already
+                // have a definitive version from the partial fetch.
                 if let Ok(index) = self
                     .index_manager
-                    .ensure_loaded(CacheStrategy::RespectTtl)
+                    .ensure_loaded(CacheStrategy::OnlyCache)
                     .await
                     && let Some(cached_master) =
                         index.get_master_version().and_then(|cached_master| {
@@ -469,7 +519,7 @@ impl ZvNetwork {
                 {
                     tracing::debug!(
                         target: "zv::network::fetch_master_version",
-                        "Partial fetch version matches cached version, using cache"
+                        "Partial fetch version matches cached version, using cache (no TTL bump — master unchanged)"
                     );
                     return Ok(cached_master);
                 }
@@ -487,7 +537,10 @@ impl ZvNetwork {
             }
         }
 
-        // Fallback to full index fetch with cache fallback on failure
+        // Fallback to full index fetch with cache fallback on failure.
+        // refresh_from_network() already handles the new-vs-same master comparison
+        // and bumps master_last_fetched only on a genuinely new master, so we don't
+        // need to stamp again here.
         match self
             .index_manager
             .ensure_loaded(CacheStrategy::AlwaysRefresh)

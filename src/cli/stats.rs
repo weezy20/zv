@@ -109,7 +109,13 @@ fn collect(app: &App, verbose: bool) -> StatsReport {
     let zls_cfg = config::load_zv_config(&paths.config_file).ok();
 
     let mut groups = Vec::new();
-    groups.push(collect_data(app, fold_config, fold_cache, &zls_cfg, verbose));
+    groups.push(collect_data(
+        app,
+        fold_config,
+        fold_cache,
+        &zls_cfg,
+        verbose,
+    ));
     if !fold_config {
         groups.push(collect_config(paths, &zls_cfg));
     }
@@ -192,7 +198,11 @@ fn collect_data(
         kind: EntryKind::Dir,
         size: zls_size,
         active: false,
-        annotation: Some(format!("{} build{}", zls_count, if zls_count == 1 { "" } else { "s" })),
+        annotation: Some(format!(
+            "{} build{}",
+            zls_count,
+            if zls_count == 1 { "" } else { "s" }
+        )),
         stale: 0,
         children: zls_children,
     });
@@ -201,7 +211,10 @@ fn collect_data(
     let env_path = app.env_path().clone();
     if env_path.exists() {
         let size = std::fs::metadata(&env_path).map(|m| m.len()).unwrap_or(0);
-        let name = env_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = env_path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         entries.push(Entry {
             name,
             path: env_path,
@@ -222,7 +235,13 @@ fn collect_data(
     }
 
     let size = entries.iter().map(|e| e.size).sum();
-    Group { title: "Data", root: paths.data_dir.clone(), root_exists: paths.data_dir.is_dir(), size, entries }
+    Group {
+        title: "Data",
+        root: paths.data_dir.clone(),
+        root_exists: paths.data_dir.is_dir(),
+        size,
+        entries,
+    }
 }
 
 fn collect_config(paths: &ZvPaths, zls_cfg: &Option<config::ZvConfig>) -> Group {
@@ -240,13 +259,24 @@ fn collect_config(paths: &ZvPaths, zls_cfg: &Option<config::ZvConfig>) -> Group 
 fn toml_entry(config_file: &Path, zls_cfg: &Option<config::ZvConfig>) -> Entry {
     let size = std::fs::metadata(config_file).map(|m| m.len()).unwrap_or(0);
     let annotation = zls_cfg.as_ref().map(|c| {
-        let active = c.active_zig.as_ref().map(|a| a.version.as_str()).unwrap_or("none");
+        let active = c
+            .active_zig
+            .as_ref()
+            .map(|a| a.version.as_str())
+            .unwrap_or("none");
         let n = c.zls.as_ref().map(|z| z.mappings.len()).unwrap_or(0);
-        format!("active={active}, {n} zls mapping{}", if n == 1 { "" } else { "s" })
+        format!(
+            "active={active}, {n} zls mapping{}",
+            if n == 1 { "" } else { "s" }
+        )
     });
     Entry {
         name: "zv.toml".into(),
-        kind: if config_file.exists() { EntryKind::File } else { EntryKind::Missing },
+        kind: if config_file.exists() {
+            EntryKind::File
+        } else {
+            EntryKind::Missing
+        },
         path: config_file.to_path_buf(),
         size,
         active: false,
@@ -276,15 +306,27 @@ fn cache_file_entries(paths: &ZvPaths, verbose: bool) -> Vec<Entry> {
     // downloads/
     let dl = &paths.downloads_dir;
     let dl_size = if dl.is_dir() { dir_size(dl) } else { 0 };
-    let dl_items = if dl.is_dir() { std::fs::read_dir(dl).map(|r| r.count()).unwrap_or(0) } else { 0 };
-    let dl_children = if verbose && dl.is_dir() { flat_dir_entries(dl) } else { vec![] };
+    let dl_items = if dl.is_dir() {
+        std::fs::read_dir(dl).map(|r| r.count()).unwrap_or(0)
+    } else {
+        0
+    };
+    let dl_children = if verbose && dl.is_dir() {
+        flat_dir_entries(dl)
+    } else {
+        vec![]
+    };
     out.push(Entry {
         name: "downloads/".into(),
         path: dl.clone(),
         kind: EntryKind::Dir,
         size: dl_size,
         active: false,
-        annotation: Some(if dl_items == 0 { "empty".into() } else { format!("{dl_items} item{}", if dl_items == 1 { "" } else { "s" }) }),
+        annotation: Some(if dl_items == 0 {
+            "empty".into()
+        } else {
+            format!("{dl_items} item{}", if dl_items == 1 { "" } else { "s" })
+        }),
         stale: 0,
         children: dl_children,
     });
@@ -292,7 +334,11 @@ fn cache_file_entries(paths: &ZvPaths, verbose: bool) -> Vec<Entry> {
     // zls-src/
     let src = paths.zls_src_dir();
     let src_size = if src.is_dir() { dir_size(&src) } else { 0 };
-    let git_ref = if src.is_dir() { read_git_head(&src) } else { None };
+    let git_ref = if src.is_dir() {
+        read_git_head(&src)
+    } else {
+        None
+    };
     out.push(Entry {
         name: "zls-src/".into(),
         path: src,
@@ -311,11 +357,18 @@ fn cache_file_entries(paths: &ZvPaths, verbose: bool) -> Vec<Entry> {
 
     // master
     let mf = &paths.master_file;
-    let master_val = std::fs::read_to_string(mf).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let master_val = std::fs::read_to_string(mf)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     out.push(Entry {
         name: "master".into(),
         path: mf.clone(),
-        kind: if mf.exists() { EntryKind::File } else { EntryKind::Missing },
+        kind: if mf.exists() {
+            EntryKind::File
+        } else {
+            EntryKind::Missing
+        },
         size: std::fs::metadata(mf).map(|m| m.len()).unwrap_or(0),
         active: false,
         annotation: master_val,
@@ -331,15 +384,28 @@ fn ttl_entry(path: &Path, name: &str, ttl_days: i64) -> Entry {
     let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     let (annotation, stale) = if exists {
         let age = file_age_days(path).unwrap_or(0);
-        let stale = if age > ttl_days { 2 } else if ttl_days - age <= 3 { 1 } else { 0 };
-        (Some(format!("{age} day{} old", if age == 1 { "" } else { "s" })), stale)
+        let stale = if age > ttl_days {
+            2
+        } else if ttl_days - age <= 3 {
+            1
+        } else {
+            0
+        };
+        (
+            Some(format!("{age} day{} old", if age == 1 { "" } else { "s" })),
+            stale,
+        )
     } else {
         (None, 0)
     };
     Entry {
         name: name.into(),
         path: path.to_path_buf(),
-        kind: if exists { EntryKind::File } else { EntryKind::Missing },
+        kind: if exists {
+            EntryKind::File
+        } else {
+            EntryKind::Missing
+        },
         size,
         active: false,
         annotation,
@@ -365,13 +431,26 @@ fn collect_public_bin(pub_dir: &Path) -> Group {
                 let dangling = !path.exists();
                 let target = std::fs::read_link(&path)
                     .ok()
-                    .map(|t| t.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| t.to_string_lossy().into_owned()))
+                    .map(|t| {
+                        t.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| t.to_string_lossy().into_owned())
+                    })
                     .unwrap_or_else(|| "?".into());
                 (EntryKind::Symlink { target, dangling }, m.len())
             }
             Ok(m) => (EntryKind::File, m.len()),
         };
-        entries.push(Entry { name: name.to_string(), path, kind, size, active: false, annotation: None, stale: 0, children: vec![] });
+        entries.push(Entry {
+            name: name.to_string(),
+            path,
+            kind,
+            size,
+            active: false,
+            annotation: None,
+            stale: 0,
+            children: vec![],
+        });
     }
     let size = entries.iter().map(|e| e.size).sum();
     Group {
@@ -387,26 +466,46 @@ fn bin_entries(dir: &Path) -> Vec<Entry> {
     if !dir.is_dir() {
         return vec![];
     }
-    let mut names: Vec<_> = std::fs::read_dir(dir).into_iter().flatten().flatten().collect();
+    let mut names: Vec<_> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
     names.sort_by_key(|e| e.file_name());
-    names.into_iter().map(|de| {
-        let path = de.path();
-        let name = de.file_name().to_string_lossy().into_owned();
-        let meta = std::fs::symlink_metadata(&path);
-        let (kind, size) = match meta {
-            Err(_) => (EntryKind::Missing, 0),
-            Ok(m) if m.file_type().is_symlink() => {
-                let dangling = !path.exists();
-                let target = std::fs::read_link(&path)
-                    .ok()
-                    .map(|t| t.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| t.to_string_lossy().into_owned()))
-                    .unwrap_or_else(|| "?".into());
-                (EntryKind::Symlink { target, dangling }, m.len())
+    names
+        .into_iter()
+        .map(|de| {
+            let path = de.path();
+            let name = de.file_name().to_string_lossy().into_owned();
+            let meta = std::fs::symlink_metadata(&path);
+            let (kind, size) = match meta {
+                Err(_) => (EntryKind::Missing, 0),
+                Ok(m) if m.file_type().is_symlink() => {
+                    let dangling = !path.exists();
+                    let target = std::fs::read_link(&path)
+                        .ok()
+                        .map(|t| {
+                            t.file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| t.to_string_lossy().into_owned())
+                        })
+                        .unwrap_or_else(|| "?".into());
+                    (EntryKind::Symlink { target, dangling }, m.len())
+                }
+                Ok(m) => (EntryKind::File, m.len()),
+            };
+            Entry {
+                name,
+                path,
+                kind,
+                size,
+                active: false,
+                annotation: None,
+                stale: 0,
+                children: vec![],
             }
-            Ok(m) => (EntryKind::File, m.len()),
-        };
-        Entry { name, path, kind, size, active: false, annotation: None, stale: 0, children: vec![] }
-    }).collect()
+        })
+        .collect()
 }
 
 fn version_entries(app: &App) -> (Vec<Entry>, u64) {
@@ -423,7 +522,9 @@ fn version_entries(app: &App) -> (Vec<Entry>, u64) {
         } else {
             ResolvedZigVersion::Semver(version.clone())
         };
-        let dir = app.toolchain_manager.is_version_installed(&rzv)
+        let dir = app
+            .toolchain_manager
+            .is_version_installed(&rzv)
             .and_then(|p| p.parent().map(|d| d.to_path_buf()))
             .unwrap_or_else(|| versions_dir.join(version.to_string()));
 
@@ -436,7 +537,11 @@ fn version_entries(app: &App) -> (Vec<Entry>, u64) {
             kind: EntryKind::Dir,
             size,
             active: *is_active,
-            annotation: if *is_master { Some("master".into()) } else { None },
+            annotation: if *is_master {
+                Some("master".into())
+            } else {
+                None
+            },
             stale: 0,
             children: vec![],
         });
@@ -448,37 +553,74 @@ fn zls_build_entries(zls_dir: &Path, zls_cfg: &Option<config::ZvConfig>) -> (Vec
     if !zls_dir.is_dir() {
         return (vec![], 0);
     }
-    let reverse: std::collections::HashMap<String, String> = zls_cfg.as_ref()
+    let reverse: std::collections::HashMap<String, String> = zls_cfg
+        .as_ref()
         .and_then(|c| c.zls.as_ref())
-        .map(|z| z.mappings.iter().map(|(zig, zls)| (zls.clone(), zig.clone())).collect())
+        .map(|z| {
+            z.mappings
+                .iter()
+                .map(|(zig, zls)| (zls.clone(), zig.clone()))
+                .collect()
+        })
         .unwrap_or_default();
 
-    let mut names: Vec<_> = std::fs::read_dir(zls_dir).into_iter().flatten().flatten().collect();
+    let mut names: Vec<_> = std::fs::read_dir(zls_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
     names.sort_by_key(|e| e.file_name());
 
     let mut entries = Vec::new();
     let mut total = 0u64;
     for de in names {
         let path = de.path();
-        if !path.is_dir() { continue; }
+        if !path.is_dir() {
+            continue;
+        }
         let name = de.file_name().to_string_lossy().into_owned();
         let size = dir_size(&path);
         total += size;
         let annotation = reverse.get(&name).map(|zig| format!("for Zig {zig}"));
-        entries.push(Entry { name, path, kind: EntryKind::Dir, size, active: false, annotation, stale: 0, children: vec![] });
+        entries.push(Entry {
+            name,
+            path,
+            kind: EntryKind::Dir,
+            size,
+            active: false,
+            annotation,
+            stale: 0,
+            children: vec![],
+        });
     }
     (entries, total)
 }
 
 fn flat_dir_entries(dir: &Path) -> Vec<Entry> {
-    let mut names: Vec<_> = std::fs::read_dir(dir).into_iter().flatten().flatten().collect();
+    let mut names: Vec<_> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
     names.sort_by_key(|e| e.file_name());
-    names.into_iter().map(|de| {
-        let path = de.path();
-        let name = de.file_name().to_string_lossy().into_owned();
-        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        Entry { name, path, kind: EntryKind::File, size, active: false, annotation: None, stale: 0, children: vec![] }
-    }).collect()
+    names
+        .into_iter()
+        .map(|de| {
+            let path = de.path();
+            let name = de.file_name().to_string_lossy().into_owned();
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            Entry {
+                name,
+                path,
+                kind: EntryKind::File,
+                size,
+                active: false,
+                annotation: None,
+                stale: 0,
+                children: vec![],
+            }
+        })
+        .collect()
 }
 
 // ─── PATH check ──────────────────────────────────────────────────────────────
@@ -489,23 +631,44 @@ fn build_path_check(paths: &ZvPaths) -> PathCheck {
         .ok()
         .and_then(|p| canonicalize(&p).ok())
         .unwrap_or_default();
-    let resolved_dir = current_exe.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-    let expected_dir = paths.public_bin_dir.as_ref().unwrap_or(&paths.bin_dir).clone();
-    let expected_in_path = expected_dir.is_dir() && check_dir_in_path_for_shell(&shell, &expected_dir);
+    let resolved_dir = current_exe
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_default();
+    let expected_dir = paths
+        .public_bin_dir
+        .as_ref()
+        .unwrap_or(&paths.bin_dir)
+        .clone();
+    let expected_in_path =
+        expected_dir.is_dir() && check_dir_in_path_for_shell(&shell, &expected_dir);
 
     let path_var = std::env::var("PATH").unwrap_or_default();
     let sep = shell.get_path_separator();
     let (in_path, matching_entry) = find_in_path(&path_var, sep, &resolved_dir);
 
-    PathCheck { current_exe, resolved_dir, in_path, matching_entry, expected_dir, expected_in_path }
+    PathCheck {
+        current_exe,
+        resolved_dir,
+        in_path,
+        matching_entry,
+        expected_dir,
+        expected_in_path,
+    }
 }
 
 fn find_in_path(path_var: &str, sep: char, target: &Path) -> (bool, Option<String>) {
-    if target == Path::new("") { return (false, None); }
+    if target == Path::new("") {
+        return (false, None);
+    }
     for raw in path_var.split(sep) {
-        if raw.is_empty() { continue; }
+        if raw.is_empty() {
+            continue;
+        }
         let p = Path::new(raw);
-        if !p.is_dir() { continue; }
+        if !p.is_dir() {
+            continue;
+        }
         if let Ok(c) = canonicalize(p)
             && c == target
         {
@@ -532,12 +695,24 @@ fn human_size(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
     let mut v = bytes as f64;
     let mut i = 0;
-    while v >= 1024.0 && i < UNITS.len() - 1 { v /= 1024.0; i += 1; }
-    if i == 0 { format!("{bytes} B") } else { format!("{v:.1} {}", UNITS[i]) }
+    while v >= 1024.0 && i < UNITS.len() - 1 {
+        v /= 1024.0;
+        i += 1;
+    }
+    if i == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{v:.1} {}", UNITS[i])
+    }
 }
 
 fn file_age_days(path: &Path) -> Option<i64> {
-    let elapsed = std::fs::metadata(path).ok()?.modified().ok()?.elapsed().ok()?;
+    let elapsed = std::fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()?
+        .elapsed()
+        .ok()?;
     Some(elapsed.as_secs() as i64 / 86400)
 }
 
@@ -568,7 +743,12 @@ fn render_tree(report: &StatsReport) {
         String::new()
     };
     println!();
-    println!("zv {}  —  layout: {}{}", report.zv_version.yellow(), Paint::cyan(layout_str).bold(), env_badge);
+    println!(
+        "zv {}  —  layout: {}{}",
+        report.zv_version.yellow(),
+        Paint::cyan(layout_str).bold(),
+        env_badge
+    );
 
     match &report.active_zig {
         Some(v) => println!("active zig: {}", Paint::green(v).bold()),
@@ -590,13 +770,15 @@ fn render_group(group: &Group) {
     let size_str = human_size(group.size);
 
     if group.root_exists {
-        println!("{:<12}  {}  ({})",
+        println!(
+            "{:<12}  {}  ({})",
             Paint::cyan(group.title).bold(),
             Paint::yellow(&root),
             Paint::new(&size_str).dim()
         );
     } else {
-        println!("{:<12}  {}  {}",
+        println!(
+            "{:<12}  {}  {}",
             Paint::cyan(group.title).bold(),
             Paint::yellow(&root),
             Paint::red("(does not exist)")
@@ -661,7 +843,10 @@ fn render_entry(entry: &Entry, prefix: &str, is_last: bool) {
         }
     };
 
-    println!("{}{}{}{}{}", prefix, connector, name_part, kind_suffix, trail);
+    println!(
+        "{}{}{}{}{}",
+        prefix, connector, name_part, kind_suffix, trail
+    );
 
     let cn = entry.children.len();
     for (i, child) in entry.children.iter().enumerate() {
@@ -681,14 +866,23 @@ fn render_path_check(pc: &PathCheck) {
         println!("├─ $PATH hit: {}  {}", Paint::yellow(entry), "✔".green());
     } else {
         let dir = pc.resolved_dir.display().to_string();
-        println!("├─ $PATH hit: {}  {}", Paint::yellow(&dir), "✘ not in PATH".red());
+        println!(
+            "├─ $PATH hit: {}  {}",
+            Paint::yellow(&dir),
+            "✘ not in PATH".red()
+        );
     }
 
     let expected = pc.expected_dir.display().to_string();
     if pc.expected_in_path {
-        println!("└─ expected bin: {}  {}", Paint::yellow(&expected), "✔ in PATH".green());
+        println!(
+            "└─ expected bin: {}  {}",
+            Paint::yellow(&expected),
+            "✔ in PATH".green()
+        );
     } else {
-        println!("└─ expected bin: {}  {}  — run {}",
+        println!(
+            "└─ expected bin: {}  {}  — run {}",
             Paint::yellow(&expected),
             "✘ not in PATH".red(),
             crate::tools::format_cmd("zv setup")

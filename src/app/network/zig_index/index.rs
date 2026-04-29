@@ -222,6 +222,27 @@ impl IndexManager {
         Ok(())
     }
 
+    /// Borrow the in-memory index, if loaded. Returns None when no `ensure_loaded`
+    /// call has populated it yet (or when the last load failed).
+    pub fn loaded_index(&self) -> Option<&ZigIndex> {
+        self.index.as_ref()
+    }
+
+    /// Mark master as freshly fetched from network and persist cache metadata.
+    pub async fn stamp_master_fetched(
+        &mut self,
+        master_release: Option<ZigRelease>,
+    ) -> Result<(), CfgErr> {
+        if let Some(index) = self.index.as_mut() {
+            if let Some(release) = master_release {
+                index.upsert_master_release(release);
+            }
+            index.mark_master_fetched_now();
+            self.save_to_disk().await?;
+        }
+        Ok(())
+    }
+
     /// Fetches the latest index from the network, updates the internal state, and attempts to save it to disk.
     ///
     /// The index is fetched from `ZIG_DOWNLOAD_INDEX_JSON`, parsed as JSON, and the `last_synced` timestamp is updated.
@@ -231,6 +252,15 @@ impl IndexManager {
     ///
     /// Returns `Ok(())` on success, or a `ZvError` if the network request or parsing fails.
     pub async fn refresh_from_network(&mut self) -> Result<(), ZvError> {
+        // Capture previous master state so we can decide whether the network result
+        // is genuinely a *new* master or the same one we already had cached.
+        let prev_master_version = self
+            .index
+            .as_ref()
+            .and_then(|i| i.get_master_version())
+            .map(|r| r.resolved_version().clone());
+        let prev_master_stamp = self.index.as_ref().and_then(|i| i.master_last_fetched());
+
         let response = self
             .client
             .get(ZIG_DOWNLOAD_INDEX_JSON)
@@ -254,7 +284,19 @@ impl IndexManager {
             .map_err(NetErr::JsonParse)
             .map_err(ZvError::NetworkError)?;
 
-        let runtime_index: ZigIndex = network_index.into();
+        let mut runtime_index: ZigIndex = network_index.into();
+
+        // Bump the master TTL stamp only when the network observed a master version
+        // different from what we already had. Otherwise preserve the prior stamp so
+        // a "no new master" probe doesn't extend the freshness window.
+        let new_master_version = runtime_index
+            .get_master_version()
+            .map(|r| r.resolved_version().clone());
+        if new_master_version.is_some() && new_master_version != prev_master_version {
+            runtime_index.mark_master_fetched_now();
+        } else {
+            runtime_index.set_master_last_fetched(prev_master_stamp);
+        }
 
         self.index = Some(runtime_index);
         let _ = self.save_to_disk().await.map_err(|e| {

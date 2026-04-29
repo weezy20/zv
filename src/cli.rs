@@ -408,9 +408,11 @@ impl Commands {
                 dry_run,
                 no_interactive,
             } => setup::setup_shell(&mut app, using_env, dry_run, no_interactive).await,
-            Commands::Stats { verbose, json, no_color } => {
-                stats::run(&app, verbose, json, no_color).await
-            }
+            Commands::Stats {
+                verbose,
+                json,
+                no_color,
+            } => stats::run(&app, verbose, json, no_color).await,
             Commands::Sync => sync::sync(&mut app).await,
             Commands::Uninstall => uninstall::uninstall(&mut app).await,
             Commands::Update { force, rc } => update::update_zv(&mut app, force, rc).await,

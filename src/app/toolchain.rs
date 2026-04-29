@@ -1,5 +1,5 @@
-use crate::app::constants::ZV_MASTER_FILE;
 use crate::app::config::ZvConfig;
+use crate::app::constants::ZV_MASTER_FILE;
 use crate::{ArchiveExt, ResolvedZigVersion, Result, Shim, ZvError, app::utils::ProgressHandle};
 use color_eyre::eyre::{Context, eyre};
 use serde::{Deserialize, Serialize};
@@ -458,9 +458,7 @@ impl ToolchainManager {
         if is_master {
             if let Ok(mut config) = crate::app::config::load_zv_config(&self.zv_config_file) {
                 config.local_master_zig = Some(version.to_string());
-                if let Err(e) =
-                    crate::app::config::save_zv_config(&self.zv_config_file, &config)
-                {
+                if let Err(e) = crate::app::config::save_zv_config(&self.zv_config_file, &config) {
                     tracing::error!(target: TARGET, "Failed to update local_master_zig: {}", e);
                 }
             } else {
@@ -471,9 +469,7 @@ impl ToolchainManager {
                     local_master_zig: Some(version.to_string()),
                     zls: None,
                 };
-                if let Err(e) =
-                    crate::app::config::save_zv_config(&self.zv_config_file, &config)
-                {
+                if let Err(e) = crate::app::config::save_zv_config(&self.zv_config_file, &config) {
                     tracing::error!(target: TARGET, "Failed to create config with local_master_zig: {}", e);
                 }
             }
