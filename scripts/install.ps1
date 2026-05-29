@@ -80,9 +80,16 @@ if (-not $SkipChecksum) {
 
 Write-Host "=> Extracting..."
 Expand-Archive -Path $ArchivePath -DestinationPath $TmpDir -Force
-$Binary = [System.IO.Path]::Combine($TmpDir, "zv-$Target", 'zv.exe')
-if (-not (Test-Path $Binary)) {
-    Write-Host "Binary not found in archive (expected zv-$Target\zv.exe)" -ForegroundColor Red
+$BinaryCandidates = @(
+    [System.IO.Path]::Combine($TmpDir, "zv-$Target", 'zv.exe'),
+    [System.IO.Path]::Combine($TmpDir, 'zv.exe')
+)
+$Binary = $BinaryCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $Binary) {
+    Write-Host "Binary not found in archive. Tried:" -ForegroundColor Red
+    $BinaryCandidates | ForEach-Object {
+        Write-Host "  $_" -ForegroundColor Red
+    }
     exit 1
 }
 
