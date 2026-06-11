@@ -104,13 +104,24 @@ fn get_program_name() -> Result<String> {
         .ok_or_else(|| color_eyre::eyre::eyre!("Failed to get executable filename"))?
         .to_string_lossy();
 
-    // Remove .exe extension on Windows
-    let name = if cfg!(windows) && file_name.ends_with(".exe") {
-        file_name.strip_suffix(".exe").unwrap().to_string()
+    Ok(normalize_program_name(&file_name, cfg!(windows)))
+}
+
+fn normalize_program_name(file_name: &str, is_windows: bool) -> String {
+    if !is_windows {
+        return file_name.to_string();
+    }
+
+    let name = if file_name
+        .get(file_name.len().saturating_sub(4)..)
+        .is_some_and(|suffix| suffix.eq_ignore_ascii_case(".exe"))
+    {
+        &file_name[..file_name.len() - 4]
     } else {
-        file_name.to_string()
+        file_name
     };
-    Ok(name)
+
+    name.to_ascii_lowercase()
 }
 
 /// Apply Windows-specific security mitigations to prevent DLL hijacking
@@ -168,3 +179,22 @@ pub use app::App;
 pub use shell::*;
 pub use templates::*;
 pub use types::*;
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_program_name;
+
+    #[test]
+    fn normalizes_windows_exe_extension_case() {
+        assert_eq!(normalize_program_name("zig.exe", true), "zig");
+        assert_eq!(normalize_program_name("zig.EXE", true), "zig");
+        assert_eq!(normalize_program_name("zls.ExE", true), "zls");
+        assert_eq!(normalize_program_name("ZV.EXE", true), "zv");
+    }
+
+    #[test]
+    fn preserves_unix_invocation_case_and_suffix() {
+        assert_eq!(normalize_program_name("zig.exe", false), "zig.exe");
+        assert_eq!(normalize_program_name("ZIG", false), "ZIG");
+    }
+}
