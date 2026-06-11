@@ -112,11 +112,15 @@ fn normalize_program_name(file_name: &str, is_windows: bool) -> String {
         return file_name.to_string();
     }
 
-    let name = if file_name
-        .get(file_name.len().saturating_sub(4)..)
-        .is_some_and(|suffix| suffix.eq_ignore_ascii_case(".exe"))
+    let path = std::path::Path::new(file_name);
+    let name = if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
     {
-        &file_name[..file_name.len() - 4]
+        path.file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or(file_name)
     } else {
         file_name
     };
